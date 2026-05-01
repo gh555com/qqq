@@ -1432,10 +1432,114 @@ mod win {
     }
 
     // =============================================================================
-    //  dump_html_to_file —— HTML 剪贴板写文件（对齐 C# DumpHtmlToFile）
-    //  ★ Win7 兼容：使用 RegisterClipboardFormatW + GetClipboardData
-    //  ★ 直接写入原始字节，保持完整 HTML Format 头信息
+    //  set_image —— 读取图片文件，解码为位图，写入剪贴板 CF_DIB（截图式粘贴）
+    //  ★ Win7 兼容：仅使用 CF_DIB + BITMAPINFOHEADER（不用 DIBV5）
     // =============================================================================
+
+    pub fn set_image(file_path: &str) -> PyV {
+        // 1. Read & decode image file
+        let img = match image::open(file_path) {
+            Ok(i) => i,
+            Err(e) => {
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str(format!("decode failed: {}", e))),
+                ]);
+            }
+        };
+
+        let rgba = img.to_rgba8();
+        let (width, height) = (rgba.width(), rgba.height());
+
+        // 2. Build BITMAPINFOHEADER (40 bytes) + BGRA pixel data (bottom-up)
+        let row_bytes = (width as usize) * 4;
+        let pixel_size = row_bytes * (height as usize);
+        let header_size: u32 = 40;
+        let total_size = (header_size as usize) + pixel_size;
+
+        let mut dib = Vec::with_capacity(total_size);
+
+        // BITMAPINFOHEADER
+        dib.extend_from_slice(&header_size.to_le_bytes());         // biSize
+        dib.extend_from_slice(&(width as i32).to_le_bytes());      // biWidth
+        dib.extend_from_slice(&(height as i32).to_le_bytes());     // biHeight (positive = bottom-up)
+        dib.extend_from_slice(&1u16.to_le_bytes());                // biPlanes
+        dib.extend_from_slice(&32u16.to_le_bytes());               // biBitCount
+        dib.extend_from_slice(&0u32.to_le_bytes());                // biCompression = BI_RGB
+        dib.extend_from_slice(&(pixel_size as u32).to_le_bytes()); // biSizeImage
+        dib.extend_from_slice(&0i32.to_le_bytes());                // biXPelsPerMeter
+        dib.extend_from_slice(&0i32.to_le_bytes());                // biYPelsPerMeter
+        dib.extend_from_slice(&0u32.to_le_bytes());                // biClrUsed
+        dib.extend_from_slice(&0u32.to_le_bytes());                // biClrImportant
+
+        // Pixel data: RGBA → BGRA, bottom-up row order
+        for y in (0..height).rev() {
+            for x in 0..width {
+                let px = rgba.get_pixel(x, y);
+                dib.push(px[2]); // B
+                dib.push(px[1]); // G
+                dib.push(px[0]); // R
+                dib.push(px[3]); // A
+            }
+        }
+
+        // 3. Write to clipboard
+        unsafe {
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("OpenClipboard failed".to_string())),
+                ]);
+            }
+
+            if EmptyClipboard() == 0 {
+                CloseClipboard();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("EmptyClipboard failed".to_string())),
+                ]);
+            }
+
+            let h_mem: isize = GlobalAlloc(GHND, total_size) as isize;
+            if h_mem == 0 {
+                CloseClipboard();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("GlobalAlloc failed".to_string())),
+                ]);
+            }
+
+            let ptr = GlobalLock(h_mem as *mut core::ffi::c_void);
+            if ptr.is_null() {
+                GlobalFree(h_mem);
+                CloseClipboard();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("GlobalLock failed".to_string())),
+                ]);
+            }
+
+            std::ptr::copy_nonoverlapping(dib.as_ptr(), ptr as *mut u8, total_size);
+            GlobalUnlock(h_mem as *mut core::ffi::c_void);
+
+            if SetClipboardData(CF_DIB, h_mem as *mut core::ffi::c_void) == std::ptr::null_mut() {
+                GlobalFree(h_mem);
+                CloseClipboard();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("SetClipboardData failed".to_string())),
+                ]);
+            }
+
+            CloseClipboard();
+
+            PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(true)),
+                ("width".to_string(), PyV::Int(width as i64)),
+                ("height".to_string(), PyV::Int(height as i64)),
+            ])
+        }
+    }
 
     pub fn dump_html_to_file(path: &str) -> PyV {
         if path.is_empty() {
@@ -1986,6 +2090,14 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
                 })
                 .unwrap_or_default();
             if let PyV::Obj(extra) = win::set_files(&paths) {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        // ★ setImage —— 读取图片文件写入剪贴板为位图（截图式粘贴，供 CodeLens c3 使用）
+        "setImage" | "set_clipboard_image" => {
+            let file_path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if let PyV::Obj(extra) = win::set_image(file_path) {
                 out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)

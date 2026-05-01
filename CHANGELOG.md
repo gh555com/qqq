@@ -7,6 +7,9 @@ All notable changes to this project will be documented in this file.
 
 ## [16.3.1] - 2026-04-30
 
+### Added
+- **Quick copy buttons on file preview**: Three new shortcut buttons appear next to each file in the editor — copy the full file path (c1), copy the file itself like Ctrl+C in Explorer (c2), or copy an image directly as a screenshot-style paste (c3) so you can Ctrl+V it straight into Photoshop or any image editor. The image button only appears for supported image formats and is guaranteed to work when shown.
+
 ### Fixed
 - **Clipboard pinned cards no longer lost on restart**: Fixed a long-standing issue where pinned items (and sometimes entire cards) would silently disappear — especially when switching languages or closing multiple windows at once. The root cause was that all windows shared one history file but saved blindly, so the last window to exit would overwrite everyone else's changes. Now every save merges with the latest disk state first, so no pin or card is ever lost.
 

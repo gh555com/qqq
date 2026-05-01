@@ -2966,6 +2966,8 @@ class FileCodeLensProvider {
 					fetchFolderSizeFirstTime(folder); // Scan once on first load
 				}
 
+				const canCopyAsBitmap = !isDirectory && h.isImageExtForClipboard(ext);
+
 				lenses.push(
 					new vscode.CodeLens(r, {
 						title: `✎( ${fSizeStr}) 🗀qqq`,
@@ -2977,8 +2979,29 @@ class FileCodeLensProvider {
 						title: "✎rename",
 						command: "qqq.renameFile",
 						arguments: [rawPath, absPath],
+					}),
+					new vscode.CodeLens(r, {
+						title: "✎c1",
+						command: "qqq.copyFilePath",
+						arguments: [absPath],
+						tooltip: absPath,
+					}),
+					new vscode.CodeLens(r, {
+						title: "✎c2",
+						command: "qqq.copyFileToClipboard",
+						arguments: [absPath],
 					})
 				);
+
+				if (canCopyAsBitmap) {
+					lenses.push(
+						new vscode.CodeLens(r, {
+							title: "✎c3",
+							command: "qqq.copyImageAsBitmap",
+							arguments: [absPath],
+						})
+					);
+				}
 			}
 
 			let titleSuffix = "";
@@ -3261,6 +3284,52 @@ async function renameFileCommand(rawPath, absPath) {
 	renderVisibleEditors();
 }
 
+// ==================== c1 / c2 / c3 Commands ====================
+
+/** c1: Copy absolute file path to clipboard */
+async function copyFilePathCommand(absPath) {
+	await vscode.env.clipboard.writeText(absPath);
+}
+
+/** c2: Copy file to clipboard (equivalent to Ctrl+C in Explorer) — uses Rust engine */
+async function copyFileToClipboardCommand(absPath) {
+	if (global.rustBridge && global.rustBridge.isAvailable()) {
+		try {
+			const res = await global.rustBridge.call("setFiles", { paths: [absPath] }, 5000);
+			if (res && res.success) return;
+			global.logMessage(`copyFile via Rust failed: ${JSON.stringify(res)}`, "WARN");
+		} catch (e) {
+			global.logMessage(`copyFile via Rust exception: ${e.message}`, "WARN");
+		}
+	}
+	// Fallback: direct PowerShell spawn (does NOT depend on Shell daemon)
+	const escaped = absPath.replace(/'/g, "''");
+	const ps = `Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Collections.Specialized.StringCollection; $f.Add('${escaped}'); [System.Windows.Forms.Clipboard]::SetFileDropList($f)`;
+	return new Promise((resolve) => {
+		cp.execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { windowsHide: true, timeout: 8000 }, (err) => {
+			if (err) {
+				global.logMessage(`copyFile PS fallback failed: ${err.message}`, "WARN");
+				global.showAutoCloseNotification('error', `Copy failed: ${err.message}`);
+			}
+			resolve();
+		});
+	});
+}
+
+/** c3: Copy image as bitmap into clipboard (like a screenshot paste) — uses Rust engine */
+async function copyImageAsBitmapCommand(absPath) {
+	if (global.rustBridge && global.rustBridge.isAvailable()) {
+		try {
+			const res = await global.rustBridge.call("setImage", { path: absPath }, 10000);
+			if (res && res.success) return;
+			global.logMessage(`copyImageAsBitmap via Rust failed: ${JSON.stringify(res)}`, "WARN");
+		} catch (e) {
+			global.logMessage(`copyImageAsBitmap via Rust exception: ${e.message}`, "WARN");
+		}
+	}
+	global.showAutoCloseNotification('error', 'Rust engine unavailable for image clipboard');
+}
+
 function debounceRender(editor, delay = SCROLL_DEBOUNCE_MS) {
 	if (!editor || editor.document.isClosed) return;
 	const editorId = getEditorId(editor);
@@ -3421,6 +3490,9 @@ async function activate(context) {
 		safeRegisterCommand("qqq.openFileInRightGroup", global.withReady(openFileInRightGroupCommand)),
 		safeRegisterCommand("qqq.revealFileInFolder", global.withReady(revealFileInFolder)),
 		safeRegisterCommand("qqq.renameFile", global.withReady(renameFileCommand)),
+		safeRegisterCommand("qqq.copyFilePath", global.withReady(copyFilePathCommand)),
+		safeRegisterCommand("qqq.copyFileToClipboard", global.withReady(copyFileToClipboardCommand)),
+		safeRegisterCommand("qqq.copyImageAsBitmap", global.withReady(copyImageAsBitmapCommand)),
 		safeRegisterCommand("qqq.weave", global.withReady(() => {
 			// weave only adds, never removes
 			performGlobalClean(vscode.window.activeTextEditor, true, "add");

@@ -42,6 +42,19 @@ Python Broker (长驻进程, dist/kp.py)
 
 短文件（≤300s）走 PCM 预解码路径；长文件走 streaming 逐段解码。共 6 个恢复路径。
 
+### 电台播放路径
+
+`_play_radio(m3u8_url, timeout_sec, stream_url)` — 优先直推流，fallback HLS：
+
+| 方式 | 代码路径 | 恢复策略 |
+|------|----------|----------|
+| 直推流 | `_radio_stream_worker` → `_RadioStreamSource` + `stream_any` | 两级恢复 |
+| HLS | `_radio_hls_worker` → `_hls_fetch_playlist` + `_decode_mp3_buffer` | 重建设备 |
+
+直推流两级恢复：
+1. **快速路径（原地恢复）**：复用同一条 `source_stream`，只重建 `PlaybackDevice`，~2-3 秒
+2. **慢速路径（全量重连）**：原地恢复失败时，重建 HTTP 连接 + `stream_any` 解码器
+
 ---
 
 ## 设备恢复机制
@@ -98,5 +111,5 @@ pcm, xf = self._prepare_pcm_loop_crossfade(main_pcm, xms)
 - [ ] 验证前是否避免了 token.touch()
 - [ ] 异常日志是否记录（前 2 次 retry）
 - [ ] 设备丢失日志是否用 _log_critical
-- [ ] 6 个恢复路径是否全覆盖
+- [ ] 6 个本地恢复路径 + 电台恢复路径是否全覆盖
 - [ ] 修改后同步 dist/ 并重启 broker

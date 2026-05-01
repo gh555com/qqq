@@ -1395,6 +1395,118 @@ mod platform {
     }
 
     // =============================================================================
+    //  set_image —— 读取图片文件，解码为 PNG，写入剪贴板（截图式粘贴）
+    //  Linux: 使用 wl-copy 或 xclip 写入 image/png
+    //  macOS: 使用 clipboard-rs set_image
+    // =============================================================================
+
+    pub fn set_image(file_path: &str) -> PyV {
+        if file_path.is_empty() {
+            return PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str("no path".to_string())),
+            ]);
+        }
+
+        // 1. Read & decode image file → PNG bytes
+        let img = match image::open(file_path) {
+            Ok(i) => i,
+            Err(e) => {
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str(format!("decode failed: {}", e))),
+                ]);
+            }
+        };
+
+        let rgba = img.to_rgba8();
+        let (width, height) = (rgba.width(), rgba.height());
+
+        let png_bytes = match png_bytes_from_rgba(width, height, rgba.as_raw()) {
+            Ok(b) => b,
+            Err(e) => {
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str(format!("png encode failed: {}", e))),
+                ]);
+            }
+        };
+
+        #[cfg(target_os = "linux")]
+        {
+            // Wayland 优先: wl-copy --type image/png < data
+            if is_wayland_session() && has_wl_copy() {
+                use std::process::{Command, Stdio};
+                if let Ok(mut child) = Command::new("wl-copy")
+                    .args(["--type", "image/png"])
+                    .stdin(Stdio::piped())
+                    .spawn()
+                {
+                    if let Some(stdin) = child.stdin.as_mut() {
+                        if stdin.write_all(&png_bytes).is_ok() {
+                            if let Ok(status) = child.wait() {
+                                if status.success() {
+                                    return PyV::Obj(vec![
+                                        ("success".to_string(), PyV::Bool(true)),
+                                        ("width".to_string(), PyV::Num(serde_json::Number::from(width as u64))),
+                                        ("height".to_string(), PyV::Num(serde_json::Number::from(height as u64))),
+                                    ]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // X11 fallback: xclip -selection clipboard -t image/png
+            {
+                use std::process::{Command, Stdio};
+                if let Ok(mut child) = Command::new("xclip")
+                    .args(["-selection", "clipboard", "-t", "image/png"])
+                    .stdin(Stdio::piped())
+                    .spawn()
+                {
+                    if let Some(stdin) = child.stdin.as_mut() {
+                        if stdin.write_all(&png_bytes).is_ok() {
+                            if let Ok(status) = child.wait() {
+                                if status.success() {
+                                    return PyV::Obj(vec![
+                                        ("success".to_string(), PyV::Bool(true)),
+                                        ("width".to_string(), PyV::Num(serde_json::Number::from(width as u64))),
+                                        ("height".to_string(), PyV::Num(serde_json::Number::from(height as u64))),
+                                    ]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // macOS: clipboard-rs set_image
+            if let Ok(ctx) = setup_clipboard() {
+                use clipboard_rs::common::RustImage;
+                if let Ok(rust_img) = RustImage::from_png(&png_bytes) {
+                    if ctx.set_image(rust_img).is_ok() {
+                        return PyV::Obj(vec![
+                            ("success".to_string(), PyV::Bool(true)),
+                            ("width".to_string(), PyV::Num(serde_json::Number::from(width as u64))),
+                            ("height".to_string(), PyV::Num(serde_json::Number::from(height as u64))),
+                        ]);
+                    }
+                }
+            }
+        }
+
+        PyV::Obj(vec![
+            ("success".to_string(), PyV::Bool(false)),
+            ("error".to_string(), PyV::Str("setImage not available on this platform".to_string())),
+        ])
+    }
+
+    // =============================================================================
     //  dump_html_to_file —— HTML 剪贴板写文件（Linux/macOS）
     // =============================================================================
 
@@ -1632,6 +1744,14 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
                 })
                 .unwrap_or_default();
             if let PyV::Obj(extra) = platform::set_files(&paths) {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        // ★ setImage —— 读取图片文件写入剪贴板为位图（截图式粘贴，供 CodeLens c3 使用）
+        "setImage" | "set_clipboard_image" => {
+            let file_path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if let PyV::Obj(extra) = platform::set_image(file_path) {
                 out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)
