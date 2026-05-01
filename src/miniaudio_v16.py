@@ -1810,7 +1810,6 @@ class NonBlockingAudioEngine:
                     while not token.stopped:
                         time.sleep(0.5)
                         if device and token.device_silent_seconds() > 5.0:
-                            self._log_critical("【!!】 Radio stream: device silent >5s, attempting in-place recovery")
                             if self._on_device_lost:
                                 try: self._on_device_lost()
                                 except Exception: pass
@@ -1820,18 +1819,23 @@ class NonBlockingAudioEngine:
                             self._kill_device_async(device)
                             device = None
 
-                            # ★★★ 原地渐进退避恢复：复用 source_stream，只重建设备 ★★★
-                            # HTTP 流和解码器仍然活着，无需重连，恢复速度 ~2-3 秒
+                            # ★ 判断流是否还活着：EOF = 流断了，直接全量重连
+                            if source._eof:
+                                self._log_critical("【!!】 Radio: stream EOF, skipping in-place → full-reconnect")
+                                device_dead = True
+                                break
+
+                            # ★ 流还活着（屏保场景）→ 原地恢复，最多 3 次
+                            self._log_critical("【!!】 Radio: device silent >5s, source alive → in-place recovery")
                             backoff = 0.5
                             recovered = False
                             retry_n = 0
-                            while not token.stopped:
+                            while not token.stopped and retry_n < 3:
                                 time.sleep(backoff)
                                 if token.stopped:
                                     break
                                 retry_n += 1
                                 try:
-                                    # 复用已有 source_stream，新 gen 用新 detach 信号
                                     gen_detach = threading.Event()
                                     gen = self._radio_stream_gen(source_stream, token, already_primed=True, detach=gen_detach)
                                     next(gen)  # prime wrapper
@@ -1861,8 +1865,7 @@ class NonBlockingAudioEngine:
                             if recovered:
                                 continue  # ★ 回到监控循环，继续播放
                             else:
-                                # 原地恢复彻底失败 → 跳出，走外层全量重连
-                                self._log_critical("【!!】 Radio: in-place recovery exhausted, will full-reconnect")
+                                self._log_critical("【!!】 Radio: in-place recovery failed → full-reconnect")
                                 device_dead = True
                                 break
 
@@ -1895,6 +1898,11 @@ class NonBlockingAudioEngine:
         if not already_primed:
             next(source_stream)  # prime the source decoder
         required_frames = yield b''  # prime our wrapper for device
+        # ★ 新连接预热：前 150ms 输出静音，让解码器完成 MP3 帧同步
+        # 避免 HTTP 重连时落在帧中间导致的音裂（~1/3 概率）
+        # 屏保恢复（already_primed）不需要预热，解码器状态是连续的
+        FRAME_BYTES = self.REQUESTED_CHANNELS * 2  # 16-bit stereo = 4
+        warmup_left = 0 if already_primed else int(self.REQUESTED_RATE * 0.15)
         while not token.stopped:
             # ★ detach 信号：恢复代码创建新 gen 前会 set 此事件，旧 gen 立即退出
             if detach and detach.is_set():
@@ -1904,7 +1912,11 @@ class NonBlockingAudioEngine:
                 if not data or len(data) == 0:
                     break
                 token.touch()
-                required_frames = yield data
+                if warmup_left > 0:
+                    warmup_left -= len(data) // FRAME_BYTES
+                    required_frames = yield b'\x00' * len(data)
+                else:
+                    required_frames = yield data
             except StopIteration:
                 break
             except ValueError:
