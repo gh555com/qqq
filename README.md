@@ -95,16 +95,6 @@ Let me be honest, via  qqq you can paste txt, exe, psd, mp3, folder, mp4.... if 
 
 ## ✦q✦ File Explorer
 
- Trigger: Press Tab while the window has focus but is not in editing mode, or directly click the Roam command/button.
-
-Before 2026, Tab helped you code fast.
-
-Now, I advocate for tab (=**Roam**) to help you expand rapidly: reaching any location at the speed of thought.
-
-<p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q4_1.gif" width="100%" alt="Roam file explorer">
-</p>
-
 **Roam**, from qqq, is a file explorer:
 
 1. **Nice**: It can reach any location, no longer limited to project folders. You can even map remote disks locally, skip ssh.
