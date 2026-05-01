@@ -1535,8 +1535,8 @@ mod win {
 
             PyV::Obj(vec![
                 ("success".to_string(), PyV::Bool(true)),
-                ("width".to_string(), PyV::Int(width as i64)),
-                ("height".to_string(), PyV::Int(height as i64)),
+                ("width".to_string(), PyV::Num(serde_json::Number::from(width as u64))),
+                ("height".to_string(), PyV::Num(serde_json::Number::from(height as u64))),
             ])
         }
     }
