@@ -828,7 +828,8 @@
         "tooltipMax": "최대 {0}",
         "tooltipCompanionTime": "사용 시간",
         "tooltipDiskCache": "디스크 캐시",
-        "tooltipCacheHit": "캐시 히트"
+        "tooltipCacheHit": "캐시 히트",
+        "shellNoStartupRequired": "시작 불필요"
     },
     "wq": {
         "syncSuccess": "설정 동기가 완료되었습니다",

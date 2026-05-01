@@ -4213,7 +4213,7 @@ function getEngineStatusDetails(pythonBridge, rustBridge, shellBridge) {
 	} else if (shellBridge?.isStarting) {
 		details.push(`⏳ **N** (Shell): starting...`);
 	} else {
-		details.push(`⬜ **N** (Shell): not started`);
+		details.push(`⬜ **N** (Shell): ${q('global.shellNoStartupRequired')}`);
 	}
 
 	return details.join('<br>');

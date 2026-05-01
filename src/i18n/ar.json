@@ -828,7 +828,8 @@
         "tooltipMax": "\u200Eالحد الأقصى\u200E {0}",
         "tooltipCompanionTime": "وقت الاستخدام\u200E",
         "tooltipDiskCache": "ذاكرة القرص المؤقتة\u200E",
-        "tooltipCacheHit": "إصابة الذاكرة المؤقتة‎"
+        "tooltipCacheHit": "إصابة الذاكرة المؤقتة‎",
+        "shellNoStartupRequired": "لا يتطلب التشغيل"
     },
     "wq": {
         "syncSuccess": "تمت مزامنة التكوين بنجاح",

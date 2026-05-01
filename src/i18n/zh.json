@@ -828,7 +828,8 @@
         "tooltipMax": "最大{0}",
         "tooltipCompanionTime": "陪伴时间",
         "tooltipDiskCache": "磁盘缓存",
-        "tooltipCacheHit": "缓存命中"
+        "tooltipCacheHit": "缓存命中",
+        "shellNoStartupRequired": "无需启动"
     },
     "wq": {
         "syncSuccess": "配置同步成功",
