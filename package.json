@@ -256,16 +256,16 @@
           "qqq.codelensLevel": {
             "order": 60,
             "type": "string",
-            "default": "3",
+            "default": "7",
             "enum": [
               "0",
               "1",
-              "3"
+              "7"
             ],
             "markdownEnumDescriptions": [
               "%config.codelensLevel.enum.0%",
               "%config.codelensLevel.enum.1%",
-              "%config.codelensLevel.enum.3%"
+              "%config.codelensLevel.enum.7%"
             ],
             "markdownDescription": "%config.codelensLevel.desc%"
           },

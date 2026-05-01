@@ -155,7 +155,7 @@ function getEffectiveCleanFreakMode() {
 
 let textSlideColorScheme = "light";
 let textSlideFontSize = 14;
-let codelensLevel = "3";
+let codelensLevel = "7";
 
 // Large/small frame watermarks
 let largeWatermarkBase64 = null;
@@ -229,7 +229,7 @@ function refreshConfig() {
 		cleanFreakMode = getConfig("cleanFreak") || "add";
 		textSlideColorScheme = getConfig("textSlideColorScheme") || "light";
 		textSlideFontSize = getConfig("textSlideFontSize") || 14;
-		codelensLevel = String(getConfig("codelensLevel") || "3");
+		codelensLevel = String(getConfig("codelensLevel") || "7");
 		PREVIEW_BG_COLOR = textSlideColorScheme === "dark" ? "#1B1411" : "#fef6e3";
 	} catch (e) {
 		enlargeSmallImages = false;
@@ -238,7 +238,7 @@ function refreshConfig() {
 		cleanFreakMode = "add";
 		textSlideColorScheme = "light";
 		textSlideFontSize = 14;
-		codelensLevel = "3";
+		codelensLevel = "7";
 		PREVIEW_BG_COLOR = "#fef6e3";
 	}
 }
@@ -2952,7 +2952,9 @@ class FileCodeLensProvider {
 			let tooltipText = `${q('q1.ui.created')}: ${new Date(st.birthtime).toLocaleString()}\n${q('q1.ui.modified')}: ${new Date(st.mtime).toLocaleString()}`;
 			let mtimeMs = st.mtimeMs;
 
-			if (codelensLevel === "3") {
+			const lvl = parseInt(codelensLevel, 10) || 0;
+
+			if (lvl > 1) {
 				let folderData = geqFolderSizeSync(folder);
 				let fSizeStr;
 				let folderTooltip;
@@ -3052,8 +3054,8 @@ class FileCodeLensProvider {
 				})
 			);
 
-			// Only show ✎qode button for text files, and only when codelensLevel is 3
-			if (codelensLevel === "3" && isText) {
+			// Only show ✎qode button for text files, and only when codelensLevel >= 2
+			if (lvl > 1 && isText) {
 				lenses.push(
 					new vscode.CodeLens(r, {
 						title: "✎qode",

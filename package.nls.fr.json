@@ -53,7 +53,7 @@
     "config.codelensLevel.desc": "👁️ Niveau CodeLens:",
     "config.codelensLevel.enum.0": "none",
     "config.codelensLevel.enum.1": "open file",
-    "config.codelensLevel.enum.3": "✎open folder  ✎rename  ✎open file  ±[✎qode]",
+    "config.codelensLevel.enum.7": "✎open folder  ✎rename  ✎c1 copy path  ✎c2 copy file  ±[✎c3 copy image binary]  ✎open file  ±[✎qode]",
     "config.takeOverCodelensStyle.desc": "👁️ Reprendre le style CodeLens: rouge, taille 13.",
     "config.downloadSecurityLevel.desc": "🍌 Si le téléchargement vidéo échoue, essayez une politique plus souple ici. Voir les compromis sur https://github.com/gh555com/qqq/blob/qq/docs/downloadSecurityLevel.md",
     "config.downloadSecurityLevel.enum.0": "Les 11 interrupteurs de sécurité DÉSACTIVÉS.",
