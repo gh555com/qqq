@@ -828,7 +828,8 @@
         "tooltipMax": "max {0}",
         "tooltipCompanionTime": "Nutzungszeit",
         "tooltipDiskCache": "Festplatten-Cache",
-        "tooltipCacheHit": "Cache-Treffer"
+        "tooltipCacheHit": "Cache-Treffer",
+        "shellNoStartupRequired": "Kein Start erforderlich"
     },
     "wq": {
         "syncSuccess": "Konfiguration erfolgreich synchronisiert",
