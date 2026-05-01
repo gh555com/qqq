@@ -1767,7 +1767,8 @@ class NonBlockingAudioEngine:
     def _radio_stream_worker(self, stream_url, token: PlaybackToken):
         """直推流电台：使用自定义 StreamableSource + stream_any 实现
         单解码器实例连续解码整条 MP3 流，彻底消除段切换卡顿。
-        架构：后台线程 HTTP 下载+缓冲 → stream_any 持久解码器 → device 回调消费。"""
+        架构：后台线程 HTTP 下载+缓冲 → stream_any 持久解码器 → device 回调消费。
+        屏保恢复：原地重建设备，复用同一条 source_stream（零重连延迟）。"""
         device = None
         device_dead = False
         reconnect_delay = 3.0
@@ -1808,14 +1809,58 @@ class NonBlockingAudioEngine:
                     while not token.stopped:
                         time.sleep(0.5)
                         if device and token.device_silent_seconds() > 5.0:
-                            self._log_critical("【!!】 Radio stream: device silent, will reconnect")
+                            self._log_critical("【!!】 Radio stream: device silent >5s, attempting in-place recovery")
                             if self._on_device_lost:
                                 try: self._on_device_lost()
                                 except Exception: pass
-                            device_dead = True
+                            # ★ 异步销毁旧设备（stop 可能阻塞）
                             self._kill_device_async(device)
                             device = None
-                            break
+
+                            # ★★★ 原地渐进退避恢复：复用 source_stream，只重建设备 ★★★
+                            # HTTP 流和解码器仍然活着，无需重连，恢复速度 ~2-3 秒
+                            backoff = 0.5
+                            recovered = False
+                            retry_n = 0
+                            while not token.stopped:
+                                time.sleep(backoff)
+                                if token.stopped:
+                                    break
+                                retry_n += 1
+                                try:
+                                    # 复用已有 source_stream（already_primed=True）
+                                    gen = self._radio_stream_gen(source_stream, token, already_primed=True)
+                                    next(gen)  # prime wrapper
+                                    device = self.PlaybackDevice(
+                                        output_format=self.REQUESTED_FORMAT,
+                                        nchannels=self.REQUESTED_CHANNELS,
+                                        sample_rate=self.REQUESTED_RATE,
+                                    )
+                                    device.start(gen)
+                                    # ★ 不手动 touch — 让设备真正拉取数据来证明自己
+                                    time.sleep(2.0)
+                                    silent = token.device_silent_seconds()
+                                    if silent < 1.5:
+                                        self._log_critical(f"【OK】 Radio: in-place recovery ok (retry {retry_n}, backoff {backoff:.1f}s, silent={silent:.2f}s)")
+                                        recovered = True
+                                        break
+                                    else:
+                                        self._log_critical(f"【??】 Radio: device created but no pull (silent={silent:.2f}s), retrying")
+                                        self._kill_device_async(device)
+                                        device = None
+                                except Exception as e:
+                                    if retry_n <= 2:
+                                        self._log_critical(f"【!!】 Radio: in-place recovery retry {retry_n} failed: {e}")
+                                    device = None
+                                backoff = min(backoff * 2, 30.0)
+
+                            if recovered:
+                                continue  # ★ 回到监控循环，继续播放
+                            else:
+                                # 原地恢复彻底失败 → 跳出，走外层全量重连
+                                self._log_critical("【!!】 Radio: in-place recovery exhausted, will full-reconnect")
+                                device_dead = True
+                                break
 
                 except Exception as e:
                     self._log_critical(f"【!!】 Radio stream error: {e}")
@@ -1838,10 +1883,12 @@ class NonBlockingAudioEngine:
                     try: device.close()
                     except Exception: pass
 
-    def _radio_stream_gen(self, source_stream, token: PlaybackToken):
+    def _radio_stream_gen(self, source_stream, token: PlaybackToken, already_primed=False):
         """包装 stream_any 的 generator，添加 stop 检测和 touch 心跳。
-        miniaudio generator 协议：send(required_frames) → yield PCM data。"""
-        next(source_stream)  # prime the source decoder
+        miniaudio generator 协议：send(required_frames) → yield PCM data。
+        already_primed=True 时跳过 next()，用于屏保恢复复用已有解码器。"""
+        if not already_primed:
+            next(source_stream)  # prime the source decoder
         required_frames = yield b''  # prime our wrapper for device
         while not token.stopped:
             try:

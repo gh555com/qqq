@@ -32,7 +32,7 @@ serde_json = "1.0"
 num_cpus = "1.16"
 threadpool = "1.8"
 walkdir = "2.5"
-image = { version = "0.25", default-features = false, features = ["png", "bmp"] }
+image = { version = "0.25", default-features = false, features = ["png", "bmp", "jpeg", "gif", "webp", "ico", "tiff"] }
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
   "Win32_System_DataExchange",
