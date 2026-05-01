@@ -1788,7 +1788,8 @@ class NonBlockingAudioEngine:
                         sample_rate=self.REQUESTED_RATE,
                     )
 
-                    gen = self._radio_stream_gen(source_stream, token)
+                    gen_detach = threading.Event()
+                    gen = self._radio_stream_gen(source_stream, token, detach=gen_detach)
                     next(gen)  # prime
 
                     reconnect_delay = 3.0
@@ -1813,6 +1814,8 @@ class NonBlockingAudioEngine:
                             if self._on_device_lost:
                                 try: self._on_device_lost()
                                 except Exception: pass
+                            # ★ 先通知旧 gen 脱离 source_stream，避免新旧竞争
+                            gen_detach.set()
                             # ★ 异步销毁旧设备（stop 可能阻塞）
                             self._kill_device_async(device)
                             device = None
@@ -1828,8 +1831,9 @@ class NonBlockingAudioEngine:
                                     break
                                 retry_n += 1
                                 try:
-                                    # 复用已有 source_stream（already_primed=True）
-                                    gen = self._radio_stream_gen(source_stream, token, already_primed=True)
+                                    # 复用已有 source_stream，新 gen 用新 detach 信号
+                                    gen_detach = threading.Event()
+                                    gen = self._radio_stream_gen(source_stream, token, already_primed=True, detach=gen_detach)
                                     next(gen)  # prime wrapper
                                     device = self.PlaybackDevice(
                                         output_format=self.REQUESTED_FORMAT,
@@ -1883,14 +1887,18 @@ class NonBlockingAudioEngine:
                     try: device.close()
                     except Exception: pass
 
-    def _radio_stream_gen(self, source_stream, token: PlaybackToken, already_primed=False):
+    def _radio_stream_gen(self, source_stream, token: PlaybackToken, already_primed=False, detach=None):
         """包装 stream_any 的 generator，添加 stop 检测和 touch 心跳。
         miniaudio generator 协议：send(required_frames) → yield PCM data。
-        already_primed=True 时跳过 next()，用于屏保恢复复用已有解码器。"""
+        already_primed=True 时跳过 next()，用于屏保恢复复用已有解码器。
+        detach: threading.Event — 被 set 时立即脱离 source_stream，避免新旧 gen 竞争。"""
         if not already_primed:
             next(source_stream)  # prime the source decoder
         required_frames = yield b''  # prime our wrapper for device
         while not token.stopped:
+            # ★ detach 信号：恢复代码创建新 gen 前会 set 此事件，旧 gen 立即退出
+            if detach and detach.is_set():
+                break
             try:
                 data = source_stream.send(required_frames)
                 if not data or len(data) == 0:
@@ -1898,6 +1906,10 @@ class NonBlockingAudioEngine:
                 token.touch()
                 required_frames = yield data
             except StopIteration:
+                break
+            except ValueError:
+                # "generator already executing" — 新旧 gen 竞争 source_stream.send()
+                # 安全退出，让新 gen 接管
                 break
 
     def _decode_mp3_buffer(self, mp3_bytes):
