@@ -49,7 +49,7 @@
 
 <p align="center">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/loq.gif" width="100%" alt="的梦gaea">
-  © 2005 ![gh555.com](gh555.com) All Rights Reserved.
+  © 2005 <a href="gh555.com">gh555.com</a> All Rights Reserved.
 </p>
 
 
