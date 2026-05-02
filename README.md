@@ -45,21 +45,17 @@
 
 
 
-
- 那是我的梦境。
-
  ещё whisper for my daughter的梦0.
 
 <p align="center">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/loq.gif" width="100%" alt="的梦gaea">
-  © 2005 gh555.com All Rights Reserved.
+  © 2005 ![gh555.com](gh555.com) All Rights Reserved.
 </p>
 
- Full source code transparency, security, and auditability are guaranteed. [Feedback & Issues](https://github.com/gh555com/qqq/issues)
 
  Original name: qqq    ![Open VSX](https://img.shields.io/open-vsx/dt/gh555/qqq?label=installs&color=orange)
 
- Open VSX: https://open-vsx.org/extension/gh555/qqq   ![](https://gh555.com/px?g=qqq&s=readme)
+ Open VSX、macOS、Linux: https://open-vsx.org/extension/gh555/qqq   ![](https://gh555.com/px?g=qqq&s=readme)
 
 
  You need not have opened a note-taking application specially.
@@ -85,12 +81,12 @@ Let me be honest, via  qqq you can paste txt, exe, psd, mp3, folder, mp4.... if 
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q3_3.gif" width="100%" alt="Paste any file">
 </p>
 
- qqq in, ctrl + v. If you don't like key combinations, try `F2`.
+ qqq in, ctrl + v. **If you don't like key combinations, try `F2`.**
 
  You can organize your ideas now.
 
- There’s just one more small problem - you need to be able to jump between arbitrary directories:
 
+  with:
 
 
 ## ✦q✦ File Explorer
