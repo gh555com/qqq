@@ -1486,6 +1486,8 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		} else if (downloadResult.doneMessage) {
 			// ★ Success
 			global.TaskMessage.showSimpleToast(downloadResult.doneMessage, 15000, 'success');
+			// ★ Record video stats (was missing — root cause of video_n always 0)
+			global.saveVideoStats(downloadResult.finalTotalBytes || 0);
 		}
 	}
 }
