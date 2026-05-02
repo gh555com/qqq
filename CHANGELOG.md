@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **Clipboard pinned cards no longer lost on restart**: Fixed a long-standing issue where pinned items (and sometimes entire cards) would silently disappear — especially when switching languages or closing multiple windows at once. The root cause was that all windows shared one history file but saved blindly, so the last window to exit would overwrite everyone else's changes. Now every save merges with the latest disk state first, so no pin or card is ever lost.
+- **Python Broker fails to start**: Fixed an issue where the audio engine and related features (sound effects, disk space display, etc.) would not work because the Python Broker process could not start.
+- **Video download**: Fixed known bugs.
 
 ### Improved
 - **Periodic background save**: History is now automatically saved every 300 seconds, so even if the process is force-killed, at most half a minute of changes is at risk — and the next window's merge-save will recover them.
