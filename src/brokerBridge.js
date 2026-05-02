@@ -92,6 +92,7 @@ class BrokerBridge extends EventEmitter {
 		// Spawn throttling (per-window, 3s cooldown)
 		this.lastSpawnAt = 0;
 		this.spawning = null;
+		this._lastHealAttempt = 0;  // ★ Self-healing throttle (prevent spam)
 
 		// Status flags (compatible with DaemonBridge)
 		this.available = null;
@@ -550,6 +551,36 @@ class BrokerBridge extends EventEmitter {
 							}
 						} catch (scheduleErr) {
 							global.logMessage(`[Broker] Failed to schedule install check: ${scheduleErr.message}`, "WARN");
+						}
+					}
+
+					// ★ FIX: Python 环境损坏（deps_missing / interpreter_invalid）→ 主动触发重新安装
+					// 这是关键：之前只处理了 install_in_progress 和 python_not_downloaded，
+					// 但 pip install 崩溃后留下半成品文件夹的情况完全没覆盖
+					// ★ 60秒冷却防止心跳每20秒都触发一次
+					if ((pythonPerfect.reason === 'deps_missing' || pythonPerfect.reason === 'interpreter_invalid')
+						&& Date.now() - this._lastHealAttempt > 60000) {
+						this._lastHealAttempt = Date.now();
+						try {
+							const { getSharedDownloader } = require('./dow');
+							const downloader = getSharedDownloader();
+							if (downloader && global.extensionContext) {
+								// ★ 先删掉坏的文件夹
+								const installDir = path.join(global.extensionContext.globalStorageUri.fsPath, "python_engine");
+								if (fs.existsSync(installDir)) {
+									global.logMessage(`[Broker] ★ Self-healing: nuking corrupt python_engine (${pythonPerfect.reason})`, "WARN");
+									try {
+										if (fs.rmSync) fs.rmSync(installDir, { recursive: true, force: true });
+									} catch (nukeErr) {
+										global.logMessage(`[Broker] Nuke failed (files locked?): ${nukeErr.message}`, "WARN");
+									}
+								}
+								// ★ 触发重新安装（ensurePythonReady 会调用 autoInstall）
+								global.logMessage("[Broker] Triggering fresh Python install...", "INFO");
+								downloader.ensurePythonReady(global.extensionContext).catch(() => {});
+							}
+						} catch (healErr) {
+							global.logMessage(`[Broker] Self-healing trigger failed: ${healErr.message}`, "WARN");
 						}
 					}
 				} catch { }
