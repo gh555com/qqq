@@ -1898,11 +1898,16 @@ class NonBlockingAudioEngine:
         if not already_primed:
             next(source_stream)  # prime the source decoder
         required_frames = yield b''  # prime our wrapper for device
-        # ★ 新连接预热：前 150ms 输出静音，让解码器完成 MP3 帧同步
-        # 避免 HTTP 重连时落在帧中间导致的音裂（~1/3 概率）
+        # ★ 新连接预热：前 800ms 输出静音，让解码器完成 MP3 帧同步 + 稳定化
+        # 避免 HTTP 重连时落在帧中间导致的变音/音裂（~1/3 概率）
         # 屏保恢复（already_primed）不需要预热，解码器状态是连续的
+        # ★ 150ms 实测不够 — MP3 解码器帧同步后还需要几帧来稳定输出
         FRAME_BYTES = self.REQUESTED_CHANNELS * 2  # 16-bit stereo = 4
-        warmup_left = 0 if already_primed else int(self.REQUESTED_RATE * 0.15)
+        warmup_frames = 0 if already_primed else int(self.REQUESTED_RATE * 0.8)  # 800ms
+        # ★ 额外保护：前 N 次 send() 调用完全丢弃（确保解码器内部状态稳定）
+        # stream_any 底层 MP3 解码器在 sync 期间可能产出零碎 PCM 片段
+        discard_calls = 0 if already_primed else 3
+        frames_output = 0
         while not token.stopped:
             # ★ detach 信号：恢复代码创建新 gen 前会 set 此事件，旧 gen 立即退出
             if detach and detach.is_set():
@@ -1912,8 +1917,13 @@ class NonBlockingAudioEngine:
                 if not data or len(data) == 0:
                     break
                 token.touch()
-                if warmup_left > 0:
-                    warmup_left -= len(data) // FRAME_BYTES
+                if discard_calls > 0:
+                    # ★ 完全丢弃前几次返回 — 解码器可能还在同步
+                    discard_calls -= 1
+                    required_frames = yield b'\x00' * len(data)
+                elif warmup_frames > 0:
+                    # ★ 静音预热：解码器已同步但输出可能不稳定
+                    warmup_frames -= len(data) // FRAME_BYTES
                     required_frames = yield b'\x00' * len(data)
                 else:
                     required_frames = yield data
