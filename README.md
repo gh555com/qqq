@@ -43,24 +43,17 @@
 
 
 
-
-
- ещё whisper for my daughter的梦0.
+ Fact: VS Code is incomplete without qqq.
 
 <p align="center">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/loq.gif" width="100%" alt="的梦gaea">
-  © 2005 <a href="gh555.com">gh555.com</a> All Rights Reserved.
+  © 2005 <a href="https://www.gh555.com">gh555.com</a> All Rights Reserved.
 </p>
 
 
  Original name: qqq    ![Open VSX](https://img.shields.io/open-vsx/dt/gh555/qqq?label=installs&color=orange)
 
  Open VSX、macOS、Linux: https://open-vsx.org/extension/gh555/qqq   ![](https://gh555.com/px?g=qqq&s=readme)
-
-
- You need not have opened a note-taking application specially.
-
- **√**  VS Code (Cursor, Antigravity, etc.) can also serve as an all-media paste-friendly notebook. How? Enable qqq.
 
 
 
@@ -131,75 +124,13 @@ Press `2` to scroll to list bottom.
 
   qqq Roam serves as your default start page for blank windows. Make the most of the **`Q`** key to open projects or documents;  make the most of the **`W`** key to open your music, videos, and games.
 
+ Invoke:  `Tab`(but is not in editing mode), or Roam command/button.
+
  As of v16.1, we’re thrilled to introduce the `Space + Q` keyboard shortcut to invoke Roam. Enjoy!
 
 
 
-## ✦q✦ Premium vs Free
-
-
- All features mentioned above are fully available in the free version.
-
-In addition, qqq comes with essential premium capabilities, including HTML pasting, DOC export, streaming video pasting, and more...
-
-However, qqq only includes the simplest billing model: a one-time purchase.
-
-**One-time purchase, permanent ownership.**
-
-More importantly, all advanced features of qqq are permanently free and unlimited.
-
-**This means the most powerful version of qqq is available in the free edition.**
-
-Still, we hope you will purchase the genuine version. The genuine version offers just two additional benefits: 1. Watermark removal; 2. Cloud storage for preferences.
-
-
- ↓ How to Get a Genuine License ↓
-
-Sponsor [GH Health](https://www.gh555.com/gaea/d/qqq#price) to receive ge as a gift. You can purchase the official version with 100ge (approximately equivalent to 100 RMB or 15 USD).
-
-Additionally, there are 3 other ways to get a genuine activation code for free:
-
-#### Method 1: Earn It in 100 Days
-
-Register as a part of **GH Health** to automatically receive **1 ge per day** — no login, no check-in, no tasks required.
-Since qqq is priced at 100 ge: **Sign up → Wait 100 days → Get qqq for free**.
-
-[Register](https://www.gh555.com/login)　[Buy License](https://www.gh555.com/gaea/d/qqq#price)　[▶Save Preferences](https://www.gh555.com/gaea/d/qqq#profile)
-
-
-
-#### Method 2: Contribute a Video
-
-Independently produce and publish an introductory video for qqq. Depending on video quality, you can earn:
-
-| Video Quality | Rewards |
-|---------------|---------|
-| ★ | 3 Premium license keys, or the equivalent of 300 ge |
-| ★★ | 10 Premium license keys, or the equivalent of 1,000 ge |
-| ★★★ | 30 Premium license keys, or the equivalent of 3,000 ge |
-| ★★★★ | 100 Premium license keys, or the equivalent of 10,000 ge |
-| ★★★★★ | 300 Premium license keys, or the equivalent of 30,000 ge |
-
-Simply email the video link to: info@gh555.com.
-
-
-#### Method 3. Submit bugs at https://github.com/gh555com/qqq/issues.
-
-
-Share 3 Premium license keys:
-
-DG-7J4OA-4H7CX-K3F2I-D377P-HU22GI
-
-DG-GHPCV-L7EFH-22EBK-IDBCY-GHYXRD
-
-DG-F3HJ5-UBVX3-4HBV2-QQIXL-ZZRSJ7
-
-
-Premium Help: ky@gh555.com (Primary)；📞 +86 19232854249 (Emergency & Chinese Language Only (Priority: IDE integration; merchant & group procurement) )
-
-
-
-### **Premium Features: Out of the box**
+## ✦q✦ Premium Features: Out of the box
 
  #### Paste HTML
 
@@ -284,6 +215,6 @@ Virus detection or submission: https://www.avira.com/en/analysis/submit
 
 
 
-  the whisper is: I miss you 的梦0.
+ For 的梦0.
 
 
