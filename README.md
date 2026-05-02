@@ -68,7 +68,7 @@
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q23.gif" width="100%" alt="Paste image files directly">
 </p>
 
-Let me be honest, via  qqq you can paste txt, exe, psd, mp3, folder, mp4.... if you want. Why not?
+Via  qqq you can paste txt, exe, psd, mp3, folder, mp4.... if you want. Why not?
 
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q3_3.gif" width="100%" alt="Paste any file">
