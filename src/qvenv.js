@@ -545,6 +545,18 @@ sys.exit(0)
             };
         }
 
+        // ★ FIX: Actively clean stale marker (process crashed without releasing)
+        // If marker exists but is stale (>5min), the installer process is dead — clean it
+        try {
+            if (fs.existsSync(markerPath)) {
+                fs.unlinkSync(markerPath);
+                try {
+                    const global = require('./global');
+                    global.logMessage("[PythonCheck] Cleaned stale install marker (installer process likely crashed)", "WARN");
+                } catch { }
+            }
+        } catch { }
+
         const installDir = path.join(context.globalStorageUri.fsPath, "python_engine");
         const binName = process.platform === "win32" ? "python.exe" : "bin/python3";
         const pythonPath = path.join(installDir, binName);
@@ -879,14 +891,25 @@ sys.exit(0)
      */
     /**
      * ★ Nuke python_engine directory completely (for self-healing retry)
+     * Retries with delay if files are locked (e.g., python.exe still running from killed pip)
      */
     _nukeInstallDir(installDir) {
-        try {
-            if (fs.existsSync(installDir)) {
-                if (fs.rmSync) fs.rmSync(installDir, { recursive: true, force: true });
-                else this._rmDir(installDir);
+        for (let i = 0; i < 3; i++) {
+            try {
+                if (fs.existsSync(installDir)) {
+                    if (fs.rmSync) fs.rmSync(installDir, { recursive: true, force: true });
+                    else this._rmDir(installDir);
+                }
+                if (!fs.existsSync(installDir)) break; // success
+            } catch { }
+            // Files might be locked — wait and retry
+            if (i < 2) {
+                const { spawnSync } = require('child_process');
+                spawnSync(process.platform === 'win32' ? 'timeout' : 'sleep',
+                    process.platform === 'win32' ? ['/t', '2', '/nobreak'] : ['2'],
+                    { windowsHide: true, stdio: 'ignore' });
             }
-        } catch { }
+        }
         // Also clean stale zip if present
         const zipPath = path.join(path.dirname(installDir), "python_3.8.10.zip");
         try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch { }

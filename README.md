@@ -203,7 +203,7 @@ Premium Help: ky@gh555.com (Primary)；📞 +86 19232854249 (Emergency & Chinese
 
 
 
-### **Premium features: Out of the box**
+### **Premium Features: Out of the box**
 
  #### Paste HTML
 
