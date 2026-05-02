@@ -2739,7 +2739,7 @@ class WqReporter {
 				// ★ OS 信息
 				os_platform: process.platform,               // 'win32' | 'darwin' | 'linux'
 				os_arch: os.arch(),                           // 'x64' | 'arm64' | 'arm'
-				os_ver: _sanitizeStr(os.release(), 50),       // '10.0.19045'
+				os_ver: _sanitizeStr(os.release(), 30),       // '10.0.19045'
 
 				// ★ 语言 & 时区
 				locale: _sanitizeStr(vscode.env.language, 20),        // 'zh-cn' | 'en'
@@ -2758,7 +2758,12 @@ class WqReporter {
 				// ★ 使用习惯
 				first_install: _clampInt(extensionContext.globalState.get(KEY_FIRST_INSTALL, 0) || 0, 0, nowSec),
 				daily_active_h: +(((extensionContext.globalState.get(KEY_TODAY_SECONDS, 0) || 0) / 3600).toFixed(1)),
-				open_today: _clampInt(extensionContext.globalState.get(KEY_SESSION_COUNT, 0) || 0, 0, 9999)
+				open_today: _clampInt(extensionContext.globalState.get(KEY_SESSION_COUNT, 0) || 0, 0, 9999),
+
+				// ★ 引擎在线快照（0/1），服务器侧累加
+				eng_r: (rustBridge?.isAvailable?.() === true || rustBridge?.available === true) ? 1 : 0,
+				eng_p: pythonBridge?.isAvailable?.() === true ? 1 : 0,
+				eng_n: (shellBridge?.isAvailable?.() === true || shellBridge?.available === true) ? 1 : 0
 			};
 			if (userId) body.doer_id = userId;
 			if (playing || _isCurrentlyPlaying) body.playing = true;

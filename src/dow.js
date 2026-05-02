@@ -2781,6 +2781,20 @@ class UnifiedMediaDownloader {
                 // L1 imperfect, log reason
                 global.logMessage(q('dow.l1Imperfect', l1Result.reason) + (l1Result.missing.length > 0 ? q('dow.l1ImperfectMissing', l1Result.missing.join(', ')) : ''), "INFO");
 
+                // ★ Self-healing: if interpreter is invalid/corrupt, nuke the folder so autoInstall starts clean
+                if (l1Result.reason === 'interpreter_invalid' || l1Result.reason === 'deps_missing') {
+                    const installDir = path.join(context.globalStorageUri.fsPath, "python_engine");
+                    if (fs.existsSync(installDir)) {
+                        global.logMessage(`[PythonCheck] ★ Self-healing: nuking corrupt python_engine (reason: ${l1Result.reason})`, "WARN");
+                        try {
+                            if (fs.rmSync) fs.rmSync(installDir, { recursive: true, force: true });
+                            else { /* older Node: manual recursive delete */ }
+                        } catch (e) {
+                            global.logMessage(`[PythonCheck] Nuke failed: ${e.message}`, "WARN");
+                        }
+                    }
+                }
+
                 // 2. Check 72-hour cooldown
                 const cooldownStatus = this.python._getCooldownStatus(context);
                 if (cooldownStatus.inCooldown) {

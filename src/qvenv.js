@@ -877,6 +877,50 @@ sys.exit(0)
      * Includes download, extract, pip install, pywin32 config, slimming
      * ★ Multi-window safe: uses atomic marker to prevent concurrent installs
      */
+    /**
+     * ★ Nuke python_engine directory completely (for self-healing retry)
+     */
+    _nukeInstallDir(installDir) {
+        try {
+            if (fs.existsSync(installDir)) {
+                if (fs.rmSync) fs.rmSync(installDir, { recursive: true, force: true });
+                else this._rmDir(installDir);
+            }
+        } catch { }
+        // Also clean stale zip if present
+        const zipPath = path.join(path.dirname(installDir), "python_3.8.10.zip");
+        try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch { }
+    }
+
+    /**
+     * ★ Validate extraction result: critical files must exist
+     * @returns {{ ok: boolean, missing: string[] }}
+     */
+    _validateExtraction(installDir, platform) {
+        const criticalFiles = platform === 'win32'
+            ? ['python.exe', 'python38.dll', 'python38._pth']
+            : ['bin/python3'];
+
+        const missing = [];
+        for (const f of criticalFiles) {
+            if (!fs.existsSync(path.join(installDir, f))) {
+                missing.push(f);
+            }
+        }
+        return { ok: missing.length === 0, missing };
+    }
+
+    /**
+     * ★ Self-healing auto-install with infinite retry on download success
+     *
+     * Architecture ("用一万年"):
+     * - Only DOWNLOAD FAILURES count toward giving up
+     * - 3 consecutive download failures → give up this lifecycle
+     * - Any successful download resets the failure counter → infinite retries
+     * - Each retry: nuke old folder → download → validate → extract → deps
+     * - Only a FULLY SUCCESSFUL install counts as one "attempt" for the cooldown system
+     * - Max 30 total attempts as absolute safety cap (prevent infinite loop on weird edge cases)
+     */
     async autoInstall(context) {
         const global = require('./global');
 
@@ -889,6 +933,12 @@ sys.exit(0)
             return { success: false, error: 'install_in_progress', skipped: true };
         }
 
+        let lastError = '';
+        let consecutiveDownloadFailures = 0;  // ★ Only download failures count
+        const MAX_DOWNLOAD_FAILURES = 3;       // ★ 3 consecutive download fails → give up
+        const MAX_TOTAL_ATTEMPTS = 30;         // ★ Absolute safety cap
+        let totalAttempts = 0;
+
         try {
             const os = require('os');
             const https = require('https');
@@ -897,12 +947,9 @@ sys.exit(0)
             const platform = os.platform();
             const arch = os.arch();
             const installDir = path.join(context.globalStorageUri.fsPath, "python_engine");
-            // ★ Win7 fix: Shell.Application.NameSpace() only works with .zip extension
             const zipPath = path.join(context.globalStorageUri.fsPath, "python_3.8.10.zip");
             const binName = platform === "win32" ? "python.exe" : "bin/python3";
             const installPath = path.join(installDir, binName);
-
-            if (!fs.existsSync(installDir)) fs.mkdirSync(installDir, { recursive: true });
 
             // Platform detection
             let officialUrl, mirrorUrl;
@@ -930,7 +977,7 @@ sys.exit(0)
 
             global.logMessage(q('qvenv.platformArch', platform, arch, officialUrl), "INFO");
 
-            // Download function
+            // ★ Download function — returns downloaded file size for validation
             const downloadFile = (url, targetPath, timeoutMs = 30000) => {
                 return new Promise((resolve, reject) => {
                     const doReq = (targetUrl, redirects = 0) => {
@@ -950,9 +997,10 @@ sys.exit(0)
                                 res.resume();
                                 return reject(new Error(`Status: ${res.statusCode}`));
                             }
+                            const expectedSize = parseInt(res.headers['content-length'], 10) || 0;
                             const file = fs.createWriteStream(targetPath);
                             res.pipe(file);
-                            file.on('finish', () => { file.close(); resolve(); });
+                            file.on('finish', () => { file.close(); resolve({ expectedSize }); });
                             file.on('error', (e) => { fs.unlink(targetPath, () => { }); reject(e); });
                         });
                         req.on('error', reject);
@@ -962,166 +1010,236 @@ sys.exit(0)
                 });
             };
 
-            // Cascading download
+            // Cascading download URLs
             const downloadUrls = platform === 'win32'
                 ? [{ url: mirrorUrl, timeout: 30000, name: '淘宝NPM' }, { url: officialUrl, timeout: 30000, name: '官方' }]
                 : [{ url: officialUrl, timeout: 15000, name: '官方' }, { url: mirrorUrl, timeout: 60000, name: 'ghproxy' }];
 
-            for (const { url, timeout, name } of downloadUrls) {
+            // Python 3.8.10 embed amd64 ~7.3MB, win32 ~6.5MB; anything under 5MB is corrupt
+            const MIN_ZIP_SIZE = 5 * 1024 * 1024;
+
+            // ============================================================
+            // ★★★ Self-healing retry loop: infinite on download success ★★★
+            // ============================================================
+            while (consecutiveDownloadFailures < MAX_DOWNLOAD_FAILURES && totalAttempts < MAX_TOTAL_ATTEMPTS) {
+                totalAttempts++;
                 try {
-                    global.logMessage(q('qvenv.trySource', name), "INFO");
-                    await downloadFile(url, zipPath, timeout);
-                    global.logMessage(q('qvenv.sourceSuccess', name), "INFO");
-                    break;
-                } catch (e) {
-                    global.logMessage(q('qvenv.sourceFailed', name, e.message), "WARN");
-                    if (url === downloadUrls[downloadUrls.length - 1].url) {
-                        throw new Error(q('qvenv.allSourcesFailed', e.message));
+                    global.logMessage(`[PythonInstall] === Round ${totalAttempts} (download fails: ${consecutiveDownloadFailures}/${MAX_DOWNLOAD_FAILURES}) ===`, "INFO");
+
+                    // ★ Step 0: Nuke any previous bad install (clean slate)
+                    if (fs.existsSync(installDir)) {
+                        global.logMessage(`[PythonInstall] Nuking old python_engine for clean retry`, "INFO");
+                        this._nukeInstallDir(installDir);
                     }
-                }
-            }
+                    try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch { }
+                    fs.mkdirSync(installDir, { recursive: true });
 
-            // Extract
-            if (platform === 'win32') {
-                // ★ 使用公用解压模块 (Win7 兼容三级回退)
-                await global.extractZip(zipPath, installDir);
+                    // ★ Step 1: Download with cascading fallback + validation
+                    let downloaded = false;
+                    for (const { url, timeout, name } of downloadUrls) {
+                        try {
+                            global.logMessage(q('qvenv.trySource', name), "INFO");
+                            const result = await downloadFile(url, zipPath, timeout);
+                            global.logMessage(q('qvenv.sourceSuccess', name), "INFO");
 
-                // Fix ._pth
-                const pthFile = path.join(installDir, 'python38._pth');
-                if (fs.existsSync(pthFile)) {
-                    let content = fs.readFileSync(pthFile, 'utf8');
-                    content = content.replace('#import site', 'import site');
-                    if (!content.includes('site-packages')) content += '\n./site-packages\n';
-                    if (!content.includes('./Lib')) content = './Lib\n' + content;
-                    fs.writeFileSync(pthFile, content);
-                }
-            } else {
-                cp.execSync(`tar -xzf "${zipPath}" -C "${installDir}" --strip-components=1`, { windowsHide: true });
-            }
-            fs.unlinkSync(zipPath);
+                            let actualSize = 0;
+                            try { actualSize = fs.statSync(zipPath).size; } catch { }
 
-            if (!await this.isAvailable(installPath)) {
-                return { success: false, error: q('qvenv.extractVerifyFailed') };
-            }
-
-            this.pythonPath = installPath;
-            const sitePackagesDir = path.join(installDir, 'site-packages');
-            if (!fs.existsSync(sitePackagesDir)) fs.mkdirSync(sitePackagesDir, { recursive: true });
-
-            // Install pip (Windows embed)
-            if (platform === 'win32') {
-                global.logMessage(q('qvenv.installPip'), 'INFO');
-                const getPipPath = path.join(installDir, 'get-pip.py');
-                await new Promise((resolve, reject) => {
-                    const downloadGetPip = (url, redirectCount = 0) => {
-                        if (redirectCount > 5) return reject(new Error(q('qvenv.tooManyRedirects')));
-                        const urlObj = new URL(url);
-                        https.get({
-                            hostname: urlObj.hostname,
-                            path: urlObj.pathname,
-                            headers: { 'User-Agent': 'Mozilla/5.0' }
-                        }, (res) => {
-                            if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
-                                res.resume();
-                                downloadGetPip(new URL(res.headers.location, url).href, redirectCount + 1);
-                                return;
+                            if (actualSize < MIN_ZIP_SIZE) {
+                                global.logMessage(`[PythonInstall] ⚠ Zip too small: ${(actualSize / 1024 / 1024).toFixed(1)}MB < 5MB, source=${name}`, "WARN");
+                                try { fs.unlinkSync(zipPath); } catch { }
+                                continue;
                             }
-                            if (res.statusCode !== 200) return reject(new Error(`Status ${res.statusCode}`));
-                            const file = fs.createWriteStream(getPipPath);
-                            res.pipe(file);
-                            file.on('finish', () => { file.close(); resolve(); });
-                            file.on('error', reject);
-                        }).on('error', reject);
-                    };
-                    downloadGetPip('https://bootstrap.pypa.io/pip/3.8/get-pip.py');
-                });
 
-                cp.execSync(`"${installPath}" "${getPipPath}" --index-url https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com`, {
-                    windowsHide: true,
-                    timeout: 121000,
-                    stdio: ['pipe', 'pipe', 'pipe'],
-                    // ★ 绕过代理，避免 ProxyError
-                    env: { ...process.env, PYTHONNOUSERSITE: '1', NO_PROXY: '*', http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '' }
-                });
-                try { fs.unlinkSync(getPipPath); } catch { }
-            }
+                            if (result.expectedSize > 0 && actualSize < result.expectedSize * 0.95) {
+                                global.logMessage(`[PythonInstall] ⚠ Download truncated: got ${(actualSize / 1024 / 1024).toFixed(1)}MB, expected ${(result.expectedSize / 1024 / 1024).toFixed(1)}MB`, "WARN");
+                                try { fs.unlinkSync(zipPath); } catch { }
+                                continue;
+                            }
 
-            // Install dependencies
-            const lockedDeps = this._getLockedDeps();
-            global.logMessage(q('qvenv.installDeps', lockedDeps.join(', ')), 'INFO');
-            const pipCmd = `"${installPath}" -m pip install ${lockedDeps.join(' ')} --upgrade --force-reinstall --quiet --target="${sitePackagesDir}" --index-url https://mirrors.aliyun.com/pypi/simple/`;
-            cp.execSync(pipCmd, {
-                windowsHide: true,
-                timeout: 300000,
-                // ★ 绕过代理，避免 ProxyError
-                env: { ...process.env, PYTHONNOUSERSITE: '1', NO_PROXY: '*', http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '' }
-            });
-
-            // ★ Smartest invocation timing: after deps install, before pywin32 config
-            // Reason: packages are complete but not yet used; deletion is safest
-            global.logMessage(q('qvenv.startSlim'), 'INFO');
-            await this._slimPython(installDir, installPath);
-
-            // pywin32 configuration
-            if (platform === 'win32') {
-                const pywin32System32 = path.join(sitePackagesDir, 'pywin32_system32');
-                if (fs.existsSync(pywin32System32)) {
-                    const dlls = fs.readdirSync(pywin32System32).filter(f => f.endsWith('.dll'));
-                    for (const dll of dlls) {
-                        fs.copyFileSync(path.join(pywin32System32, dll), path.join(installDir, dll));
+                            global.logMessage(`[PythonInstall] ✓ Zip validated: ${(actualSize / 1024 / 1024).toFixed(1)}MB`, "INFO");
+                            downloaded = true;
+                            break;
+                        } catch (e) {
+                            global.logMessage(q('qvenv.sourceFailed', name, e.message), "WARN");
+                        }
                     }
-                    const sitecustomizeCode = `# Auto-generated pywin32 fix
+
+                    if (!downloaded) {
+                        // ★ DOWNLOAD FAILED — increment consecutive counter
+                        consecutiveDownloadFailures++;
+                        lastError = `All download sources failed (${consecutiveDownloadFailures}/${MAX_DOWNLOAD_FAILURES})`;
+                        global.logMessage(`[PythonInstall] ⚠ ${lastError}`, "WARN");
+                        // Brief delay before retry to avoid hammering servers
+                        await new Promise(r => setTimeout(r, 3000 * consecutiveDownloadFailures));
+                        continue;
+                    }
+
+                    // ★ DOWNLOAD SUCCEEDED — reset consecutive failure counter!
+                    consecutiveDownloadFailures = 0;
+
+                    // ★ Step 2: Extract
+                    if (platform === 'win32') {
+                        await global.extractZip(zipPath, installDir);
+                        const pthFile = path.join(installDir, 'python38._pth');
+                        if (fs.existsSync(pthFile)) {
+                            let content = fs.readFileSync(pthFile, 'utf8');
+                            content = content.replace('#import site', 'import site');
+                            if (!content.includes('site-packages')) content += '\n./site-packages\n';
+                            if (!content.includes('./Lib')) content = './Lib\n' + content;
+                            fs.writeFileSync(pthFile, content);
+                        }
+                    } else {
+                        cp.execSync(`tar -xzf "${zipPath}" -C "${installDir}" --strip-components=1`, { windowsHide: true });
+                    }
+                    try { fs.unlinkSync(zipPath); } catch { }
+
+                    // ★ Step 3: Validate extraction
+                    const extractionCheck = this._validateExtraction(installDir, platform);
+                    if (!extractionCheck.ok) {
+                        lastError = `Extraction incomplete, missing: ${extractionCheck.missing.join(', ')}`;
+                        global.logMessage(`[PythonInstall] ⚠ ${lastError} — will re-download`, "WARN");
+                        continue; // download was OK but extract failed → retry (download counter still 0)
+                    }
+
+                    // ★ Step 4: Verify interpreter
+                    if (!await this.isAvailable(installPath)) {
+                        lastError = 'Interpreter failed to execute';
+                        global.logMessage(`[PythonInstall] ⚠ ${lastError} — will re-download`, "WARN");
+                        continue;
+                    }
+
+                    global.logMessage(`[PythonInstall] ✓ Extraction + interpreter OK`, "INFO");
+                    this.pythonPath = installPath;
+                    const sitePackagesDir = path.join(installDir, 'site-packages');
+                    if (!fs.existsSync(sitePackagesDir)) fs.mkdirSync(sitePackagesDir, { recursive: true });
+
+                    // ★ Step 5: Install pip (Windows embed)
+                    if (platform === 'win32') {
+                        global.logMessage(q('qvenv.installPip'), 'INFO');
+                        const getPipPath = path.join(installDir, 'get-pip.py');
+                        await new Promise((resolve, reject) => {
+                            const downloadGetPip = (url, redirectCount = 0) => {
+                                if (redirectCount > 5) return reject(new Error(q('qvenv.tooManyRedirects')));
+                                const urlObj = new URL(url);
+                                https.get({
+                                    hostname: urlObj.hostname,
+                                    path: urlObj.pathname,
+                                    headers: { 'User-Agent': 'Mozilla/5.0' }
+                                }, (res) => {
+                                    if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+                                        res.resume();
+                                        downloadGetPip(new URL(res.headers.location, url).href, redirectCount + 1);
+                                        return;
+                                    }
+                                    if (res.statusCode !== 200) return reject(new Error(`Status ${res.statusCode}`));
+                                    const file = fs.createWriteStream(getPipPath);
+                                    res.pipe(file);
+                                    file.on('finish', () => { file.close(); resolve(); });
+                                    file.on('error', reject);
+                                }).on('error', reject);
+                            };
+                            downloadGetPip('https://bootstrap.pypa.io/pip/3.8/get-pip.py');
+                        });
+
+                        cp.execSync(`"${installPath}" "${getPipPath}" --index-url https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com`, {
+                            windowsHide: true,
+                            timeout: 121000,
+                            stdio: ['pipe', 'pipe', 'pipe'],
+                            env: { ...process.env, PYTHONNOUSERSITE: '1', NO_PROXY: '*', http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '' }
+                        });
+                        try { fs.unlinkSync(getPipPath); } catch { }
+                    }
+
+                    // ★ Step 6: Install dependencies
+                    const lockedDeps = this._getLockedDeps();
+                    global.logMessage(q('qvenv.installDeps', lockedDeps.join(', ')), 'INFO');
+                    const pipCmd = `"${installPath}" -m pip install ${lockedDeps.join(' ')} --upgrade --force-reinstall --quiet --target="${sitePackagesDir}" --index-url https://mirrors.aliyun.com/pypi/simple/`;
+                    cp.execSync(pipCmd, {
+                        windowsHide: true,
+                        timeout: 300000,
+                        env: { ...process.env, PYTHONNOUSERSITE: '1', NO_PROXY: '*', http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '' }
+                    });
+
+                    // ★ Step 7: Slim + pywin32 config + VC++ DLLs
+                    global.logMessage(q('qvenv.startSlim'), 'INFO');
+                    await this._slimPython(installDir, installPath);
+
+                    if (platform === 'win32') {
+                        const pywin32System32 = path.join(sitePackagesDir, 'pywin32_system32');
+                        if (fs.existsSync(pywin32System32)) {
+                            const dlls = fs.readdirSync(pywin32System32).filter(f => f.endsWith('.dll'));
+                            for (const dll of dlls) {
+                                fs.copyFileSync(path.join(pywin32System32, dll), path.join(installDir, dll));
+                            }
+                            const sitecustomizeCode = `# Auto-generated pywin32 fix
 import sys, os
 site_packages = os.path.dirname(__file__)
 for p in [os.path.join(site_packages, 'win32'), os.path.join(site_packages, 'win32', 'lib'), os.path.join(site_packages, 'Pythonwin')]:
     if os.path.isdir(p) and p not in sys.path: sys.path.insert(0, p)
 `;
-                    fs.writeFileSync(path.join(sitePackagesDir, 'sitecustomize.py'), sitecustomizeCode, 'utf8');
-                    global.logMessage(q('qvenv.pywin32Done'), 'INFO');
-                }
+                            fs.writeFileSync(path.join(sitePackagesDir, 'sitecustomize.py'), sitecustomizeCode, 'utf8');
+                            global.logMessage(q('qvenv.pywin32Done'), 'INFO');
+                        }
 
-                // ★ Copy VC++ runtime DLLs (Pillow dependency)
-                if (context.extensionPath) {
-                    const copyResult = this._copyVCRuntimeDlls(context, installDir);
-                    if (copyResult.copied.length > 0) {
-                        global.logMessage(q('qvenv.copyVcDll', copyResult.copied.join(', ')), 'INFO');
+                        if (context.extensionPath) {
+                            const copyResult = this._copyVCRuntimeDlls(context, installDir);
+                            if (copyResult.copied.length > 0) {
+                                global.logMessage(q('qvenv.copyVcDll', copyResult.copied.join(', ')), 'INFO');
+                            }
+                        }
                     }
+
+                    // ★ Step 8: Final deps check — the ultimate gate
+                    const finalCheck = await this.checkDeps(installPath);
+                    if (!finalCheck.hasAll) {
+                        lastError = `Deps check failed: missing ${finalCheck.missing.join(', ')}`;
+                        global.logMessage(`[PythonInstall] ⚠ ${lastError} — will nuke and retry`, "WARN");
+                        continue; // download was OK → doesn't count as download failure → retry
+                    }
+
+                    // ★★★ SUCCESS — only now count as a valid attempt ★★★
+                    const currentState = this._readState(context);
+                    const newAttemptCount = (currentState.attemptCount || 0) + 1;
+                    const maxAttempts = PythonEngineDownloader.MAX_ATTEMPTS;
+
+                    if (newAttemptCount >= maxAttempts) {
+                        this._saveState(context, { installTimestamp: Date.now(), attemptCount: newAttemptCount });
+                    } else {
+                        this._saveState(context, { installTimestamp: currentState.installTimestamp, attemptCount: newAttemptCount });
+                    }
+                    this.clearL1ImperfectCache();
+
+                    global.logMessage(`[PythonInstall] ✓ Install complete after ${totalAttempts} round(s)`, "INFO");
+                    return { success: true, path: installPath, fromScratch: true };
+
+                } catch (e) {
+                    lastError = e.message;
+                    global.logMessage(`[PythonInstall] Round ${totalAttempts} threw: ${e.message}`, "WARN");
+                    this._nukeInstallDir(installDir);
+                    // Download succeeded but post-download step threw → NOT a download failure → retry
                 }
             }
 
-            // ★ 3-chance system: increment attempt count
-            const currentState = this._readState(context);
-            const newAttemptCount = (currentState.attemptCount || 0) + 1;
-            const maxAttempts = PythonEngineDownloader.MAX_ATTEMPTS;
-
-            // ★ Only start 72h cooldown when all chances exhausted
-            if (newAttemptCount >= maxAttempts) {
-                this._saveState(context, { installTimestamp: Date.now(), attemptCount: newAttemptCount });
-                global.logMessage(`[PythonInstall] All ${maxAttempts} chances used, 72h cooldown started`, "INFO");
-            } else {
-                this._saveState(context, { installTimestamp: currentState.installTimestamp, attemptCount: newAttemptCount });
-                global.logMessage(`[PythonInstall] Attempt ${newAttemptCount}/${maxAttempts} succeeded, ${maxAttempts - newAttemptCount} chance(s) remaining`, "INFO");
-            }
-            this.clearL1ImperfectCache();
-
-            return { success: true, path: installPath, fromScratch: true };
-        } catch (e) {
-            // ★ 3-chance system: increment attempt count on failure too
+            // ★ Loop ended: either consecutive download failures or safety cap
             const currentState = this._readState(context);
             const newAttemptCount = (currentState.attemptCount || 0) + 1;
             const maxAttempts = PythonEngineDownloader.MAX_ATTEMPTS;
 
             if (newAttemptCount >= maxAttempts) {
                 this._saveState(context, { installTimestamp: Date.now(), attemptCount: newAttemptCount });
-                global.logMessage(`[PythonInstall] All ${maxAttempts} chances used (last failed), 72h cooldown started`, "WARN");
+                global.logMessage(`[PythonInstall] All ${maxAttempts} chances used, 72h cooldown`, "WARN");
             } else {
                 this._saveState(context, { installTimestamp: currentState.installTimestamp, attemptCount: newAttemptCount });
-                global.logMessage(`[PythonInstall] Attempt ${newAttemptCount}/${maxAttempts} failed, ${maxAttempts - newAttemptCount} chance(s) remaining`, "WARN");
+                global.logMessage(`[PythonInstall] ${newAttemptCount}/${maxAttempts} used, ${maxAttempts - newAttemptCount} left`, "WARN");
             }
-            global.logMessage(q('qvenv.installFailed', e.message), 'ERROR');
-            return { success: false, error: e.message };
+
+            const reason = consecutiveDownloadFailures >= MAX_DOWNLOAD_FAILURES
+                ? `${MAX_DOWNLOAD_FAILURES} consecutive download failures`
+                : `safety cap (${MAX_TOTAL_ATTEMPTS} rounds)`;
+            global.logMessage(`[PythonInstall] Giving up: ${reason}. Last error: ${lastError}`, 'ERROR');
+            return { success: false, error: lastError };
         } finally {
-            // ★ Always release the marker
             marker.release();
         }
     }
