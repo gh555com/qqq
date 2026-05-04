@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ---
 
 
+
 ## [16.4.0] - 2026-05-04
 
 ### Added
@@ -23,6 +24,13 @@ All notable changes to this project will be documented in this file.
 - **Linux: Python engine installs in a loop**: The dependency installer would nuke and retry endlessly (7+ rounds) because packages were installed to the wrong directory. Fixed the install path to match Linux Python's expected location — now succeeds in one round.
 - **Linux: terminal won't open from Roam**: Pressing `a` to open a terminal would show a notification but nothing happened. The command required sudo which silently failed. Replaced with native terminal arguments — supports gnome-terminal, konsole, xfce4-terminal, mate-terminal, lxterminal, tilix, alacritty, kitty, and xterm.
 - **Audio broker mutex error**: The broker's singleton lock on Linux failed with "_get_cache_dir is not defined". Fixed the missing function reference so only one broker instance runs at a time.
+- **YouTube video downloads fail midway**: Downloads that contain VP9+Opus streams would fail during the merge step on Linux because FFmpeg couldn't mux Opus audio into an MP4 container. Now prefers h264+aac streams, and automatically retries with MKV container if the merge still fails.
+- **Large downloads vanish after completing**: A race condition in the cleanup logic could delete already-verified files during rollback — notably affecting long multi-segment downloads (e.g. 1 GB+). Landed files are now protected from post-transaction cleanup.
+- **GIF filmstrip shows static image on Linux**: Animated GIFs were incorrectly classified as static because Linux FFmpeg reports their duration as zero. Now detects animation by reading GIF binary markers (NETSCAPE extension block) instead of relying on FFmpeg duration.
+- **PSD preview fails for large files**: PSD files with high resolution (e.g. 5300×5300) would fail to generate a preview on both Windows and Linux. When FFmpeg cannot convert a PSD, the preview engine now falls back to Python Pillow — which handles large and complex PSD files reliably.
+- **Linux: music, sound effects, and radio completely broken**: The audio engine crashed on startup with `NameError: name 'sys' is not defined` — a misplaced import caused by a previous platform compatibility fix. All audio features are now restored.
+- **Linux: CodeLens "open folder" doesn't select the file**: Clicking the folder button would open the directory but not highlight the target file, and minimizing the window made it unreachable. Now uses D-Bus FileManager1 interface to properly select the file and bring the window to front — same behavior as Windows Explorer.
+- **Linux: CodeLens "open file" button does nothing**: Clicking to open images, videos, or other files had no effect (only folders worked). Switched from shell-escaped `exec` to direct `spawn` with `gio open` fallback, resolving path escaping issues.
 
 ---
 
