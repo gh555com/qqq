@@ -31,6 +31,9 @@ All notable changes to this project will be documented in this file.
 - **Linux: music, sound effects, and radio completely broken**: The audio engine crashed on startup with `NameError: name 'sys' is not defined` — a misplaced import caused by a previous platform compatibility fix. All audio features are now restored.
 - **Linux: CodeLens "open folder" doesn't select the file**: Clicking the folder button would open the directory but not highlight the target file, and minimizing the window made it unreachable. Now uses D-Bus FileManager1 interface to properly select the file and bring the window to front — same behavior as Windows Explorer.
 - **Linux: CodeLens "open file" button does nothing**: Clicking to open images, videos, or other files had no effect (only folders worked). Switched from shell-escaped `exec` to direct `spawn` with `gio open` fallback, resolving path escaping issues.
+- **Linux: Python Broker fails to start**: The Broker crashed immediately on Linux because it unconditionally imported a Windows-only module (`ctypes.wintypes`). Audio, sound effects, and radio were completely unavailable until the extension was restarted multiple times. Now properly guarded — Broker starts reliably on first launch.
+- **Linux: HTML rich-text paste only outputs plain text**: Copying content from a browser and pasting would lose all formatting, images, and tables — only plain text came through. The HTML retrieval engine was accidentally restricted to Windows only. Now works cross-platform via Rust daemon (primary) with xclip Shell fallback.
+- **Linux: no warning when xclip is missing during paste**: If the user dismissed the initial xclip install prompt, all subsequent file/image/HTML paste operations would silently fail with no explanation. Now re-prompts on every non-text paste attempt until xclip is installed — plain text paste is unaffected.
 
 ---
 
