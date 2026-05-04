@@ -2228,7 +2228,7 @@ class ClipboardHistorySidebarProvider {
         .search-container { margin: 3px 0 0 0; flex-shrink: 0; position: relative; }
         .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 7.5px 10px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; position: relative; top: 4px; }
         .search-input::selection { background: #FFD302; color: #000; }
-        .search-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.15)); }
+        .search-input::placeholder { color: rgba(0,0,0,0.18); }
         .search-input:focus { border-color: var(--primary-color); box-shadow: 0 0 0 1px var(--primary-color); }
 
         .item-info { display: none; }
