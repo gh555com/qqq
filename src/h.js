@@ -889,47 +889,47 @@ async function _getSmartHtmlFromClipboard(progressCallback, token) {
     let rawText = null;
     let baseUrl = "";
 
-    if (process.platform === "win32") {
-        // ★ 优先使用 Rust daemon（更快，内存更小）
-        const rustBridge = getGlobal().rustBridge;
-        if (rustBridge && rustBridge.isAvailable()) {
+    // ★ 优先使用 Rust daemon（更快，内存更小）— 跨平台
+    const rustBridge = getGlobal().rustBridge;
+    if (rustBridge && rustBridge.isAvailable()) {
+        try {
+            const tempFileR = path.join(os.tmpdir(), `vscode_img_paste_r_${Date.now()}.bin`);
+            const r = await rustBridge.call("dumpHtmlToFile", { path: tempFileR }, 2000);
+            if (r && r.success && fs.existsSync(tempFileR)) {
+                const buf = fs.readFileSync(tempFileR);
+                try { fs.unlinkSync(tempFileR); } catch { }
+                if (buf && buf.length > 0) {
+                    rawBuf = buf;
+                    log(`[RustDaemon] Successfully dumped ${buf.length} bytes`, "INFO");
+                }
+            }
+        } catch (e) { log(`[RustDaemon] Dump failed: ${e.message}`, "DEBUG"); }
+    }
+
+    // ★ Fallback: Shell daemon（跨平台，Linux 上通过 xclip 获取 text/html）
+    if (!rawBuf) {
+        const shellBridge = getGlobal().shellBridge;
+        if (shellBridge && shellBridge.isAvailable()) {
             try {
-                const tempFileR = path.join(os.tmpdir(), `vscode_img_paste_r_${Date.now()}.bin`);
-                const r = await rustBridge.call("dumpHtmlToFile", { path: tempFileR }, 2000);
-                if (r && r.success && fs.existsSync(tempFileR)) {
-                    const buf = fs.readFileSync(tempFileR);
-                    try { fs.unlinkSync(tempFileR); } catch { }
+                const tempFileD = path.join(os.tmpdir(), `vscode_img_paste_d_${Date.now()}.bin`);
+                const r = await shellBridge.call("dumpHtmlToFile", { path: tempFileD }, 2000);
+                if (r && r.success && fs.existsSync(tempFileD)) {
+                    const buf = fs.readFileSync(tempFileD);
+                    try { fs.unlinkSync(tempFileD); } catch { }
                     if (buf && buf.length > 0) {
                         rawBuf = buf;
-                        log(`[RustDaemon] Successfully dumped ${buf.length} bytes`, "INFO");
+                        log(`[ShellDaemon] Successfully dumped ${buf.length} bytes`, "INFO");
                     }
                 }
-            } catch (e) { log(`[RustDaemon] Dump failed: ${e.message}`, "DEBUG"); }
+            } catch (e) { log(`[ShellDaemon] Dump failed: ${e.message}`, "WARN"); }
         }
+    }
 
-        // ★ Fallback: Shell daemon
-        if (!rawBuf) {
-            const shellBridge = getGlobal().shellBridge;
-            if (shellBridge && shellBridge.isAvailable()) {
-                try {
-                    const tempFileD = path.join(os.tmpdir(), `vscode_img_paste_d_${Date.now()}.bin`);
-                    const r = await shellBridge.call("dumpHtmlToFile", { path: tempFileD }, 2000);
-                    if (r && r.success && fs.existsSync(tempFileD)) {
-                        const buf = fs.readFileSync(tempFileD);
-                        try { fs.unlinkSync(tempFileD); } catch { }
-                        if (buf && buf.length > 0) {
-                            rawBuf = buf;
-                            log(`[ShellDaemon] Successfully dumped ${buf.length} bytes`, "INFO");
-                        }
-                    }
-                } catch (e) { log(`[ShellDaemon] Dump failed: ${e.message}`, "WARN"); }
-            }
-        }
-
-        if (!rawBuf) {
-            try {
-                const tempFile = path.join(os.tmpdir(), `vscode_img_paste_${Date.now()}.bin`);
-                const psScript = `
+    // ★ Windows-only: PowerShell 兜底
+    if (!rawBuf && process.platform === "win32") {
+        try {
+            const tempFile = path.join(os.tmpdir(), `vscode_img_paste_${Date.now()}.bin`);
+            const psScript = `
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 try {
     $code = @'
@@ -942,17 +942,16 @@ ${CLIPBOARD_HELPER_CS}
     Write-Output ("Error: " + $_.Exception.Message)
 }
 `;
-                await spawnOutput("powershell", ["-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript]);
-                if (fs.existsSync(tempFile)) {
-                    const buf = fs.readFileSync(tempFile);
-                    try { fs.unlinkSync(tempFile); } catch { }
-                    if (buf && buf.length > 0) {
-                        rawBuf = buf;
-                        log(`[PowerShellDump] Successfully dumped ${buf.length} bytes`, "INFO");
-                    }
+            await spawnOutput("powershell", ["-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript]);
+            if (fs.existsSync(tempFile)) {
+                const buf = fs.readFileSync(tempFile);
+                try { fs.unlinkSync(tempFile); } catch { }
+                if (buf && buf.length > 0) {
+                    rawBuf = buf;
+                    log(`[PowerShellDump] Successfully dumped ${buf.length} bytes`, "INFO");
                 }
-            } catch (e) { log(`[Smart] powershell dump failed: ${e.message}`, "WARN"); }
-        }
+            }
+        } catch (e) { log(`[Smart] powershell dump failed: ${e.message}`, "WARN"); }
     }
 
     if (!rawBuf) {
