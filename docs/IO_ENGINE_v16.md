@@ -14,9 +14,11 @@
 
 | Engine | Responsibility | Lifecycle | Memory |
 |--------|----------------|-----------|--------|
-| **Rust daemon** | IO operations (clipboard, files, paste) | per-window | ~7 MB |
+| **Rust daemon** | IO operations (clipboard†, files, paste) | per-window | ~7 MB |
 | **Python Broker** | Audio playback, clipboard monitoring | System-wide singleton | ~50 MB |
-| **Shell fallback** | Fallback (only when Rust fails) | per-window | ~70 MB |
+| **Shell daemon** | Clipboard (Linux/macOS); Fallback (Windows) | per-window | ~70 MB |
+
+> † Rust handles clipboard natively on **Windows only**. On Linux/macOS, clipboard is handled by Shell (xclip/pngpaste).
 
 **Extreme scenario with 15 windows**: v16 uses only **~155 MB**, compared to ~855 MB in the old architecture, saving **82%**.
 
@@ -113,11 +115,13 @@ wmic process where "commandline like '%kp.py%'" get processid,commandline
 ps aux | grep "kp.py.*--broker"
 ```
 
-### 3. Shell Daemon (Fallback Engine)
+### 3. Shell Daemon (Clipboard Engine on Unix / Fallback on Windows)
 
-Only automatically enabled when Rust daemon fails to start (e.g., binary corruption, blocked by antivirus, etc.).
+**Platform behavior:**
+- **Windows**: Only starts when Rust fails (fallback). Rust handles clipboard natively via Win32 API.
+- **Linux/macOS**: **Always starts alongside Rust** (complementary). Rust handles media/audio; Shell handles clipboard via xclip/pngpaste/osascript.
 
-> ⚠️ Since v16, Rust daemon is compiled with Win7-specific targets. Under normal circumstances, **all Windows versions (Win7+) use Rust**; no Shell fallback is needed.
+> ⚠️ Since v16, Rust daemon is compiled with Win7-specific targets. On Windows, **all versions (Win7+) use Rust** for clipboard; no Shell needed.
 
 | Platform | Process Name | Startup Command |
 |----------|--------------|-----------------|
@@ -128,7 +132,7 @@ Only automatically enabled when Rust daemon fails to start (e.g., binary corrupt
 |-----------|-------|
 | **Lifecycle** | per-window |
 | **Memory Footprint** | ~70 MB (PowerShell) / ~20 MB (Bash) |
-| **Number of Processes** | 0 (normal) / 1 per window (fallback) |
+| **Number of Processes** | Windows: 0 (normal) / 1 (fallback); Linux/macOS: **1 per window** (always) |
 
 ```bash
 # Identification Method
@@ -326,9 +330,11 @@ pkill -f "kp.py.*--broker"
 
 | 引擎 | 职责 | 生命周期 | 内存 |
 |------|------|----------|------|
-| **Rust daemon** | IO 操作（剪贴板、文件、粘贴） | per-window | ~7 MB |
+| **Rust daemon** | IO 操作（剪贴板†、文件、粘贴） | per-window | ~7 MB |
 | **Python Broker** | 音频播放、剪贴板监听 | 全操作系统唯一单例 | ~50 MB |
-| **Shell fallback** | 兜底（仅 Rust 异常时） | per-window | ~70 MB |
+| **Shell daemon** | 剪贴板（Linux/macOS）；兜底（Windows） | per-window | ~70 MB |
+
+> † Rust 仅在 **Windows** 上原生处理剪贴板。Linux/macOS 的剪贴板由 Shell（xclip/pngpaste）负责。
 
 **15 窗口极端场景**：v16 仅占 **~155 MB**，对比老架构 ~855 MB，节省 **82%**。
 
@@ -425,11 +431,13 @@ wmic process where "commandline like '%kp.py%'" get processid,commandline
 ps aux | grep "kp.py.*--broker"
 ```
 
-### 3. Shell Daemon（兜底引擎）
+### 3. Shell Daemon（Unix 剪贴板引擎 / Windows 兜底引擎）
 
-仅在 Rust daemon 启动异常时自动启用（如二进制损坏、被杀毒软件拦截等极端情况）。
+**平台策略：**
+- **Windows**：仅在 Rust 失败时启动（兜底）。Rust 通过 Win32 API 原生处理剪贴板。
+- **Linux/macOS**：**始终与 Rust 同时启动**（互补关系）。Rust 负责媒体/音频，Shell 通过 xclip/pngpaste/osascript 负责剪贴板。
 
-> ⚠️ 自 v16 起，Rust daemon 已使用 Win7 专用目标编译，正常情况下 **所有 Windows 版本（Win7+）均使用 Rust**，无需 Shell fallback。
+> ⚠️ 自 v16 起，Rust daemon 已使用 Win7 专用目标编译。Windows 上 **所有版本（Win7+）均由 Rust 处理剪贴板**，无需 Shell。
 
 | 平台 | 进程名 | 启动命令 |
 |------|--------|----------|
@@ -440,7 +448,7 @@ ps aux | grep "kp.py.*--broker"
 |------|-----|
 | **生命周期** | per-window |
 | **内存占用** | ~70 MB (PowerShell) / ~20 MB (Bash) |
-| **进程数量** | 0 (正常) / 每窗口 1 个 (fallback) |
+| **进程数量** | Windows: 0（正常）/ 1（兜底）；Linux/macOS: **每窗口 1 个**（始终启动） |
 
 ```bash
 # 识别方法
