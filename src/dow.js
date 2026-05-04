@@ -2480,8 +2480,11 @@ class YtDlpDownloader {
                         }
 
                         const urlObj = new URL(targetUrl);
+                        // ★ 根据协议选择 http/https 模块 (CDN 可能重定向到 HTTP)
+                        const transport = urlObj.protocol === 'http:' ? http : https;
                         const options = {
                             hostname: urlObj.hostname,
+                            port: urlObj.port || (urlObj.protocol === 'http:' ? 80 : 443),
                             path: urlObj.pathname + urlObj.search,
                             headers: {
                                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -2489,7 +2492,7 @@ class YtDlpDownloader {
                             timeout: timeoutMs
                         };
 
-                        const req = https.get(options, (res) => {
+                        const req = transport.get(options, (res) => {
                             if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
                                 const location = res.headers.location;
                                 if (location) {
@@ -2521,7 +2524,7 @@ class YtDlpDownloader {
                             }
                         });
 
-                        req.on('error', (err) => reject(err));
+                        req.on('error', (err) => reject(new Error(`Network: ${err.code || err.message || 'unknown'}`)));
                         req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
                     };
                     downloadFile(url);

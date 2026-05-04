@@ -281,7 +281,10 @@ class PythonEngineDownloader {
      * ★ Missing ANY one = delete python_engine and reinstall from scratch
      */
     _getDepsForCheck() {
-        const baseDeps = ['miniaudio', 'Pillow', 'pynput', 'psutil'];
+        // ★ Linux 不装 pynput (依赖 evdev 需要 clang 编译)，检查时也不能要求
+        const baseDeps = process.platform === 'linux'
+            ? ['miniaudio', 'Pillow', 'psutil']
+            : ['miniaudio', 'Pillow', 'pynput', 'psutil'];
         return process.platform === 'win32'
             ? [...baseDeps, 'pywin32']
             : baseDeps;
@@ -292,7 +295,9 @@ class PythonEngineDownloader {
      * Missing any = imperfect = delete and reinstall
      */
     _getRequiredDeps() {
-        const baseDeps = ['miniaudio', 'Pillow', 'pynput', 'psutil'];
+        const baseDeps = process.platform === 'linux'
+            ? ['miniaudio', 'Pillow', 'psutil']
+            : ['miniaudio', 'Pillow', 'pynput', 'psutil'];
         return process.platform === 'win32'
             ? [...baseDeps, 'pywin32']
             : baseDeps;
@@ -1023,13 +1028,17 @@ sys.exit(0)
             global.logMessage(q('qvenv.platformArch', platform, arch, officialUrl), "INFO");
 
             // ★ Download function — returns downloaded file size for validation
+            const http = require('http');
             const downloadFile = (url, targetPath, timeoutMs = 30000) => {
                 return new Promise((resolve, reject) => {
                     const doReq = (targetUrl, redirects = 0) => {
                         if (redirects > 5) return reject(new Error("Too many redirects"));
                         const urlObj = new URL(targetUrl);
-                        const req = https.get({
+                        // ★ 根据协议选择 http/https 模块 (CDN 可能重定向到 HTTP)
+                        const transport = urlObj.protocol === 'http:' ? http : https;
+                        const req = transport.get({
                             hostname: urlObj.hostname,
+                            port: urlObj.port || (urlObj.protocol === 'http:' ? 80 : 443),
                             path: urlObj.pathname + urlObj.search,
                             timeout: timeoutMs,
                             headers: { 'User-Agent': 'Mozilla/5.0' }
@@ -1048,7 +1057,7 @@ sys.exit(0)
                             file.on('finish', () => { file.close(); resolve({ expectedSize }); });
                             file.on('error', (e) => { fs.unlink(targetPath, () => { }); reject(e); });
                         });
-                        req.on('error', reject);
+                        req.on('error', (e) => reject(new Error(`Network: ${e.code || e.message || 'unknown'}`)));
                         req.on('timeout', () => { req.destroy(); reject(new Error("Timeout")); });
                     };
                     doReq(url);

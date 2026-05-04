@@ -1520,9 +1520,18 @@ async function startDaemons() {
 		// Wait for Rust first (needed to decide if Shell fallback is required)
 		const rustOk = await rustPromise;
 
-		// ★ Step 2: Shell (PowerShell) is fallback only when Rust fails
-		if (!rustOk) {
-			logMessage("[Daemon] Rust failed, starting Shell as fallback for wq/clipboard", "INFO");
+		// ★ Step 2: Shell startup strategy
+		// Windows: Shell (PowerShell) is fallback only when Rust fails (Rust handles clipboard natively)
+		// Linux/macOS: Shell MUST always start alongside Rust (complementary roles)
+		//   - Rust: audio/media operations (q_engine binary)
+		//   - Shell: clipboard operations (xclip/pngpaste/osascript)
+		const isUnix = process.platform !== 'win32';
+		if (!rustOk || isUnix) {
+			if (!rustOk) {
+				logMessage("[Daemon] Rust failed, starting Shell as fallback for wq/clipboard", "INFO");
+			} else {
+				logMessage("[Daemon] Unix: starting Shell alongside Rust (clipboard via xclip)", "INFO");
+			}
 			await ensureStarted(shellBridge);
 		}
 
@@ -1774,7 +1783,7 @@ const outputChannel = vscode.window.createOutputChannel("qqq");
 // ★ Log level filter: DEBUG < INFO < WARN < ERROR
 // Set to "WARN" to only show warnings and errors in Output panel
 // let LOG_LEVEL = "DEBUG";
-let LOG_LEVEL = "WARN";
+let LOG_LEVEL = "INFO";
 const LOG_LEVEL_PRIORITY = { "DEBUG": 0, "INFO": 1, "WARN": 2, "ERROR": 3 };
 
 function setLogLevel(level) {
