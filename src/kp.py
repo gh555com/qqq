@@ -2760,7 +2760,7 @@ def _acquire_broker_mutex() -> bool:
         # Unix: flock
         try:
             import fcntl
-            cache_dir = _get_cache_dir()
+            cache_dir = str(_get_endpoint_dir_simple())
             os.makedirs(cache_dir, exist_ok=True)
             lock_path = os.path.join(cache_dir, "broker.lock")
             _BROKER_LOCK_FD = open(lock_path, 'w')

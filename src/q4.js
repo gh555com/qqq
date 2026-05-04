@@ -1369,9 +1369,18 @@ class ClipboardHistorySidebarProvider {
 
         // ★ Runtime theme change: sync dark/light to webview
         this._themeDisposable = vscode.window.onDidChangeActiveColorTheme(() => {
+            // ★ Only relay VS Code theme changes when config is "auto"
+            const themeCfg = this._global.ConfigManager.get('theme') || 'auto';
+            if (themeCfg !== 'auto') return;
             if (this._view) {
-                const isDark = (() => { try { const k = vscode.window.activeColorTheme?.kind; return k === 2 || k === 3; } catch { return false; } })();
-                this._postMessage({ command: 'setTheme', theme: isDark ? 'dark' : 'light' });
+                this._postMessage({ command: 'setTheme', theme: this._global.isDarkTheme() ? 'dark' : 'light' });
+            }
+        });
+
+        // ★ Config change: live-switch theme when user changes qqq.theme setting
+        this._global.ConfigManager.onConfigUpdated((changedKeys) => {
+            if (changedKeys.includes('theme') && this._view) {
+                this._postMessage({ command: 'setTheme', theme: this._global.isDarkTheme() ? 'dark' : 'light' });
             }
         });
 
@@ -2041,7 +2050,7 @@ class ClipboardHistorySidebarProvider {
             `font-src ${this._view.webview.cspSource}`,
         ].join('; ');
 
-        const _isDark = (() => { try { const k = vscode.window.activeColorTheme?.kind; return k === 2 || k === 3; } catch { return false; } })();
+        const _isDark = this._global.isDarkTheme();
         const _themeAttr = _isDark ? ' data-theme="dark"' : '';
 
         return `<!DOCTYPE html>

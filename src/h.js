@@ -2248,7 +2248,11 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
 async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0, transId = null, onCancelCallback = null, shouldCancel = null, autoRename = false) {
     try {
         if (token?.isCancellationRequested || (shouldCancel && shouldCancel())) return null;
-        if (process.platform === "win32") {
+
+        // ★ File copy logic: works on ALL platforms (Windows, Linux, macOS)
+        // Linux/macOS: preFetchedFiles comes from Shell bridge (xclip text/uri-list → file:// URIs)
+        // Windows: preFetchedFiles comes from Shell bridge or PowerShell (CF_HDROP)
+        {
             let files = preFetchedFiles;
 
             // ★ Prefer using pre-fetched file list (single source of truth)

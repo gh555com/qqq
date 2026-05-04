@@ -755,19 +755,20 @@ function openAdminTerminal(targetPath, termType) {
     } else {
       // Linux: try common terminal emulators
       const escapedPath = absPath.replace(/'/g, "'\"'\"'");
-      const sudoCmd = `cd '${escapedPath}' && sudo -s`;
+      // ★ Linux: open normal terminal (not sudo) — user can sudo manually if needed
+      const cdCmd = `cd '${escapedPath}'`;
 
       // Try common Linux terminals
       const terminals = [
-        { cmd: 'gnome-terminal', args: ['--', 'bash', '-c', sudoCmd + '; exec bash'] },
-        { cmd: 'konsole', args: ['-e', 'bash', '-c', sudoCmd + '; exec bash'] },
-        { cmd: 'xfce4-terminal', args: ['-e', `bash -c "${sudoCmd}; exec bash"`] },
-        { cmd: 'mate-terminal', args: ['-e', `bash -c "${sudoCmd}; exec bash"`] },
-        { cmd: 'lxterminal', args: ['-e', `bash -c "${sudoCmd}; exec bash"`] },
-        { cmd: 'tilix', args: ['-e', `bash -c "${sudoCmd}; exec bash"`] },
-        { cmd: 'alacritty', args: ['-e', 'bash', '-c', sudoCmd + '; exec bash'] },
-        { cmd: 'kitty', args: ['bash', '-c', sudoCmd + '; exec bash'] },
-        { cmd: 'xterm', args: ['-e', `bash -c "${sudoCmd}; exec bash"`] },
+        { cmd: 'gnome-terminal', args: ['--', 'bash', '-c', cdCmd + '; exec bash'] },
+        { cmd: 'konsole', args: ['--workdir', absPath] },
+        { cmd: 'xfce4-terminal', args: ['--default-working-directory', absPath] },
+        { cmd: 'mate-terminal', args: ['--working-directory', absPath] },
+        { cmd: 'lxterminal', args: ['--working-directory=' + absPath] },
+        { cmd: 'tilix', args: ['-w', absPath] },
+        { cmd: 'alacritty', args: ['--working-directory', absPath] },
+        { cmd: 'kitty', args: ['--directory', absPath] },
+        { cmd: 'xterm', args: ['-e', `bash -c "${cdCmd}; exec bash"`] },
       ];
 
       // Try to open terminal one by one
@@ -4311,6 +4312,9 @@ function showSaveAsDialog() {
 
   // ★ Runtime theme change: sync dark/light to webview when VS Code theme changes
   const themeDisposable = vscode.window.onDidChangeActiveColorTheme(() => {
+    // ★ Only relay VS Code theme changes when config is "auto"; explicit dark/light ignores VS Code theme
+    const themeCfg = global.ConfigManager.get('theme') || 'auto';
+    if (themeCfg !== 'auto') return;
     if (panel && activePanelAlive) {
       panel.webview.postMessage({ command: 'setTheme', theme: global.isDarkTheme() ? 'dark' : 'light' });
     }
@@ -5371,6 +5375,12 @@ async function activate(context) {
   // ★ Ultimate fix: use ConfigGate callback mechanism to receive config update notifications (resolve race condition)
   // Previously, directly listening to onDidChangeConfiguration caused reading config before sessionOverrides update
   global.ConfigManager.onConfigUpdated((changedKeys, event) => {
+    // ★ Theme change: send setTheme message to webview (no full refresh needed)
+    if (changedKeys.includes('theme')) {
+      if (activePanel && activePanelAlive) {
+        activePanel.webview.postMessage({ command: 'setTheme', theme: global.isDarkTheme() ? 'dark' : 'light' });
+      }
+    }
     // Only care about q2-related config
     const q2Keys = ["szDisplayMode", "sortBy", "autoWatchChanges"];
     if (!changedKeys.some(k => q2Keys.includes(k))) return;
