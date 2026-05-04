@@ -2499,6 +2499,13 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
         } catch (e) { }
     }
 
+    // ★ Linux: if detection returned all-false AND no text either, xclip might be missing → prompt install
+    if (process.platform === 'linux' && !qStatus.hasFile && !qStatus.hasHtml && !qStatus.hasImage && !qStatus.hasText) {
+        if (global.checkAndInstallLinuxDeps) {
+            await global.checkAndInstallLinuxDeps(true);
+        }
+    }
+
     log(q('h.autoDetect.finalStatus', qStatus.hasFile, qStatus.hasHtml, qStatus.hasImage, qStatus.hasText), "INFO");
 
     // Dispatch based on priority: File > HTML > Image > Text

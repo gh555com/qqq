@@ -114,7 +114,15 @@
             "rename": "名前変更",
             "fileNameEmpty": "ファイル名は空にできません",
             "targetFileExists": "ターゲットファイルは既に存在します",
-            "coreFilesIncomplete": "コアファイルが不完全、一部の機能が制限される可能性があります"
+            "coreFilesIncomplete": "コアファイルが不完全、一部の機能が制限される可能性があります",
+            "copyPathSuccess": "コピー成功 — テキストパス",
+            "copyPathFailed": "コピー失敗 — テキストパス: {0}",
+            "copyFileSuccess": "コピー成功 — ファイル",
+            "copyFileFailed": "コピー失敗 — ファイル: {0}",
+            "copyImageSuccess": "コピー成功 — ビットマップバイナリ",
+            "copyImageFailed": "コピー失敗 — ビットマップバイナリ: {0}",
+            "renameSuccess": "名前変更成功: {0}",
+            "renameFailed": "名前変更失敗: {0}"
         }
     },
     "q2": {
@@ -712,6 +720,7 @@
     },
     "rust": {
         "exeNotFound": "Rust Bridge 実行ファイルが見つかりません",
+        "unavailable": "Rust エンジンが利用不可能",
         "tryStart": "Rust Bridge 起動を試行: \"{0}\" --daemon",
         "processError": "Rust Bridge プロセスエラー: {0}",
         "startSuccess": "Rust Bridge 起動成功",

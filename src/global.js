@@ -1262,6 +1262,7 @@ function updateStatusBarNow() {
 // ★ Linux dependency detection and install guidance
 // ============================================================================
 let _linuxDepsChecked = false;
+let _xclipAvailable = null; // null = unknown, true/false = cached result
 
 /**
  * Detect whether xclip is installed on Linux
@@ -1348,24 +1349,26 @@ async function runInTerminal(command, title) {
 /**
  * Detect and guide installation of Linux dependency (xclip)
  * Only check once on first startup to avoid frequent user interruption
+ * @param {boolean} fromPaste - true if triggered by a paste operation (bypasses "don't ask again")
  */
-async function checkAndInstallLinuxDeps() {
+async function checkAndInstallLinuxDeps(fromPaste = false) {
 	// Linux only
 	if (process.platform !== 'linux') return;
 
-	// Avoid repeated checks
-	if (_linuxDepsChecked) return;
-	_linuxDepsChecked = true;
+	// Avoid repeated checks (startup check only; paste-triggered checks always proceed)
+	if (!fromPaste && _linuxDepsChecked) return;
+	if (!fromPaste) _linuxDepsChecked = true;
 
-	// Check if already prompted (user chose "don't ask again")
+	// Check if already prompted (user chose "don't ask again") — paste bypasses this
 	const suppressKey = 'xclipInstallSuppressed';
-	if (extensionContext) {
+	if (!fromPaste && extensionContext) {
 		const suppressed = extensionContext.globalState.get(suppressKey);
 		if (suppressed) return;
 	}
 
 	// Detect whether xclip is installed
 	const hasXclip = await checkXclipInstalled();
+	_xclipAvailable = hasXclip;
 	if (hasXclip) {
 		logMessage(q('linux.xclipInstalled'), 'INFO');
 		return;
@@ -1402,6 +1405,7 @@ async function checkAndInstallLinuxDeps() {
 
 				// Re-check
 				const nowHasXclip = await checkXclipInstalled();
+				_xclipAvailable = nowHasXclip;
 				if (nowHasXclip) {
 					showAutoCloseNotification('success', q('global.xclipInstallSuccess'));
 					logMessage(q('linux.xclipInstallSuccess'), 'INFO');
@@ -4446,6 +4450,13 @@ async function tryOneByOne(callback) {
  * Simple and direct: only use shell daemon
  */
 async function triggerSystemPaste(targetDir) {
+	// ★ Linux: ensure xclip is available before paste, re-prompt if missing
+	if (process.platform === 'linux' && _xclipAvailable === false) {
+		await checkAndInstallLinuxDeps(true);
+		if (!_xclipAvailable) {
+			return { success: false, error: 'xclip not installed' };
+		}
+	}
 	if (!targetDir) {
 		logMessage(q('q2paste.targetEmpty'), "ERROR");
 		return { success: false, error: q('q2paste.targetEmptyError') };
@@ -5131,6 +5142,7 @@ module.exports = {
 	tryEngineCall,
 	cancelScans,
 	triggerSystemPaste,
+	checkAndInstallLinuxDeps,
 	getActiveEngineCode,
 	getActiveEngineName,
 	invalidateEngineCache,  // ★ Refresh engine cache

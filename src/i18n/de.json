@@ -114,7 +114,15 @@
             "rename": "Umbenennen",
             "fileNameEmpty": "Dateiname darf nicht leer sein",
             "targetFileExists": "Zieldatei existiert bereits",
-            "coreFilesIncomplete": "Kerndateien unvollständig, einige Funktionen könnten eingeschränkt sein"
+            "coreFilesIncomplete": "Kerndateien unvollständig, einige Funktionen könnten eingeschränkt sein",
+            "copyPathSuccess": "Erfolgreich kopiert — Textpfad",
+            "copyPathFailed": "Kopieren fehlgeschlagen — Textpfad: {0}",
+            "copyFileSuccess": "Erfolgreich kopiert — Datei",
+            "copyFileFailed": "Kopieren fehlgeschlagen — Datei: {0}",
+            "copyImageSuccess": "Erfolgreich kopiert — Bitmap-Binär",
+            "copyImageFailed": "Kopieren fehlgeschlagen — Bitmap-Binär: {0}",
+            "renameSuccess": "Erfolgreich umbenannt: {0}",
+            "renameFailed": "Umbenennen fehlgeschlagen: {0}"
         }
     },
     "q2": {
@@ -712,6 +720,7 @@
     },
     "rust": {
         "exeNotFound": "Rust Bridge ausführbare Datei nicht gefunden",
+        "unavailable": "Rust-Engine nicht verfügbar",
         "tryStart": "Rust Bridge Startversuch: \"{0}\" --daemon",
         "processError": "Rust Bridge Prozessfehler: {0}",
         "startSuccess": "Rust Bridge erfolgreich gestartet",
