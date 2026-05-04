@@ -2316,6 +2316,7 @@ class YtDlpDownloader {
      * Auto download and install yt-dlp
      */
     async autoInstall(context) {
+        let lockResult = null; // ★ Declare in outer scope so catch block can access it
         try {
             const os = require('os');
             const fs = require('fs');
@@ -2347,36 +2348,44 @@ class YtDlpDownloader {
             let binaryName;
             let officialUrl;
             let mirrorUrl;
+            let cdnUrl;
 
-            // ★ nicolaasjan fork 支持老系统，三级回退：gh-proxy.com → GitHub → ghproxy.net
+            // ★ nicolaasjan fork 支持老系统，三级回退：gh-proxy.com → GitHub → ghproxy.net → CDN
             const LEGACY_BASE = 'https://github.com/nicolaasjan/yt-dlp/releases/latest/download';
             const OFFICIAL_BASE = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download';
+            // ★ 自有 CDN 终极兜底
+            const YTDLP_CDN = {
+                win32:  'https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/PT4V74HAMAOUE.exe',
+                linux:  'https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/S46D37Y3DOK3M.bin',
+                darwin: 'https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/QXFGBBGQQM364.bin',
+            };
 
             if (platform === 'win32') {
                 binaryName = 'yt-dlp.exe';
                 if (useLegacyFork) {
-                    // ★ Win7/8: 下载专门的 yt-dlp_win7.exe
                     officialUrl = `${LEGACY_BASE}/yt-dlp_win7.exe`;
                     mirrorUrl = `https://ghproxy.net/${LEGACY_BASE}/yt-dlp_win7.exe`;
                 } else {
                     officialUrl = `${OFFICIAL_BASE}/yt-dlp.exe`;
                     mirrorUrl = `https://ghproxy.net/${OFFICIAL_BASE}/yt-dlp.exe`;
                 }
+                cdnUrl = YTDLP_CDN.win32;
             } else if (platform === 'darwin') {
                 binaryName = 'yt-dlp';
                 if (useLegacyFork) {
-                    // ★ macOS < 10.15: nicolaasjan fork 的 yt-dlp_macos 支持老系统
                     officialUrl = `${LEGACY_BASE}/yt-dlp_macos`;
                     mirrorUrl = `https://ghproxy.net/${LEGACY_BASE}/yt-dlp_macos`;
                 } else {
                     officialUrl = `${OFFICIAL_BASE}/yt-dlp_macos`;
                     mirrorUrl = `https://ghproxy.net/${OFFICIAL_BASE}/yt-dlp_macos`;
                 }
+                cdnUrl = YTDLP_CDN.darwin;
             } else {
-                // Linux: 先用官方，失败会回退到代理
+                // ★ Linux: 用 yt-dlp_linux (standalone ~35MB)，不是 yt-dlp (zipapp ~3MB)
                 binaryName = 'yt-dlp';
-                officialUrl = `${OFFICIAL_BASE}/yt-dlp`;
-                mirrorUrl = `https://ghproxy.net/${OFFICIAL_BASE}/yt-dlp`;
+                officialUrl = `${OFFICIAL_BASE}/yt-dlp_linux`;
+                mirrorUrl = `https://ghproxy.net/${OFFICIAL_BASE}/yt-dlp_linux`;
+                cdnUrl = YTDLP_CDN.linux;
             }
 
             const installDir = context.globalStorageUri.fsPath;
@@ -2409,11 +2418,12 @@ class YtDlpDownloader {
             }
 
             // ★ CROSS-PROCESS LOCK: Prevent multiple windows from downloading simultaneously
-            const lockResult = await acquireDownloadLock(installPath, {
+            const lockResult_ = await acquireDownloadLock(installPath, {
                 downloadLockWaitMs: 121000,  // Wait up to 121s for other window to finish
                 downloadLockStaleMs: 300000, // Lock expires after 300s (safety)
                 downloadLockPollMs: 500
             });
+            lockResult = lockResult_;
 
             if (!lockResult.ok) {
                 // Another window is downloading, wait and check if it completed
@@ -2518,7 +2528,7 @@ class YtDlpDownloader {
                 });
             };
 
-            // ★ Cascading download strategy: gh-proxy.com → GitHub → ghproxy.net
+            // ★ Cascading download strategy: gh-proxy.com → GitHub → ghproxy.net → CDN
             const downloadUrls = [
                 // ★ gh-proxy.com (fastest in CN)
                 { url: officialUrl.replace('https://github.com/', 'https://gh-proxy.com/https://github.com/'), timeout: 60000, name: 'gh-proxy.com' },
@@ -2526,6 +2536,8 @@ class YtDlpDownloader {
                 { url: officialUrl, timeout: 60000, name: 'GitHub' },
                 // ★ ghproxy.net (backup)
                 { url: mirrorUrl, timeout: 60000, name: 'ghproxy.net' },
+                // ★ CDN (gh555.com ultimate fallback)
+                { url: cdnUrl, timeout: 60000, name: 'CDN' },
             ];
 
             let lastError = null;

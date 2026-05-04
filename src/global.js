@@ -999,12 +999,12 @@ while ($true) {
 			const nodeBin = process.execPath.replace(/"/g, '\\"');
 			const bashScript = platform === "darwin"
 				? `
-			NODE_BIN = "${nodeBin}"
-			json_get() { echo "$1" | "$NODE_BIN" - e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j[process.argv[1]]??"")))}catch(e){}});' "$2" 2 > /dev/null; }
+			NODE_BIN="${nodeBin}"
+			json_get() { echo "$1" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j[process.argv[1]]??"")))}catch(e){}});' "$2" 2>/dev/null; }
 
-			while IFS = read - r line; do
-				action = $(json_get "$line" "action")
-  id = $(json_get "$line" "_id")
+			while IFS= read -r line; do
+				action=$(json_get "$line" "action")
+  id=$(json_get "$line" "_id")
   case "$action" in
 	ping) echo '{"_id":'"$id"',"status":"alive"}';;
     hasImage) if command -v pngpaste > /dev/null 2>&1 && pngpaste - > /dev/null 2>&1; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
@@ -1046,18 +1046,18 @@ esac
 done
 	`.trim()
 				: `
-NODE_BIN = "${nodeBin}"
-json_get() { echo "$1" | "$NODE_BIN" - e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j[process.argv[1]]??"")))}catch(e){}});' "$2" 2 > /dev/null; }
+NODE_BIN="${nodeBin}"
+json_get() { echo "$1" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j[process.argv[1]]??"")))}catch(e){}});' "$2" 2>/dev/null; }
 
-while IFS = read - r line; do
-	action = $(json_get "$line" "action")
-  id = $(json_get "$line" "_id")
+while IFS= read -r line; do
+	action=$(json_get "$line" "action")
+  id=$(json_get "$line" "_id")
   case "$action" in
 	ping) echo '{"_id":'"$id"',"status":"alive"}';;
-    hasImage) if command - v xclip > /dev/null 2 >& 1 && xclip - selection clipboard - t TARGETS - o 2 > /dev/null | grep - q "image/png"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
-    hasHtml) if command - v xclip > /dev/null 2 >& 1 && xclip - selection clipboard - t TARGETS - o 2 > /dev/null | grep - q "text/html"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
+    hasImage) if command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -q "image/png"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
+    hasHtml) if command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -q "text/html"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
     getHtml)
-content = $(xclip - selection clipboard - o - t text / html 2 > /dev/null | python3 - c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+content=$(xclip -selection clipboard -o -t text/html 2>/dev/null | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
       echo '{"_id":'"$id"',"value":'$content'}';;
     saveImage)
       dest=$(json_get "$line" "path")

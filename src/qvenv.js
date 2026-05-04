@@ -910,9 +910,12 @@ sys.exit(0)
                     { windowsHide: true, stdio: 'ignore' });
             }
         }
-        // Also clean stale zip if present
-        const zipPath = path.join(path.dirname(installDir), "python_3.8.10.zip");
-        try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch { }
+        // Also clean stale zip/tar.gz if present
+        const zipGlobs = ['python_3.8.10.zip', 'python_3.10.11.tar.gz'];
+        for (const zf of zipGlobs) {
+            const zp = path.join(path.dirname(installDir), zf);
+            try { if (fs.existsSync(zp)) fs.unlinkSync(zp); } catch { }
+        }
     }
 
     /**
@@ -970,32 +973,47 @@ sys.exit(0)
             const platform = os.platform();
             const arch = os.arch();
             const installDir = path.join(context.globalStorageUri.fsPath, "python_engine");
-            const zipPath = path.join(context.globalStorageUri.fsPath, "python_3.8.10.zip");
             const binName = platform === "win32" ? "python.exe" : "bin/python3";
             const installPath = path.join(installDir, binName);
 
             // Platform detection
-            let officialUrl, mirrorUrl;
+            // ★ Windows: python.org embed (3.8.10 available)
+            // ★ Linux/macOS: python-build-standalone (20230507 release only has 3.10.11+, no 3.8.x)
+            let officialUrl, mirrorUrl, cdnUrl;
             const releaseDate = '20230507';
-            const pyVersion = '3.8.10';
+            const pyVersionWin = '3.8.10';   // ★ Windows embed from python.org
+            const pyVersionUnix = '3.10.11'; // ★ Linux/macOS from python-build-standalone
+            // ★ 自有 CDN 终极兜底 (per-platform pre-built packages)
+            const CDN_URLS = {
+                win_x64:       'https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/GI5BAPXG6E63A.zip',
+                linux_x64:     'https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/PELAJFKB5RCS4.gz',
+                darwin_x64:    'https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/H5AZEMOY65W7U.gz',
+                darwin_arm64:  'https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/2IHWSCEBOP3KG.gz',
+            };
+            const zipPath = path.join(context.globalStorageUri.fsPath, platform === 'win32' ? `python_${pyVersionWin}.zip` : `python_${pyVersionUnix}.tar.gz`);
 
             if (platform === 'win32') {
                 if (arch === 'x64' || arch === 'arm64') {
-                    officialUrl = `https://www.python.org/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
-                    mirrorUrl = `https://registry.npmmirror.com/-/binary/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
+                    officialUrl = `https://www.python.org/ftp/python/${pyVersionWin}/python-${pyVersionWin}-embed-amd64.zip`;
+                    mirrorUrl = `https://registry.npmmirror.com/-/binary/python/${pyVersionWin}/python-${pyVersionWin}-embed-amd64.zip`;
                 } else {
-                    officialUrl = `https://www.python.org/ftp/python/${pyVersion}/python-${pyVersion}-embed-win32.zip`;
-                    mirrorUrl = `https://registry.npmmirror.com/-/binary/python/${pyVersion}/python-${pyVersion}-embed-win32.zip`;
+                    officialUrl = `https://www.python.org/ftp/python/${pyVersionWin}/python-${pyVersionWin}-embed-win32.zip`;
+                    mirrorUrl = `https://registry.npmmirror.com/-/binary/python/${pyVersionWin}/python-${pyVersionWin}-embed-win32.zip`;
                 }
+                cdnUrl = CDN_URLS.win_x64;
             } else if (platform === 'darwin') {
                 const archSuffix = arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin';
-                officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-${archSuffix}-install_only.tar.gz`;
-                mirrorUrl = `https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-${archSuffix}-install_only.tar.gz`;
+                officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersionUnix}+${releaseDate}-${archSuffix}-install_only.tar.gz`;
+                mirrorUrl = `https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersionUnix}+${releaseDate}-${archSuffix}-install_only.tar.gz`;
+                cdnUrl = arch === 'arm64'
+                    ? CDN_URLS.darwin_arm64
+                    : CDN_URLS.darwin_x64;
             } else {
                 const archSuffix = arch === 'arm64' ? 'aarch64' : (arch === 'arm' ? 'armv7' : 'x86_64');
                 const gnuSuffix = arch === 'arm' ? 'gnueabihf' : 'gnu';
-                officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-${archSuffix}-unknown-linux-${gnuSuffix}-install_only.tar.gz`;
+                officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersionUnix}+${releaseDate}-${archSuffix}-unknown-linux-${gnuSuffix}-install_only.tar.gz`;
                 mirrorUrl = officialUrl.replace('https://github.com/', 'https://ghproxy.net/https://github.com/');
+                cdnUrl = CDN_URLS.linux_x64;
             }
 
             global.logMessage(q('qvenv.platformArch', platform, arch, officialUrl), "INFO");
@@ -1033,12 +1051,13 @@ sys.exit(0)
                 });
             };
 
-            // Cascading download URLs
+            // Cascading download URLs: ① official → ② mirror → ③ CDN (gh555.com ultimate fallback)
             const downloadUrls = platform === 'win32'
-                ? [{ url: mirrorUrl, timeout: 30000, name: '淘宝NPM' }, { url: officialUrl, timeout: 30000, name: '官方' }]
-                : [{ url: officialUrl, timeout: 15000, name: '官方' }, { url: mirrorUrl, timeout: 60000, name: 'ghproxy' }];
+                ? [{ url: mirrorUrl, timeout: 30000, name: '淘宝NPM' }, { url: officialUrl, timeout: 30000, name: '官方' }, { url: cdnUrl, timeout: 60000, name: 'CDN', isCdn: true }]
+                : [{ url: officialUrl, timeout: 15000, name: '官方' }, { url: mirrorUrl, timeout: 60000, name: 'ghproxy' }, { url: cdnUrl, timeout: 60000, name: 'CDN', isCdn: true }];
+            let downloadedFromCdn = false; // ★ Track if CDN was used (Windows CDN = complete env)
 
-            // Python 3.8.10 embed amd64 ~7.3MB, win32 ~6.5MB; anything under 5MB is corrupt
+            // Python embed amd64 ~7.3MB, win32 ~6.5MB, standalone tar.gz ~20MB+; anything under 5MB is corrupt
             const MIN_ZIP_SIZE = 5 * 1024 * 1024;
 
             // ============================================================
@@ -1059,7 +1078,7 @@ sys.exit(0)
 
                     // ★ Step 1: Download with cascading fallback + validation
                     let downloaded = false;
-                    for (const { url, timeout, name } of downloadUrls) {
+                    for (const { url, timeout, name, isCdn } of downloadUrls) {
                         try {
                             global.logMessage(q('qvenv.trySource', name), "INFO");
                             const result = await downloadFile(url, zipPath, timeout);
@@ -1080,8 +1099,9 @@ sys.exit(0)
                                 continue;
                             }
 
-                            global.logMessage(`[PythonInstall] ✓ Zip validated: ${(actualSize / 1024 / 1024).toFixed(1)}MB`, "INFO");
+                            global.logMessage(`[PythonInstall] ✓ Zip validated: ${(actualSize / 1024 / 1024).toFixed(1)}MB (source: ${name})`, "INFO");
                             downloaded = true;
+                            if (isCdn) downloadedFromCdn = true;
                             break;
                         } catch (e) {
                             global.logMessage(q('qvenv.sourceFailed', name, e.message), "WARN");
@@ -1136,6 +1156,11 @@ sys.exit(0)
                     this.pythonPath = installPath;
                     const sitePackagesDir = path.join(installDir, 'site-packages');
                     if (!fs.existsSync(sitePackagesDir)) fs.mkdirSync(sitePackagesDir, { recursive: true });
+
+                    // ★ CDN 兜底优化: Windows CDN 包已含完整 site-packages，跳过 pip + deps
+                    if (downloadedFromCdn && platform === 'win32' && fs.existsSync(path.join(sitePackagesDir, '_miniaudio.pyd'))) {
+                        global.logMessage(`[PythonInstall] ★ CDN complete package detected, skipping pip + deps install`, "INFO");
+                    } else {
 
                     // ★ Step 5: Install pip (Windows embed)
                     if (platform === 'win32') {
@@ -1212,6 +1237,8 @@ for p in [os.path.join(site_packages, 'win32'), os.path.join(site_packages, 'win
                             }
                         }
                     }
+
+                    } // ★ end of else (non-CDN-complete path)
 
                     // ★ Step 8: Final deps check — the ultimate gate
                     const finalCheck = await this.checkDeps(installPath);
