@@ -2228,7 +2228,7 @@ class ClipboardHistorySidebarProvider {
         .search-container { margin: 3px 0 0 0; flex-shrink: 0; position: relative; }
         .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 7.5px 10px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; position: relative; top: 4px; }
         .search-input::selection { background: #FFD302; color: #000; }
-        .search-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.5)); }
+        .search-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.15)); }
         .search-input:focus { border-color: var(--primary-color); box-shadow: 0 0 0 1px var(--primary-color); }
 
         .item-info { display: none; }
@@ -2389,7 +2389,7 @@ class ClipboardHistorySidebarProvider {
                 </div>
             </div>
             <div class="search-container">
-                <input type="text" class="search-input" id="searchBox" placeholder="clipboard history" spellcheck="false"><span class="spacer-75"><span class="spacer-75"></span><span id="clipboard-stats"></span>
+                <input type="text" class="search-input" id="searchBox" placeholder="find ..." spellcheck="false"><span class="spacer-75"><span class="spacer-75"></span><span id="clipboard-stats"></span>
                  <!-- ★ NEW: clipboard history dropdown -->
                 <div id="searchHistoryDropdown" class="history-dropdown"></div>
             </div>
@@ -2968,7 +2968,7 @@ class ClipboardHistorySidebarProvider {
 
                 if (m.command === 'updateData') {
                     if (m.fullStats !== undefined && el.searchBox) {
-                        el.searchBox.placeholder = 'clipboard history                                  ' + m.fullStats;
+                        el.searchBox.placeholder = 'find ...                                                                              ' + m.fullStats;
                     }
                     if (m.radioLive !== undefined) {
                         var label = document.getElementById('ms-label');

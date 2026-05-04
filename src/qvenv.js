@@ -262,13 +262,17 @@ class PythonEngineDownloader {
             'Pillow==10.4.0',
             'cffi==1.16.0',
             'pycparser==2.22',
-            'pynput==1.7.7',  // ★ Global hotkey support (Space+Q)
             'psutil==5.9.8'   // ★ Hotkey hwnd validation
         ];
-        // Windows-only dependency: pywin32==311 (no postinstall)
-        return process.platform === 'win32'
-            ? [...baseDeps, 'pywin32==311']
-            : baseDeps;
+        // ★ pynput: Windows/macOS only. Linux 的 pynput 依赖 evdev 需要 clang 编译，
+        //   大多数 Linux 环境没有 clang，会导致整条 pip 命令失败。
+        //   kp.py 已优雅处理 _HAS_PYNPUT=False，热键非关键功能。
+        if (process.platform === 'win32') {
+            return [...baseDeps, 'pynput==1.7.7', 'pywin32==311'];
+        } else if (process.platform === 'darwin') {
+            return [...baseDeps, 'pynput==1.7.7'];
+        }
+        return baseDeps; // Linux: 跳过 pynput
     }
 
     /**

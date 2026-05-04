@@ -310,13 +310,18 @@
 			display: none;
 			flex-shrink: 0;
 			margin-left: auto;
+			position: absolute;
+			right: 0;
+			top: 0;
+			bottom: 0;
+			align-items: center;
 			gap: 0;
 		}
 		.recent-item:hover .pin-move-group {
 			display: flex;
 		}
 		.pin-move-btn {
-			padding: 0 7px;
+			padding: 0 8px;
 			cursor: pointer;
 			color: var(--text-dim);
 			opacity: 0.55;
@@ -328,7 +333,7 @@
 		}
 		.pin-move-btn:hover {
 			opacity: 1;
-			color: var(--text-primary);
+			color: #dc322f;
 		}
 
 		.divider {
@@ -352,7 +357,7 @@
 		}
 
 		.qq-filter-container {
-			padding: 4px 8px 2px 8px;
+			padding: 1px 8px 2px 8px;
 			flex-shrink: 0;
 			position: relative;
 		}

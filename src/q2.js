@@ -3890,7 +3890,7 @@ function generateSidebarHtml(config) {
   const qqiqHtml = showqqiq
     ? `
   <div class="divider"></div>
-    <div class="qq-filter-container"><input type="text" class="qq-filter-input" id="qqFilterInput" placeholder="filter..." spellcheck="false"><div id="qqFilterHistoryDropdown" class="history-dropdown"></div></div>
+    <div class="qq-filter-container"><input type="text" class="qq-filter-input" id="qqFilterInput" placeholder="find ..." spellcheck="false"><div id="qqFilterHistoryDropdown" class="history-dropdown"></div></div>
     <div class="qq-iq-section">
       ${displayedqqiq.map(generateqqiqItemHtml).join("")}
     </div>`

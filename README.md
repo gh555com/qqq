@@ -46,7 +46,7 @@
  Fact: VS Code is incomplete without qqq.
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/loq.gif" width="100%" alt="的梦gaea">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/FPXKHX4NKOZJ6.gif" width="100%" alt="的梦gaea">
   © 2005 <a href="https://www.gh555.com">gh555.com</a> All Rights Reserved.
 </p>
 
@@ -59,19 +59,19 @@
 
 ## ✦q✦ Enhanced Ctrl+V: Without changing any original features, Paste everything  anywhere in any document
 <p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q1_4.gif" width="100%" alt="Paste Screenshot">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/YBZ5FHDRYKQF2.gif" width="100%" alt="Paste Screenshot">
 </p>
 
  Works with any document e.g. ".txt", ".1", any file extension, or no extension.
 
 <p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q23.gif" width="100%" alt="Paste image files directly">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/6QEDZULVO33JW.gif" width="100%" alt="Paste image files directly">
 </p>
 
 Via  qqq you can paste txt, exe, psd, mp3, folder, mp4.... if you want. Why not?
 
 <p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q3_3.gif" width="100%" alt="Paste any file">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/E2ULPGMCYGGFE.gif" width="100%" alt="Paste any file">
 </p>
 
  qqq in, ctrl + v. **If you don't like key combinations, try `F2`.**
