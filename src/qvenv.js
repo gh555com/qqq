@@ -1167,7 +1167,23 @@ sys.exit(0)
 
                     global.logMessage(`[PythonInstall] ✓ Extraction + interpreter OK`, "INFO");
                     this.pythonPath = installPath;
-                    const sitePackagesDir = path.join(installDir, 'site-packages');
+                    // ★ site-packages 路径: Windows embed 用根目录，Linux/macOS standalone 用 lib/pythonX.Y/site-packages
+                    let sitePackagesDir;
+                    if (platform === 'win32') {
+                        sitePackagesDir = path.join(installDir, 'site-packages');
+                    } else {
+                        // ★ Linux/macOS indygreg standalone: Python 的 sys.path 指向 lib/python3.10/site-packages
+                        //   如果用 --target=根/site-packages，pip 装进去了但 import 找不到 → 死循环
+                        const libDir = path.join(installDir, 'lib');
+                        try {
+                            const pyDirs = fs.readdirSync(libDir).filter(d => d.startsWith('python'));
+                            sitePackagesDir = pyDirs.length > 0
+                                ? path.join(libDir, pyDirs[0], 'site-packages')
+                                : path.join(installDir, 'site-packages'); // fallback
+                        } catch {
+                            sitePackagesDir = path.join(installDir, 'site-packages');
+                        }
+                    }
                     if (!fs.existsSync(sitePackagesDir)) fs.mkdirSync(sitePackagesDir, { recursive: true });
 
                     // ★ CDN 兜底优化: Windows CDN 包已含完整 site-packages，跳过 pip + deps
@@ -1215,7 +1231,11 @@ sys.exit(0)
                     // ★ Step 6: Install dependencies
                     const lockedDeps = this._getLockedDeps();
                     global.logMessage(q('qvenv.installDeps', lockedDeps.join(', ')), 'INFO');
-                    const pipCmd = `"${installPath}" -m pip install ${lockedDeps.join(' ')} --upgrade --force-reinstall --quiet --target="${sitePackagesDir}" --index-url https://mirrors.aliyun.com/pypi/simple/`;
+                    // ★ Linux/macOS: 不用 --target (standalone Python 默认 site-packages 已在 sys.path 里)
+                    //   Windows embed: 必须用 --target (embed 版没有标准 site-packages 路径)
+                    const pipCmd = platform === 'win32'
+                        ? `"${installPath}" -m pip install ${lockedDeps.join(' ')} --upgrade --force-reinstall --quiet --target="${sitePackagesDir}" --index-url https://mirrors.aliyun.com/pypi/simple/`
+                        : `"${installPath}" -m pip install ${lockedDeps.join(' ')} --upgrade --force-reinstall --quiet --index-url https://mirrors.aliyun.com/pypi/simple/`;
                     cp.execSync(pipCmd, {
                         windowsHide: true,
                         timeout: 300000,

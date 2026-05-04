@@ -1367,6 +1367,14 @@ class ClipboardHistorySidebarProvider {
         // ★ Start multi-window Savoring sync
         this._startSavoringSync();
 
+        // ★ Runtime theme change: sync dark/light to webview
+        this._themeDisposable = vscode.window.onDidChangeActiveColorTheme(() => {
+            if (this._view) {
+                const isDark = (() => { try { const k = vscode.window.activeColorTheme?.kind; return k === 2 || k === 3; } catch { return false; } })();
+                this._postMessage({ command: 'setTheme', theme: isDark ? 'dark' : 'light' });
+            }
+        });
+
         // ★ Register cleanFreakMode change callback for weave button sync
         q1.onCleanFreakModeChange = (newMode) => {
             this._postMessage({ command: 'cleanFreakMode', mode: newMode });
@@ -2033,8 +2041,11 @@ class ClipboardHistorySidebarProvider {
             `font-src ${this._view.webview.cspSource}`,
         ].join('; ');
 
+        const _isDark = (() => { try { const k = vscode.window.activeColorTheme?.kind; return k === 2 || k === 3; } catch { return false; } })();
+        const _themeAttr = _isDark ? ' data-theme="dark"' : '';
+
         return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN"${_themeAttr}>
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="${csp}">
@@ -2046,6 +2057,15 @@ class ClipboardHistorySidebarProvider {
             --violet: #6c71c4; --blue: #268bd2; --cyan: #2aa198; --green: #859900;
             --primary-color: var(--yellow); --background-color: var(--base3);
             --card-bg: var(--base2); --text-primary: #2a211c; --border-color: #d3c6aa;
+        }
+        /* ★ Dark theme overrides */
+        [data-theme="dark"] {
+            --base03: #fdf6e3; --base02: #eee8d5; --base01: #93a1a1; --base00: #c8c4b8;
+            --base0: #a8a49c; --base1: #6a6660; --base2: #2a2a2a; --base3: #1e1e1e;
+            --yellow: #d4a017; --orange: #e07020; --red: #ff4444; --magenta: #c06080;
+            --violet: #a08060; --blue: #d4a017; --cyan: #5abfb5; --green: #8fbc5a;
+            --primary-color: var(--yellow); --background-color: #1e1e1e;
+            --card-bg: #2a2a2a; --text-primary: #d4d0c8; --border-color: #444;
         }
         html { forced-color-adjust: none !important; }
         body {
@@ -2073,6 +2093,14 @@ class ClipboardHistorySidebarProvider {
         .icon-ufo { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTEyIDJDMi40OCAyIDEyIDIuNDggMTIgOCAxMiAxMy41MiA3LjUyIDIyIDEyIDIyYzQuNDggMCA5LjUyLTguNDggMTAtMTQgMC01LjUyLTkuNTItMTAtMTAtMTB6bTAgMThjLTMuMzEgMC02LTIuNjktNi02IDAtMy4zMSAyLjY5LTYgNi02czYgMi42OSA2IDYtMi42OSA2LTYgNnoiLz48cGF0aCBkPSJNMjEgMTNoLTRjLS41NSAwLTEgLjQ1LTEgMXMuNDUgMSAxIDFoNGMuNTUgMCAxLS40NSAxLTFzLS40NS0xLTEtMXpNNyAxM0gzYy0uNTUgMC0xIC40NS0xIDFzLjQ1IDEgMSAxaDRjLjU1IDAgMS0uNDUgMS0xcy0uNDUtMS0xLTF6TTEyIDhjLTMuMzEgMC02IDIuNjktNiA2IDAgMy4zMSAyLjY5IDYgNiA2czYtMi42OSA2LTYtMi42LTMuMzEgMC02IDIuNjktNiA2IDAgMy4zMSAyLjY5IDYgNiA2czYtMi42OSA2LTYtMi42OS02LTYtNnoiIG9wYWNpdHk9Ii4zIi8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-all-settings { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTE5LjE0IDEyLjk0Yy4wNC0uMy4wNi0uNjEuMDYtLjk0IDAtLjMyLS4wMi0uNjQtLjA3LS45NGwyLjAzLTEuNThjLjE4LS4xNC4yMy0uNDEuMTItLjYxbC0xLjkyLTMuMzJjLS4xMi0uMjItLjM3LS4yOS0uNTktLjIybC0yLjM5Ljk2Yy0uNS0uMzgtMS4wMy0uNy0xLjYyLS45NGwtLjM2LTIuNTRjLS4wNC0uMjQtLjI0LS40MS0uNDgtLjQxaC0zLjg0Yy0uMjQgMC0uNDMuMTctLjQ3LjQxbC0uMzYgMi41NGMtLjU5LjI0LTEuMTMuNTctMS42Mi45NGwtMi4zOS0uOTZjLS4yMi0uMDgtLjQ3IDAtLjU5LjIybC0xLjkyIDMuMzJjLS4xMi4yLS4wNy40Ny4xMi42MWwyLjAzIDEuNThjLS4wNS4zLS4wOS42My0uMDkuOTRzLjAyLjY0LjA3Ljk0bC0yLjAzIDEuNThjLS4xOC4xNC0uMjMuNDEtLjEyLjYxbDEuOTIgMy4zMmMuMTIuMjIuMzcuMjkuNTkuMjJsMi4zOS0uOTZjLjUuMzggMS4wMy43IDEuNjIuOTRsLjM2IDIuNTRjLjA1LjI0LjI0LjQxLjQ4LjQxaDMuODRjLjI0IDAgLjQ0LS4xNy40Ny0uNDFsLjM2LTIuNTRjLjU5LS4yNCAxLjEzLS41NiAxLjYyLS45NGwyLjM5Ljk2Yy4yMi4wOC40NyAwIC41OS0uMjJsMS45Mi0zLjMyYy4xMi0uMjIuMDctLjQ3LS4xMi0uNjFsLTIuMDEtMS41OHpNMTIgMTUuNmMtMS45OCAwLTMuNi0xLjYyLTMuNi0zLjZzMS42Mi0zLjYgMy42LTMuNiAzLjYgMS42MiAzLjYgMy42LTEuNjIgMy42LTMuNiAzLjZ6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
 
+        /* ★ Dark mode: invert SVG icons for visibility */
+        [data-theme="dark"] .icon-loop,
+        [data-theme="dark"] .icon-stop,
+        [data-theme="dark"] .icon-play,
+        [data-theme="dark"] .icon-pen,
+        [data-theme="dark"] .icon-ufo,
+        [data-theme="dark"] .icon-all-settings { filter: invert(0.75); }
+
         /* ★ Weave inline buttons - positioned right after "Weave" text */
         /* ★ Hidden by default, shown for 9s (cumulative) when weave button clicked */
         .weave-inline-btns { display: inline-flex; gap: 5px; margin-left: 2px; vertical-align: middle; position: relative; top: -1px; visibility: hidden; pointer-events: none; opacity: 0; }
@@ -2097,8 +2125,8 @@ class ClipboardHistorySidebarProvider {
         .input-box-wrapper { position: relative; width: 156px; height: 30px; flex-shrink: 0; margin-left: -7px; }
         .inline-input {
             background: var(--base2);
-            color: #000;
-            border: 1px solid var(--vscode-input-border, #d3c6aa);
+            color: var(--text-primary);
+            border: 1px solid var(--vscode-input-border, var(--border-color));
             border-radius: 2px;
             padding: 2px 36px 2px 6px;
             font-size: 14px;
@@ -2111,6 +2139,8 @@ class ClipboardHistorySidebarProvider {
         .inline-input::selection { background: #FFD302; color: #000; }
         .inline-input:focus { border-color: var(--primary-color); box-shadow: 0 0 0 1px var(--primary-color); }
         .inline-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.5)); font-size: 14px; }
+        [data-theme="dark"] .inline-input::selection { background: #6a5a10; color: #f0e8d8; }
+        [data-theme="dark"] .inline-input::placeholder { color: rgba(255,255,255,0.25); }
 
         #btnVideoStart {
             position: absolute;
@@ -2146,6 +2176,7 @@ class ClipboardHistorySidebarProvider {
             border: 1px solid #f5c6cb;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
+        [data-theme="dark"] .error-tip { background: #4a2020; color: #f0a0a0; border-color: #6a3030; }
         .error-tip::after { display: none; }
 
         .paste-tip {
@@ -2164,6 +2195,7 @@ class ClipboardHistorySidebarProvider {
             border: 1px solid #dce775;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
+        [data-theme="dark"] .paste-tip { background: #3a3a20; color: #c8c880; border-color: #4a4a30; }
 
         .history-container { flex: 1; min-height: 400px; position: relative; margin-bottom: 0; display: flex; flex-direction: column; overflow: hidden; margin-top: -9px; }
 
@@ -2204,11 +2236,11 @@ class ClipboardHistorySidebarProvider {
         .history-list::-webkit-scrollbar { display: none; }
         .history-item { background: var(--base3); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: #8e8e8e; margin-right: 2px; position: relative; overflow: hidden; }
         /* Hover: border becomes dashed, turns red, text becomes black, border width unchanged to prevent layout jitter */
-        .history-item:hover { border-color: var(--red); border-style: dashed; color: #000000; }
+        .history-item:hover { border-color: var(--red); border-style: dashed; color: var(--text-primary); }
         /* Selected item (last clicked) uses subtle orange */
         .history-item.selected { color: #e67e22; }
         /* Pinned item text stays black always, higher priority than selected; background restores light base2 */
-        .history-item.pinned { background: var(--base2); color: #000000 !important; }
+        .history-item.pinned { background: var(--base2); color: var(--text-primary) !important; }
 
         /* Card internal sweep highlight */
         .history-item.executing::before {
@@ -2226,9 +2258,11 @@ class ClipboardHistorySidebarProvider {
         }
 
         .search-container { margin: 3px 0 0 0; flex-shrink: 0; position: relative; }
-        .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 7.5px 10px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; position: relative; top: 4px; }
+        .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 7.5px 10px; font-family: Tahoma, sans-serif; font-size: 13px; color: var(--text-primary); outline: none; transition: 0.2s; box-sizing: border-box; position: relative; top: 4px; }
         .search-input::selection { background: #FFD302; color: #000; }
         .search-input::placeholder { color: rgba(0,0,0,0.18); }
+        [data-theme="dark"] .search-input::selection { background: #6a5a10; color: #f0e8d8; }
+        [data-theme="dark"] .search-input::placeholder { color: rgba(255,255,255,0.2); }
         .search-input:focus { border-color: var(--primary-color); box-shadow: 0 0 0 1px var(--primary-color); }
 
         .item-info { display: none; }
@@ -2260,13 +2294,14 @@ class ClipboardHistorySidebarProvider {
             border: 1px solid var(--primary-color);
             transform: translateX(-50%); /* Horizontally center */
         }
+        [data-theme="dark"] #tooltip { background: #2a2520; color: #d4d0c8; }
         .item-actions { margin-top: 5px; display: flex; gap: 5px; }
 
         .action-mini-btn { padding: 2px 6px; font-size: 13px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--base3); cursor: pointer; color: var(--text-primary); font-family: Tahoma, sans-serif; line-height: 1.2; }
-        .action-mini-btn:hover { background: var(--primary-color); color: #fff; }
+        .action-mini-btn:hover { background: var(--primary-color); color: #1e1e1e; }
 
         .scrollbar-outer { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 1000; pointer-events: none; }
-        .scrollbar-outer-thumb { position: absolute; right: 1px; width: 4px; background: #000 !important; border-radius: 3px; opacity: 1; cursor: pointer; pointer-events: auto; forced-color-adjust: none !important; transition: width 0.1s ease, right 0.1s ease; }
+        .scrollbar-outer-thumb { position: absolute; right: 1px; width: 4px; background: var(--text-primary) !important; border-radius: 3px; opacity: 1; cursor: pointer; pointer-events: auto; forced-color-adjust: none !important; transition: width 0.1s ease, right 0.1s ease; }
         .scrollbar-outer-thumb:hover { width: 6px; right: 0; }
 
         .scrollbar-inner { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 10; pointer-events: none; }
@@ -2307,7 +2342,7 @@ class ClipboardHistorySidebarProvider {
         .history-dropdown-item {
             padding: 6px 10px;
             cursor: pointer;
-            color: #000;
+            color: var(--text-primary);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -2943,6 +2978,16 @@ class ClipboardHistorySidebarProvider {
                 var m = e.data;
                 if (!m) return;
 
+                // ★ Runtime theme switching
+                if (m.command === 'setTheme') {
+                    if (m.theme === 'dark') {
+                        document.documentElement.setAttribute('data-theme', 'dark');
+                    } else {
+                        document.documentElement.removeAttribute('data-theme');
+                    }
+                    return;
+                }
+
                 // ★★★ Handle line height measurement request ★★★
                 if (m.command === 'measureLineHeight') {
                     var result = measureLineHeight(m.fontSize, m.lineHeight, m.fontFamily);
@@ -3221,6 +3266,7 @@ class ClipboardHistorySidebarProvider {
     }
 
     dispose() {
+        if (this._themeDisposable) { this._themeDisposable.dispose(); this._themeDisposable = null; }
         if (this._onlineCountUpdateInterval) {
             clearInterval(this._onlineCountUpdateInterval);
             this._onlineCountUpdateInterval = null;
