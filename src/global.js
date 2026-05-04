@@ -553,6 +553,15 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 			return;
 		}
 
+		// ★ Linux/macOS: 确保 q_engine 有执行权限 (VSIX 解压可能丢失 +x)
+		if (platform !== 'win32') {
+			try {
+				fs.chmodSync(exePath, 0o755);
+			} catch (e) {
+				logMessage(`[Rust] chmod +x failed: ${e.message}`, "WARN");
+			}
+		}
+
 		// ★ Win7/8 兼容：复制 VC++ 运行库到 assets 目录
 		if (platform === "win32") {
 			try {
@@ -1007,7 +1016,58 @@ while ($true) {
   id=$(json_get "$line" "_id")
   case "$action" in
 	ping) echo '{"_id":'"$id"',"status":"alive"}';;
+    warmup) echo '{"_id":'"$id"',"status":"warmed"}';;
+    wq)
+      # macOS: use osascript to detect clipboard types
+      has_image=false; has_html=false; has_file=false; has_text=false
+      types=$(osascript -e 'the clipboard info' 2>/dev/null || true)
+      echo "$types" | grep -qi "picture\|TIFF\|PNG" && has_image=true
+      echo "$types" | grep -qi "HTML" && has_html=true
+      echo "$types" | grep -qi "file" && has_file=true
+      pbpaste >/dev/null 2>&1 && has_text=true
+      echo '{"_id":'"$id"',"hasImage":'$has_image',"hasHtml":'$has_html',"hasFile":'$has_file',"hasText":'$has_text'}';;
     hasImage) if command -v pngpaste > /dev/null 2>&1 && pngpaste - > /dev/null 2>&1; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
+    hasHtml)
+      types=$(osascript -e 'the clipboard info' 2>/dev/null || true)
+      if echo "$types" | grep -qi "HTML"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
+    hasFiles)
+      types=$(osascript -e 'the clipboard info' 2>/dev/null || true)
+      if echo "$types" | grep -qi "file"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
+    getFiles)
+      files_json=$(osascript -e '
+set fList to {}
+try
+  set theFiles to the clipboard as «class furl»
+  set fList to {POSIX path of theFiles}
+on error
+  try
+    set theFiles to the clipboard as list
+    repeat with f in theFiles
+      try
+        set end of fList to POSIX path of (f as alias)
+      end try
+    end repeat
+  end try
+end try
+set output to "["
+repeat with i from 1 to count of fList
+  if i > 1 then set output to output & ","
+  set output to output & "\"" & item i of fList & "\""
+end repeat
+set output to output & "]"
+return output
+' 2>/dev/null || echo '[]')
+      echo '{"_id":'"$id"',"files":'"$files_json"'}';;
+    getHtml)
+      content=$(osascript -e 'the clipboard as «class HTML»' 2>/dev/null | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '""')
+      echo '{"_id":'"$id"',"value":'$content'}';;
+    dumpHtmlToFile)
+      dest=$(json_get "$line" "path")
+      if osascript -e 'the clipboard as «class HTML»' > "$dest" 2>/dev/null && [ -s "$dest" ]; then
+        echo '{"_id":'"$id"',"success":true}'
+      else
+        echo '{"_id":'"$id"',"success":false}'
+      fi;;
     saveImage)
       dest=$(json_get "$line" "path")
       if command -v pngpaste > /dev/null 2>&1 && pngpaste "$dest" 2>/dev/null; then echo '{"_id":'"$id"',"success":true}'; else echo '{"_id":'"$id"',"success":false}'; fi;;
@@ -1054,17 +1114,82 @@ while IFS= read -r line; do
   id=$(json_get "$line" "_id")
   case "$action" in
 	ping) echo '{"_id":'"$id"',"status":"alive"}';;
+    warmup) echo '{"_id":'"$id"',"status":"warmed"}';;
+    wq)
+      targets=$(xclip -selection clipboard -t TARGETS -o 2>/dev/null || true)
+      has_image=false; has_html=false; has_file=false; has_text=false
+      echo "$targets" | grep -q "image/png" && has_image=true
+      echo "$targets" | grep -q "text/html" && has_html=true
+      echo "$targets" | grep -qi "uri" && has_file=true
+      echo "$targets" | grep -q "UTF8_STRING\|STRING\|TEXT" && has_text=true
+      echo '{"_id":'"$id"',"hasImage":'$has_image',"hasHtml":'$has_html',"hasFile":'$has_file',"hasText":'$has_text'}';;
     hasImage) if command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -q "image/png"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
     hasHtml) if command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -q "text/html"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
+    hasFiles) if command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -qi "uri"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
+    getFiles)
+      raw=$(xclip -selection clipboard -o 2>/dev/null || true)
+      files_json=$(echo "$raw" | python3 -c '
+import sys, json, urllib.parse, os
+lines = sys.stdin.read().strip().split("\\n")
+paths = []
+for l in lines:
+    l = l.strip()
+    if l.startswith("file://"):
+        paths.append(urllib.parse.unquote(l[7:]))
+    elif os.path.exists(l):
+        paths.append(l)
+print(json.dumps(paths))
+' 2>/dev/null || echo '[]')
+      echo '{"_id":'"$id"',"files":'"$files_json"'}';;
     getHtml)
-content=$(xclip -selection clipboard -o -t text/html 2>/dev/null | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+      content=$(xclip -selection clipboard -o -t text/html 2>/dev/null | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '""')
       echo '{"_id":'"$id"',"value":'$content'}';;
+    dumpHtmlToFile)
+      dest=$(json_get "$line" "path")
+      if xclip -selection clipboard -o -t text/html > "$dest" 2>/dev/null && [ -s "$dest" ]; then
+        echo '{"_id":'"$id"',"success":true}'
+      else
+        echo '{"_id":'"$id"',"success":false}'
+      fi;;
     saveImage)
       dest=$(json_get "$line" "path")
       if command -v xclip > /dev/null 2>&1 && xclip -selection clipboard -t image/png -o > "$dest" 2>/dev/null && [ -s "$dest" ]; then echo '{"_id":'"$id"',"success":true}'; else echo '{"_id":'"$id"',"success":false}'; fi;;
+    setFiles)
+      paths=$(json_get "$line" "paths")
+      # Linux: set file URIs to clipboard via xclip
+      uris=$(echo "$paths" | python3 -c '
+import sys, json, urllib.parse
+paths = json.loads(sys.stdin.read())
+for p in paths:
+    print("file://" + urllib.parse.quote(p, safe="/:"))
+' 2>/dev/null || true)
+      if [ -n "$uris" ] && echo "$uris" | xclip -selection clipboard -t text/uri-list -i 2>/dev/null; then
+        echo '{"_id":'"$id"',"success":true}'
+      else
+        echo '{"_id":'"$id"',"success":false}'
+      fi;;
+    trigger_system_paste)
+      dest=$(json_get "$line" "path")
+      raw=$(xclip -selection clipboard -o 2>/dev/null || true)
+      copied=0; total=0
+      while IFS= read -r fline; do
+        fline=$(echo "$fline" | sed 's/^file:\/\///')
+        [ -z "$fline" ] && continue
+        [ ! -e "$fline" ] && continue
+        total=$((total+1))
+        if [ -d "$fline" ]; then
+          cp -r "$fline" "$dest/" 2>/dev/null && copied=$((copied+1))
+        else
+          cp "$fline" "$dest/" 2>/dev/null && copied=$((copied+1))
+        fi
+      done <<< "$raw"
+      if [ $copied -gt 0 ]; then
+        echo '{"_id":'"$id"',"success":true,"copiedCount":'$copied',"totalCount":'$total'}'
+      else
+        echo '{"_id":'"$id"',"success":false,"error":"no files copied"}'
+      fi;;
     extract_icon)
-      path=$(json_get "$line" "path")
-      # Linux: try extracting icon via python3 + gi (Gio/GdkPixbuf)
+      fpath=$(json_get "$line" "path")
       icon_b64=$(python3 -c "
 import sys, os
 try:
@@ -1074,12 +1199,11 @@ try:
     import base64
     from io import BytesIO
 
-    file = Gio.File.new_for_path('$path')
+    file = Gio.File.new_for_path('$fpath')
     info = file.query_info('standard::icon', Gio.FileQueryInfoFlags.NONE, None)
     icon = info.get_icon()
 
     theme = Gio.IconTheme.get_default()
-    # Try locating icon
     icon_info = theme.lookup_by_gicon(icon, 32, Gio.IconLookupFlags.FORCE_SIZE)
     if icon_info:
         pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(icon_info.get_filename(), 32, 32)
