@@ -3537,13 +3537,21 @@ const TransactionManager = {
 		logMessage(q('rollback.completed'), "INFO");
 		await this.removeTransaction(trans.id);
 
+		// ★ Protect landed files from being deleted during cleanup
+		const landedFilesSet = new Set();
+		if (Array.isArray(trans.landedFiles)) {
+			for (const f of trans.landedFiles) {
+				if (f) landedFilesSet.add(path.normalize(f));
+			}
+		}
+
 		// ★ Background cleanup (do not block dialogs and user interaction)
 		const isRecover = options.isRecover === true;
 		if (trans.targetDir) {
 			setTimeout(() => {
 				// 1. Clean .part/.ytdl temp files (pass trans to clean pre-registered tempFiles)
 				// ★ Pass isRecover so cleanup uses transaction time baseline
-				this._cleanupTempFiles(trans.targetDir, trans, { isRecover }).catch(e => {
+				this._cleanupTempFiles(trans.targetDir, trans, { isRecover, landedFilesSet }).catch(e => {
 					logMessage(q('cleanup.tempFileFailed', e.message), "WARN");
 				});
 			}, 100);
@@ -3589,6 +3597,7 @@ const TransactionManager = {
 		const now = Date.now();
 		const SIX_MINUTES = 360000;
 		const transId = trans?.id || null;
+		const landedFilesSet = options.landedFilesSet || new Set();
 
 		// Collect files to clean (anchor match vs fuzzy match)
 		const transIdMatchFiles = new Set(); // ★ Match by transId anchor (first 4 chars, no time limit)
@@ -3638,6 +3647,11 @@ const TransactionManager = {
 				const fileName = path.basename(fullPath);
 				// ★ Reference protection: if in whitelist, skip
 				if (referencedItems.has(fileName.toLowerCase())) {
+					continue;
+				}
+
+				// ★ Landed file protection: never delete files that were already verified and landed
+				if (landedFilesSet.has(fullPath)) {
 					continue;
 				}
 

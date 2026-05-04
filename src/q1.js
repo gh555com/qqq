@@ -453,6 +453,119 @@ function clearAllCaches() {
 	global.logMessage(q('q1.log.cacheCleared'), "INFO");
 }
 
+// ==================== GIF Animation Detection ====================
+/**
+ * ★ Check if a GIF file is animated by examining binary markers.
+ * Linux FFmpeg static builds often report GIF duration as 0 even for animated GIFs,
+ * so we check the raw file for animation indicators.
+ * @param {string} filePath
+ * @returns {boolean}
+ */
+function _isGifAnimated(filePath) {
+	try {
+		// Read first 4KB — enough to find animation markers in the GIF header area
+		const fd = fs.openSync(filePath, 'r');
+		const buf = Buffer.alloc(4096);
+		const bytesRead = fs.readSync(fd, buf, 0, 4096, 0);
+		fs.closeSync(fd);
+		if (bytesRead < 13) return false;
+		const slice = buf.slice(0, bytesRead);
+
+		// Check for NETSCAPE2.0 or ANIMEXTS1.0 application extension (loop indicator = animated)
+		if (slice.includes(Buffer.from('NETSCAPE')) || slice.includes(Buffer.from('ANIMEXTS'))) {
+			return true;
+		}
+
+		// Count Graphic Control Extension blocks (0x21 0xF9)
+		// More than 1 GCE = multiple frames = animated
+		let gceCount = 0;
+		for (let i = 0; i < bytesRead - 1; i++) {
+			if (slice[i] === 0x21 && slice[i + 1] === 0xF9) {
+				gceCount++;
+				if (gceCount > 1) return true;
+			}
+		}
+		return false;
+	} catch { return false; }
+}
+
+// ==================== Pillow Fallback for PSD/AI ====================
+/**
+ * ★ Get image dimensions via Python Pillow when FFmpeg can't parse the format.
+ * Used as fallback for PSD, AI, EPS files on Linux where FFmpeg may lack decoders.
+ * @param {string} filePath
+ * @returns {Promise<{w: number, h: number}|null>}
+ */
+function _getPilImageSize(filePath) {
+	return new Promise((resolve) => {
+		try {
+			const { getSharedDownloader } = require('./dow');
+			const dl = getSharedDownloader();
+			const pyPath = dl?.python?.pythonPath;
+			if (!pyPath) { resolve(null); return; }
+
+			const script = `import sys;from PIL import Image;img=Image.open(sys.argv[1]);print(f"{img.width}x{img.height}")`;
+			const child = cp.spawn(pyPath, ['-c', script, filePath], {
+				windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
+				timeout: 8000
+			});
+			let stdout = '';
+			child.stdout.on('data', d => stdout += d.toString());
+			child.on('close', (code) => {
+				if (code === 0) {
+					const m = stdout.trim().match(/(\d+)x(\d+)/);
+					if (m) resolve({ w: parseInt(m[1]), h: parseInt(m[2]) });
+					else resolve(null);
+				} else resolve(null);
+			});
+			child.on('error', () => resolve(null));
+			setTimeout(() => { try { child.kill(); } catch {} resolve(null); }, 8000);
+		} catch { resolve(null); }
+	});
+}
+
+/**
+ * ★ Generate preview PNG via Python Pillow when FFmpeg can't convert the format.
+ * @param {string} filePath
+ * @param {number} maxW
+ * @param {number} maxH
+ * @returns {Promise<Buffer|null>}
+ */
+function _getPilPreview(filePath, maxW, maxH) {
+	return new Promise((resolve) => {
+		try {
+			const { getSharedDownloader } = require('./dow');
+			const dl = getSharedDownloader();
+			const pyPath = dl?.python?.pythonPath;
+			if (!pyPath) { resolve(null); return; }
+
+			const tmpFile = path.join(os.tmpdir(), `qqq_pil_${Date.now()}.png`);
+			const script = [
+				'import sys',
+				'from PIL import Image',
+				`img = Image.open(sys.argv[1])`,
+				`img.thumbnail((${maxW}, ${maxH}), Image.LANCZOS)`,
+				`img.save(sys.argv[2], 'PNG')`,
+			].join(';');
+			const child = cp.spawn(pyPath, ['-c', script, filePath, tmpFile], {
+				windowsHide: true, stdio: ['ignore', 'ignore', 'ignore'],
+				timeout: 15000
+			});
+			child.on('close', (code) => {
+				if (code === 0 && fs.existsSync(tmpFile)) {
+					try {
+						const buf = fs.readFileSync(tmpFile);
+						fs.unlinkSync(tmpFile);
+						resolve(buf);
+					} catch { resolve(null); }
+				} else resolve(null);
+			});
+			child.on('error', () => resolve(null));
+			setTimeout(() => { try { child.kill(); } catch {} resolve(null); }, 15000);
+		} catch { resolve(null); }
+	});
+}
+
 // ==================== FFprobe ====================
 async function getMediaInfo(filePath, mtimeMsRaw) {
 	// Normalize mtime, keep consistent with h.js
@@ -591,12 +704,18 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 					info.type = "image";
 					info.isStaticImage = isStaticByDuration;
 				} else if (c.includes("gif")) {
-					if (isStaticByDuration) {
+					// ★ FIX: Linux FFmpeg static builds often report GIF duration as 0
+					// even for animated GIFs. Fall back to binary marker detection.
+					const isActuallyAnimated = !isStaticByDuration || _isGifAnimated(filePath);
+					if (!isActuallyAnimated) {
 						info.type = "image";
 						info.isStaticImage = true;
 						info.isMjpegStatic = false; // Gif is not considered MJPEG
 					} else {
 						info.type = "animated_image";
+						// ★ If FFmpeg reported 0 duration for an animated GIF, set a default
+						// so the animation pipeline triggers correctly
+						if (info.duration <= 0.1) info.duration = 3.0;
 					}
 				} else if (
 					[
@@ -653,7 +772,32 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 			// ★ FIFO cache size limit
 			evictOldestEntries(resolutionCache, RESOLUTION_CACHE_MAX_SIZE);
 
-			resolve(info.width ? info : null);
+			if (info.width) {
+				resolve(info);
+			} else {
+				// ★ FIX: FFmpeg may not support PSD/AI/EPS on some Linux builds.
+				// Try Pillow as fallback for dimension detection.
+				const needsFallback = [".psd", ".ai", ".eps"].includes(ext);
+				if (needsFallback) {
+					_getPilImageSize(filePath).then(dims => {
+						if (dims) {
+							info.width = dims.w;
+							info.height = dims.h;
+							info.res = `${dims.w}x${dims.h}`;
+							info.type = "image";
+							info.isStaticImage = true;
+							info.needsConversion = true;
+							info._pillowFallback = true;
+							resolutionCache.set(filePath, info);
+							resolve(info);
+						} else {
+							resolve(null);
+						}
+					}).catch(() => resolve(null));
+				} else {
+					resolve(null);
+				}
+			}
 		});
 
 		child.on("error", (err) => {
@@ -1478,11 +1622,53 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		}
 
 		const cacheFilePath = path.join(tmpDir, `${contentId}_${cacheStrategy.cacheKey}.webp`);
-		return runFFmpegWithPipeAndFallback(args, cacheFilePath, 30000, isAnimated);
+		const ffResult = await runFFmpegWithPipeAndFallback(args, cacheFilePath, 30000, isAnimated);
+
+		// ★ Pillow fallback: when FFmpeg fails for PSD/AI/EPS (e.g. large resolution, unsupported variant), use Python Pillow
+		const pillowExts = [".psd", ".ai", ".eps"];
+		if (!ffResult.success && (info?._pillowFallback || pillowExts.includes(ext))) {
+			const pilBuf = await _getPilPreview(filePath, targetW, targetH);
+			if (pilBuf && pilBuf.length > 0) {
+				return { success: true, buffer: pilBuf, fromPipe: true, _isPng: true };
+			}
+		}
+
+		return ffResult;
 	});
 
 	if (result.success) {
 		const buffer = result.buffer;
+
+		// ★ Pillow PNG fallback: skip WebP validation/duration, return PNG directly
+		if (result._isPng) {
+			global.logMessage(`[Pillow] Preview generated: ${path.basename(filePath)} (${buffer.length} bytes)`, "INFO");
+			const { width: finalCssW, height: finalCssH } = fitIntoBox(
+				info?.width || targetW,
+				info?.height || targetH,
+				renderW,
+				renderH,
+				enlargeSmallImages
+			);
+			// Cache the PNG result so subsequent requests don't re-invoke Pillow
+			await geq().setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
+				width: info?.width || targetW,
+				height: info?.height || targetH,
+				origWidth: origSize?.width || 0,
+				origHeight: origSize?.height || 0,
+				type: "webp_unified",
+				webpDur: 0,
+				originalDuration: 0,
+			});
+			if (geq().unmarkFileAsBroken) geq().unmarkFileAsBroken(contentId);
+			return {
+				buffer,
+				webpDuration: 0,
+				originalDuration: 0,
+				outputSize: { width: finalCssW, height: finalCssH },
+				ext: ".png",
+				mimeType: "image/png",
+			};
+		}
 
 		const meta = result.meta || {};
 		const outW = meta.width || targetW;
@@ -3167,9 +3353,20 @@ function fetchFolderSizeInternal(folderPath, fromWatcher) {
 function openFileCommand(filePath) {
 	if (!fs.existsSync(filePath)) return;
 	try {
-		if (process.platform === "win32") cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
-		else if (process.platform === "darwin") cp.exec(`open "${filePath}"`);
-		else cp.exec(`xdg-open "${filePath}"`);
+		if (process.platform === "win32") {
+			cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
+		} else if (process.platform === "darwin") {
+			cp.exec(`open "${filePath}"`);
+		} else {
+			// ★ Linux: spawn avoids shell escaping issues; fallback to gio then vscode API
+			const child = cp.spawn('xdg-open', [filePath], { detached: true, stdio: 'ignore' });
+			child.on('error', () => {
+				const child2 = cp.spawn('gio', ['open', filePath], { detached: true, stdio: 'ignore' });
+				child2.on('error', () => vscode.env.openExternal(vscode.Uri.file(filePath)));
+				child2.unref();
+			});
+			child.unref();
+		}
 	} catch {
 		vscode.env.openExternal(vscode.Uri.file(filePath));
 	}
@@ -3209,11 +3406,23 @@ async function openFileInRightGroupCommand(filePath) {
 function revealFileInFolder(filePath) {
 	if (!fs.existsSync(filePath)) return;
 	try {
-		if (process.platform === "win32")
+		if (process.platform === "win32") {
 			cp.exec(`explorer /select,"${filePath.replace(/"/g, '""')}"`);
-		else if (process.platform === "darwin")
+		} else if (process.platform === "darwin") {
 			cp.exec(`open -R "${filePath}"`);
-		else cp.exec(`xdg-open "${path.dirname(filePath)}"`);
+		} else {
+			// ★ Linux: D-Bus FileManager1.ShowItems selects file + always brings window to front
+			const fileUri = `file://${filePath.replace(/ /g, '%20')}`;
+			const dbusCmd = `dbus-send --session --print-reply --dest=org.freedesktop.FileManager1 --type=method_call /org/freedesktop/FileManager1 org.freedesktop.FileManager1.ShowItems array:string:"${fileUri}" string:""`;
+			cp.exec(dbusCmd, (err) => {
+				if (err) {
+					// Fallback: VS Code built-in revealFileInOS (also selects file on most DEs)
+					vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(filePath)).catch(() => {
+						cp.spawn('xdg-open', [path.dirname(filePath)], { detached: true, stdio: 'ignore' }).unref();
+					});
+				}
+			});
+		}
 	} catch { }
 }
 
@@ -3252,7 +3461,7 @@ async function renameFileCommand(rawPath, absPath) {
 	try {
 		await fs.promises.rename(absPath, newAbs);
 	} catch (e) {
-		global.showAutoCloseNotification('error', e.message);
+		global.showAutoCloseNotification('error', `重命名失败: ${e.message}`);
 		return;
 	}
 
@@ -3284,13 +3493,19 @@ async function renameFileCommand(rawPath, absPath) {
 
 	invalidateFolderSizeCacheForPath(newAbs);
 	renderVisibleEditors();
+	global.showAutoCloseNotification('success', `重命名成功: ${trimmed}`);
 }
 
 // ==================== c1 / c2 / c3 Commands ====================
 
 /** c1: Copy absolute file path to clipboard */
 async function copyFilePathCommand(absPath) {
-	await vscode.env.clipboard.writeText(absPath);
+	try {
+		await vscode.env.clipboard.writeText(absPath);
+		global.showAutoCloseNotification('success', '已复制成功 — 纯文本路径');
+	} catch (e) {
+		global.showAutoCloseNotification('error', `复制失败 — 纯文本路径: ${e.message}`);
+	}
 }
 
 /** c2: Copy file to clipboard (equivalent to Ctrl+C in Explorer) — uses Rust engine */
@@ -3298,7 +3513,10 @@ async function copyFileToClipboardCommand(absPath) {
 	if (global.rustBridge && global.rustBridge.isAvailable()) {
 		try {
 			const res = await global.rustBridge.call("setFiles", { paths: [absPath] }, 5000);
-			if (res && res.success) return;
+			if (res && res.success) {
+				global.showAutoCloseNotification('success', '已复制成功 — 文件');
+				return;
+			}
 			global.logMessage(`copyFile via Rust failed: ${JSON.stringify(res)}`, "WARN");
 		} catch (e) {
 			global.logMessage(`copyFile via Rust exception: ${e.message}`, "WARN");
@@ -3311,7 +3529,9 @@ async function copyFileToClipboardCommand(absPath) {
 		cp.execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { windowsHide: true, timeout: 8000 }, (err) => {
 			if (err) {
 				global.logMessage(`copyFile PS fallback failed: ${err.message}`, "WARN");
-				global.showAutoCloseNotification('error', `Copy failed: ${err.message}`);
+				global.showAutoCloseNotification('error', `复制失败 — 文件: ${err.message}`);
+			} else {
+				global.showAutoCloseNotification('success', '已复制成功 — 文件');
 			}
 			resolve();
 		});
@@ -3323,13 +3543,16 @@ async function copyImageAsBitmapCommand(absPath) {
 	if (global.rustBridge && global.rustBridge.isAvailable()) {
 		try {
 			const res = await global.rustBridge.call("setImage", { path: absPath }, 10000);
-			if (res && res.success) return;
+			if (res && res.success) {
+				global.showAutoCloseNotification('success', '已复制成功 — 位图二进制');
+				return;
+			}
 			global.logMessage(`copyImageAsBitmap via Rust failed: ${JSON.stringify(res)}`, "WARN");
 		} catch (e) {
 			global.logMessage(`copyImageAsBitmap via Rust exception: ${e.message}`, "WARN");
 		}
 	}
-	global.showAutoCloseNotification('error', 'Rust engine unavailable for image clipboard');
+	global.showAutoCloseNotification('error', '复制失败 — 位图二进制: Rust 引擎不可用');
 }
 
 function debounceRender(editor, delay = SCROLL_DEBOUNCE_MS) {

@@ -1009,6 +1009,13 @@ function getConfig() {
 }
 
 let saveConfigTimer = null;
+let _periodicMergeSaveTimer = null; // ★ periodic merge-save interval (multi-window safety net)
+
+// ★★★ Multi-window merge-on-save: track explicit user actions this session
+// so merge doesn't re-add something user explicitly removed/unpinned
+const _sessionRemovedQqiqKeys = new Set();  // qqiq paths user explicitly removed
+const _sessionRemovedPinnedKeys = new Set(); // pinnedDirs user explicitly unpinned
+let _sessionConfigDirty = false; // tracks if there are unsaved config changes
 
 function saveConfig(
   pinnedDirs,
@@ -1039,24 +1046,69 @@ function saveConfig(
 
   // Update memory state immediately to ensure subsequent reads (e.g. refreshWebview) get correct values
   cachedInMemoryConfig = newConfig;
+  _sessionConfigDirty = true;
 
   // Performance optimization: debounce. When switching directories frequently, do not sync-update globalState
   if (saveConfigTimer) clearTimeout(saveConfigTimer);
-  saveConfigTimer = setTimeout(() => {
-    try {
-      // Exclude global setting fields when saving (they are managed by VS Code config)
-      const configToSave = {
-        pinnedDirs: newConfig.pinnedDirs,
-        lineSpacing: newConfig.lineSpacing,
-        sidebarWidth: newConfig.sidebarWidth,
-        sidebarRatio: newConfig.sidebarRatio,
-        qqiq: newConfig.qqiq,
-        isPinned: newConfig.isPinned,
-      };
-      globalContext.globalState.update("qqq_config", configToSave);
-      saveConfigTimer = null;
-    } catch (e) { }
-  }, 1000);
+  saveConfigTimer = setTimeout(() => _flushConfigToGlobalState(), 1000);
+}
+
+/**
+ * ★★★ Multi-window merge-on-save: before writing, read fresh globalState and merge
+ * - pinnedDirs from disk are kept unless user explicitly unpinned this session
+ * - qqiq items from disk (other windows) are adopted unless explicitly removed this session
+ * - Memory items (this window's intent) always take priority for ordering
+ */
+function _flushConfigToGlobalState() {
+  if (!globalContext || !cachedInMemoryConfig) return;
+  try {
+    const memCfg = cachedInMemoryConfig;
+
+    // ★ Read fresh state from globalState (another window may have written)
+    const diskConfig = globalContext.globalState.get("qqq_config") || {};
+    const diskPinned = Array.isArray(diskConfig.pinnedDirs) ? diskConfig.pinnedDirs : [];
+    const diskQqiq = Array.isArray(diskConfig.qqiq) ? diskConfig.qqiq : [];
+
+    // ---- Merge pinnedDirs ----
+    // Memory pinnedDirs are authoritative for this window's order
+    const memPinnedKeys = new Set((memCfg.pinnedDirs || []).map(d => cacheKeyForPath(d)));
+    const mergedPinned = [...(memCfg.pinnedDirs || [])];
+    for (const diskDir of diskPinned) {
+      const dk = cacheKeyForPath(diskDir);
+      // Adopt from disk if: not already in memory, and not explicitly removed this session
+      if (!memPinnedKeys.has(dk) && !_sessionRemovedPinnedKeys.has(dk)) {
+        mergedPinned.push(diskDir);
+      }
+    }
+    // Cap at 6
+    const finalPinned = mergedPinned.slice(0, 6);
+
+    // ---- Merge qqiq ----
+    const memQqiqKeys = new Set((memCfg.qqiq || []).map(item => _qqiqKey(item.path)));
+    const mergedQqiq = [...(memCfg.qqiq || [])];
+    for (const diskItem of diskQqiq) {
+      if (!diskItem || !diskItem.path) continue;
+      const dk = _qqiqKey(diskItem.path);
+      // Adopt from disk if: not in memory, and not explicitly removed this session
+      if (!memQqiqKeys.has(dk) && !_sessionRemovedQqiqKeys.has(dk)) {
+        mergedQqiq.push(diskItem);
+      }
+    }
+    // Cap at 100
+    const finalQqiq = mergedQqiq.slice(0, 100);
+
+    const configToSave = {
+      pinnedDirs: finalPinned,
+      lineSpacing: memCfg.lineSpacing,
+      sidebarWidth: memCfg.sidebarWidth,
+      sidebarRatio: memCfg.sidebarRatio,
+      qqiq: finalQqiq,
+      isPinned: memCfg.isPinned,
+    };
+    globalContext.globalState.update("qqq_config", configToSave);
+    _sessionConfigDirty = false;
+    saveConfigTimer = null;
+  } catch (e) { }
 }
 
 // ==================== Last Visited Directory Storage ====================
@@ -1132,6 +1184,8 @@ function removeFromqqiq(targetPath) {
   const key = _qqiqKey(targetPath);
   const newIq = (config.qqiq || []).filter(item => _qqiqKey(item.path) !== key);
   if (newIq.length !== (config.qqiq || []).length) {
+    // ★ Multi-window merge tracking: remember explicit removal
+    _sessionRemovedQqiqKeys.add(key);
     saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newIq, config.isPinned);
   }
 }
@@ -1205,8 +1259,12 @@ function pinDirectory(dirPath) {
   while (pinned.length > 6) {
     const removed = pinned.shift();
     const removedCanon = canonicalizeExistingPath(removed);
-    if (removedCanon && fs.existsSync(removedCanon)) {
-      iq = _insertToqqiqTop(iq, removedCanon, 'dir');
+    if (removedCanon) {
+      // ★ Multi-window merge tracking: overflow counts as implicit unpin
+      _sessionRemovedPinnedKeys.add(cacheKeyForPath(removedCanon));
+      if (fs.existsSync(removedCanon)) {
+        iq = _insertToqqiqTop(iq, removedCanon, 'dir');
+      }
     }
   }
   saveConfig(pinned, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, iq, config.isPinned);
@@ -1218,6 +1276,8 @@ function unpinDirectory(dirPath) {
   const canon = canonicalizeExistingPath(dirPath);
   if (!canon) return;
   const key = cacheKeyForPath(canon);
+  // ★ Multi-window merge tracking: remember explicit unpin
+  _sessionRemovedPinnedKeys.add(key);
   const pinned = (config.pinnedDirs || []).filter(d => cacheKeyForPath(d) !== key);
   let iq = config.qqiq || [];
   if (fs.existsSync(canon)) {
@@ -5372,6 +5432,11 @@ async function activate(context) {
   getConfig();
   geq().logMessage(q('q2.log.activated'), "INFO");
 
+  // ★ Periodic merge-save: even if process is force-killed, at most 63s of data is at risk
+  _periodicMergeSaveTimer = setInterval(() => {
+    if (_sessionConfigDirty) _flushConfigToGlobalState();
+  }, 63000);
+
   // ★ Ultimate fix: use ConfigGate callback mechanism to receive config update notifications (resolve race condition)
   // Previously, directly listening to onDidChangeConfiguration caused reading config before sessionOverrides update
   global.ConfigManager.onConfigUpdated((changedKeys, event) => {
@@ -5441,6 +5506,11 @@ async function activate(context) {
 }
 
 function deactivate() {
+  // ★ Multi-window safety: flush pending debounced save immediately
+  if (_periodicMergeSaveTimer) { clearInterval(_periodicMergeSaveTimer); _periodicMergeSaveTimer = null; }
+  if (saveConfigTimer) { clearTimeout(saveConfigTimer); saveConfigTimer = null; }
+  if (_sessionConfigDirty) _flushConfigToGlobalState();
+
   if (activePanel && activePanelAlive) {
     try {
       activePanel.dispose();

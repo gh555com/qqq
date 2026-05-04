@@ -15,6 +15,7 @@ final_audio_hub_v16_fusion.py
 ========================================================
 """
 
+import sys
 import time
 import os
 import random
@@ -26,7 +27,6 @@ if sys.platform == 'win32':
 from concurrent.futures import ThreadPoolExecutor
 
 import array
-import sys
 import math
 import atexit
 from functools import lru_cache

@@ -2089,7 +2089,10 @@ class YtDlpDownloader {
             return new Promise((resolve) => {
                 const fmt =
                     options.format ||
-                    "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best";
+                    "bestvideo[vcodec^=avc1][height<=1080]+bestaudio[acodec^=mp4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best";
+
+                // ★ mp4 for h264+aac (preferred), mkv as fallback for VP9+Opus
+                const mergeFormat = options.mergeFormat || "mp4";
 
                 const args = [
                     "-o",
@@ -2098,7 +2101,7 @@ class YtDlpDownloader {
                     "--no-playlist",
                     "--force-ipv4", // Force IPv4
                     "--merge-output-format",
-                    "mp4",
+                    mergeFormat,
                     "-f",
                     fmt,
                     "--no-mtime", // Do not modify file mtime to avoid filesystem delays on some platforms
@@ -2270,6 +2273,12 @@ class YtDlpDownloader {
 
         let res = await runDownload();
 
+        // ★ Postprocessing merge failed (e.g., VP9+Opus can't merge into MP4)
+        // Retry with mkv container which supports all codec combinations
+        if (!res.success && res.error?.includes("Postprocessing")) {
+            res = await runDownload(["--merge-output-format", "mkv"]);
+            if (res.success) return res;
+        }
 
         if (!res.success && !options.cookie && (
             res.error?.includes("403") ||

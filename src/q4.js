@@ -52,7 +52,7 @@ const CONSTANTS = Object.freeze({
     BATCH_SAVE_THRESHOLD: 5,
     SAVE_THROTTLE_MS: 1000,
     SAVE_RETRY_DELAY_MS: 121,
-    PERIODIC_MERGE_SAVE_MS: 300000, // ★ Periodic merge-save every 5min — each window runs its own timer
+    PERIODIC_MERGE_SAVE_MS: 63000, // ★ Periodic merge-save every 63s — each window runs its own timer
 
     // Atomic write
     SAVE_TEMP_SUFFIX: '.tmp',
@@ -399,7 +399,7 @@ class ClipboardHistoryManager {
         // to prevent race condition where save fires before load completes and overwrites pin state
         this._loadReady = this._loadHistory().catch(() => { });
 
-        // ★ Periodic merge-save: even if process is force-killed, at most 30s of data is at risk
+        // ★ Periodic merge-save: even if process is force-killed, at most 63s of data is at risk
         this._loadReady.then(() => {
             this._periodicMergeSaveTimer = setInterval(() => {
                 if (this._dirty) this.forceSave().catch(() => { });
