@@ -114,7 +114,15 @@
             "rename": "Rename",
             "fileNameEmpty": "File name cannot be empty",
             "targetFileExists": "Target file already exists",
-            "coreFilesIncomplete": "Core files incomplete, some features may be limited"
+            "coreFilesIncomplete": "Core files incomplete, some features may be limited",
+            "copyPathSuccess": "Copied successfully — plain text path",
+            "copyPathFailed": "Copy failed — plain text path: {0}",
+            "copyFileSuccess": "Copied successfully — file",
+            "copyFileFailed": "Copy failed — file: {0}",
+            "copyImageSuccess": "Copied successfully — bitmap binary",
+            "copyImageFailed": "Copy failed — bitmap binary: {0}",
+            "renameSuccess": "Renamed successfully: {0}",
+            "renameFailed": "Rename failed: {0}"
         }
     },
     "q2": {
@@ -712,6 +720,7 @@
     },
     "rust": {
         "exeNotFound": "Rust Bridge executable not found",
+        "unavailable": "Rust engine unavailable",
         "tryStart": "Rust Bridge trying to start: \"{0}\" --daemon",
         "processError": "Rust Bridge process error: {0}",
         "startSuccess": "Rust Bridge started successfully",

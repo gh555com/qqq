@@ -114,7 +114,15 @@
             "rename": "Renomear",
             "fileNameEmpty": "Nome do arquivo não pode estar vazio",
             "targetFileExists": "Arquivo de destino já existe",
-            "coreFilesIncomplete": "Arquivos principais incompletos, algumas funções podem estar limitadas"
+            "coreFilesIncomplete": "Arquivos principais incompletos, algumas funções podem estar limitadas",
+            "copyPathSuccess": "Copiado com sucesso — caminho de texto",
+            "copyPathFailed": "Falha ao copiar — caminho de texto: {0}",
+            "copyFileSuccess": "Copiado com sucesso — arquivo",
+            "copyFileFailed": "Falha ao copiar — arquivo: {0}",
+            "copyImageSuccess": "Copiado com sucesso — imagem binária",
+            "copyImageFailed": "Falha ao copiar — imagem binária: {0}",
+            "renameSuccess": "Renomeado com sucesso: {0}",
+            "renameFailed": "Falha ao renomear: {0}"
         }
     },
     "q2": {
@@ -712,6 +720,7 @@
     },
     "rust": {
         "exeNotFound": "Executável do Rust Bridge não encontrado",
+        "unavailable": "Mecanismo Rust indisponível",
         "tryStart": "Tentando iniciar Rust Bridge: \"{0}\" --daemon",
         "processError": "Erro de processo Rust Bridge: {0}",
         "startSuccess": "Rust Bridge iniciado com sucesso",

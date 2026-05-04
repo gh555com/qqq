@@ -114,7 +114,15 @@
             "rename": "重新命名",
             "fileNameEmpty": "檔案名稱不能為空",
             "targetFileExists": "目標檔案已存在",
-            "coreFilesIncomplete": "核心檔案不完整，部分功能可能受限"
+            "coreFilesIncomplete": "核心檔案不完整，部分功能可能受限",
+            "copyPathSuccess": "已複製成功 — 純文字路徑",
+            "copyPathFailed": "複製失敗 — 純文字路徑: {0}",
+            "copyFileSuccess": "已複製成功 — 檔案",
+            "copyFileFailed": "複製失敗 — 檔案: {0}",
+            "copyImageSuccess": "已複製成功 — 點陣圖二進位",
+            "copyImageFailed": "複製失敗 — 點陣圖二進位: {0}",
+            "renameSuccess": "重新命名成功: {0}",
+            "renameFailed": "重新命名失敗: {0}"
         }
     },
     "q2": {
@@ -712,6 +720,7 @@
     },
     "rust": {
         "exeNotFound": "Rust Bridge 可執行檔未找到",
+        "unavailable": "Rust 引擎不可用",
         "tryStart": "Rust Bridge 嘗試啟動: \"{0}\" --daemon",
         "processError": "Rust Bridge 進程錯誤: {0}",
         "startSuccess": "Rust Bridge 啟動成功",
