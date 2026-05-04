@@ -59,7 +59,7 @@
 
  Original name: qqq    ![Open VSX](https://img.shields.io/open-vsx/dt/gh555/qqq?label=installs&color=orange)
 
- Open VSX、macOS、Linux: https://open-vsx.org/extension/gh555/qqq   ![](https://gh555.com/px?g=qqq&s=gh555.presentation-resources.readme)
+  **macOS、Linux must go**: https://open-vsx.org/extension/gh555/qqq   ![](https://gh555.com/px?g=qqq&s=readme)
 
 
  You need not have opened a note-taking application specially.
@@ -78,7 +78,7 @@
   <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/6QEDZULVO33JW.gif" width="100%" alt="Paste image files directly">
 </p>
 
-**Via  qqq** you can paste txt, exe, psd, mp3, folder, mp4.... if you want. Why not?
+**Via  qqq**  you can paste txt, exe, psd, mp3, folder, mp4.... if you want. Why not?
 
 <p align="left">
   <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/E2ULPGMCYGGFE.gif" width="100%" alt="Paste any file">
@@ -132,7 +132,7 @@ A little hint:
   <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/O4H43QFLJ6WHY.gif" width="100%" alt="Most visited always closest to you">
 </p>
 
- try the shortcut key of Roam:
+shortcut key of Roam:
 
 <p align="left">
   <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/XMTOYSWJPSJYU.gif" width="80%" alt="shortcut key">
@@ -261,7 +261,7 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
 
 For the best practice, download qqq from the official Marketplace at https://marketplace.visualstudio.com/items?itemName=gh555com.q3. or, actually, the best way is to simply open any of your IDEs, type "q3" directly into the official extension marketplace in the sidebar, and install it:
 <p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/install.png" alt="How to install">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/GRLS3C7UE2NTE.png" alt="How to install">
 </p>
 
 and then you can switch languages: zh、zh-tw、en、ja、de、ko、ru、ar、es、fr、pt-BR:
@@ -290,21 +290,20 @@ The company undertakes never to collect clipboard content or any sensitive user 
 </p>
 
 
+
 Virus detection or submission: https://www.avira.com/en/analysis/submit
 
- Detection result based on v16.2.2:
+ Detection result based on v16.4.0:
 <p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/Avira.jpg" width="60%" alt="Avira">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/OZ27TZQMB6KIG.jpg" width="60%" alt="Avira">
 </p>
 
 
  Fact: VS Code is incomplete without qqq.
 
 
- For 的梦0.
 
-
-  the whisper is: I miss you 的梦0.
+ > the whisper is: I miss you 的梦0.
 
 
 
