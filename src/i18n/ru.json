@@ -114,7 +114,15 @@
             "rename": "Переименовать",
             "fileNameEmpty": "Имя файла не может быть пустым",
             "targetFileExists": "Целевой файл уже существует",
-            "coreFilesIncomplete": "Основные файлы неполные, некоторые функции могут быть ограничены"
+            "coreFilesIncomplete": "Основные файлы неполные, некоторые функции могут быть ограничены",
+            "copyPathSuccess": "Скопировано успешно — текстовый путь",
+            "copyPathFailed": "Ошибка копирования — текстовый путь: {0}",
+            "copyFileSuccess": "Скопировано успешно — файл",
+            "copyFileFailed": "Ошибка копирования — файл: {0}",
+            "copyImageSuccess": "Скопировано успешно — растровое изображение",
+            "copyImageFailed": "Ошибка копирования — растровое изображение: {0}",
+            "renameSuccess": "Переименовано успешно: {0}",
+            "renameFailed": "Ошибка переименования: {0}"
         }
     },
     "q2": {
@@ -712,6 +720,7 @@
     },
     "rust": {
         "exeNotFound": "Исполняемый файл Rust Bridge не найден",
+        "unavailable": "Движок Rust недоступен",
         "tryStart": "Попытка запуска Rust Bridge: \"{0}\" --daemon",
         "processError": "Ошибка процесса Rust Bridge: {0}",
         "startSuccess": "Rust Bridge успешно запущен",

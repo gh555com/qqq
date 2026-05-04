@@ -114,7 +114,15 @@
             "rename": "إعادة تسمية",
             "fileNameEmpty": "لا يمكن أن يكون اسم الملف فارغًا",
             "targetFileExists": "الملف الهدف موجود بالفعل",
-            "coreFilesIncomplete": "الملفات الأساسية غير مكتملة، قد تكون بعض الوظائف محدودة"
+            "coreFilesIncomplete": "الملفات الأساسية غير مكتملة، قد تكون بعض الوظائف محدودة",
+            "copyPathSuccess": "تم النسخ بنجاح — مسار النص",
+            "copyPathFailed": "فشل النسخ — مسار النص: {0}",
+            "copyFileSuccess": "تم النسخ بنجاح — ملف",
+            "copyFileFailed": "فشل النسخ — ملف: {0}",
+            "copyImageSuccess": "تم النسخ بنجاح — صورة نقطية",
+            "copyImageFailed": "فشل النسخ — صورة نقطية: {0}",
+            "renameSuccess": "تمت إعادة التسمية بنجاح: {0}",
+            "renameFailed": "فشلت إعادة التسمية: {0}"
         }
     },
     "q2": {
@@ -712,6 +720,7 @@
     },
     "rust": {
         "exeNotFound": "ملف Rust Bridge التنفيذي غير موجود",
+        "unavailable": "محرك Rust غير متاح",
         "tryStart": "محاولة بدء Rust Bridge: \"{0}\" --daemon",
         "processError": "خطأ في عملية Rust Bridge: {0}",
         "startSuccess": "Rust Bridge بدأ بنجاح",

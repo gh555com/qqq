@@ -11,7 +11,8 @@ import time
 import platform
 import shutil
 import ctypes
-from ctypes import wintypes
+if sys.platform == 'win32':
+    from ctypes import wintypes
 from pathlib import Path
 from datetime import datetime
 import random

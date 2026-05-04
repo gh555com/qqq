@@ -3358,14 +3358,18 @@ function openFileCommand(filePath) {
 		} else if (process.platform === "darwin") {
 			cp.exec(`open "${filePath}"`);
 		} else {
-			// ★ Linux: spawn avoids shell escaping issues; fallback to gio then vscode API
-			const child = cp.spawn('xdg-open', [filePath], { detached: true, stdio: 'ignore' });
-			child.on('error', () => {
-				const child2 = cp.spawn('gio', ['open', filePath], { detached: true, stdio: 'ignore' });
-				child2.on('error', () => vscode.env.openExternal(vscode.Uri.file(filePath)));
-				child2.unref();
+			// ★ Linux: chain xdg-open → gio open → VS Code API, checking exit code each time
+			const _tryLinuxOpen = (cmd, args, fallback) => {
+				const child = cp.spawn(cmd, args, { stdio: 'ignore' });
+				let done = false;
+				child.on('error', () => { if (!done) { done = true; fallback(); } });
+				child.on('close', (code) => { if (!done && code !== 0) { done = true; fallback(); } });
+			};
+			_tryLinuxOpen('xdg-open', [filePath], () => {
+				_tryLinuxOpen('gio', ['open', filePath], () => {
+					vscode.env.openExternal(vscode.Uri.file(filePath));
+				});
 			});
-			child.unref();
 		}
 	} catch {
 		vscode.env.openExternal(vscode.Uri.file(filePath));
@@ -3411,14 +3415,15 @@ function revealFileInFolder(filePath) {
 		} else if (process.platform === "darwin") {
 			cp.exec(`open -R "${filePath}"`);
 		} else {
-			// ★ Linux: D-Bus FileManager1.ShowItems selects file + always brings window to front
+			// ★ Linux: D-Bus FileManager1.ShowItems selects file + brings window to front
 			const fileUri = `file://${filePath.replace(/ /g, '%20')}`;
 			const dbusCmd = `dbus-send --session --print-reply --dest=org.freedesktop.FileManager1 --type=method_call /org/freedesktop/FileManager1 org.freedesktop.FileManager1.ShowItems array:string:"${fileUri}" string:""`;
 			cp.exec(dbusCmd, (err) => {
 				if (err) {
-					// Fallback: VS Code built-in revealFileInOS (also selects file on most DEs)
+					// Fallback: VS Code built-in revealFileInOS
 					vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(filePath)).catch(() => {
-						cp.spawn('xdg-open', [path.dirname(filePath)], { detached: true, stdio: 'ignore' }).unref();
+						const child = cp.spawn('xdg-open', [path.dirname(filePath)], { stdio: 'ignore' });
+						child.on('error', () => {});
 					});
 				}
 			});
@@ -3461,7 +3466,7 @@ async function renameFileCommand(rawPath, absPath) {
 	try {
 		await fs.promises.rename(absPath, newAbs);
 	} catch (e) {
-		global.showAutoCloseNotification('error', `重命名失败: ${e.message}`);
+		global.showAutoCloseNotification('error', q('q1.ui.renameFailed', e.message));
 		return;
 	}
 
@@ -3493,7 +3498,7 @@ async function renameFileCommand(rawPath, absPath) {
 
 	invalidateFolderSizeCacheForPath(newAbs);
 	renderVisibleEditors();
-	global.showAutoCloseNotification('success', `重命名成功: ${trimmed}`);
+	global.showAutoCloseNotification('success', q('q1.ui.renameSuccess', trimmed));
 }
 
 // ==================== c1 / c2 / c3 Commands ====================
@@ -3502,9 +3507,9 @@ async function renameFileCommand(rawPath, absPath) {
 async function copyFilePathCommand(absPath) {
 	try {
 		await vscode.env.clipboard.writeText(absPath);
-		global.showAutoCloseNotification('success', '已复制成功 — 纯文本路径');
+		global.showAutoCloseNotification('success', q('q1.ui.copyPathSuccess'));
 	} catch (e) {
-		global.showAutoCloseNotification('error', `复制失败 — 纯文本路径: ${e.message}`);
+		global.showAutoCloseNotification('error', q('q1.ui.copyPathFailed', e.message));
 	}
 }
 
@@ -3514,7 +3519,7 @@ async function copyFileToClipboardCommand(absPath) {
 		try {
 			const res = await global.rustBridge.call("setFiles", { paths: [absPath] }, 5000);
 			if (res && res.success) {
-				global.showAutoCloseNotification('success', '已复制成功 — 文件');
+				global.showAutoCloseNotification('success', q('q1.ui.copyFileSuccess'));
 				return;
 			}
 			global.logMessage(`copyFile via Rust failed: ${JSON.stringify(res)}`, "WARN");
@@ -3529,9 +3534,9 @@ async function copyFileToClipboardCommand(absPath) {
 		cp.execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { windowsHide: true, timeout: 8000 }, (err) => {
 			if (err) {
 				global.logMessage(`copyFile PS fallback failed: ${err.message}`, "WARN");
-				global.showAutoCloseNotification('error', `复制失败 — 文件: ${err.message}`);
+				global.showAutoCloseNotification('error', q('q1.ui.copyFileFailed', err.message));
 			} else {
-				global.showAutoCloseNotification('success', '已复制成功 — 文件');
+				global.showAutoCloseNotification('success', q('q1.ui.copyFileSuccess'));
 			}
 			resolve();
 		});
@@ -3544,7 +3549,7 @@ async function copyImageAsBitmapCommand(absPath) {
 		try {
 			const res = await global.rustBridge.call("setImage", { path: absPath }, 10000);
 			if (res && res.success) {
-				global.showAutoCloseNotification('success', '已复制成功 — 位图二进制');
+				global.showAutoCloseNotification('success', q('q1.ui.copyImageSuccess'));
 				return;
 			}
 			global.logMessage(`copyImageAsBitmap via Rust failed: ${JSON.stringify(res)}`, "WARN");
@@ -3552,7 +3557,7 @@ async function copyImageAsBitmapCommand(absPath) {
 			global.logMessage(`copyImageAsBitmap via Rust exception: ${e.message}`, "WARN");
 		}
 	}
-	global.showAutoCloseNotification('error', '复制失败 — 位图二进制: Rust 引擎不可用');
+	global.showAutoCloseNotification('error', q('q1.ui.copyImageFailed', q('rust.unavailable')));
 }
 
 function debounceRender(editor, delay = SCROLL_DEBOUNCE_MS) {
