@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" {{THEME_ATTR}}>
 
 <head>
 	<meta charset="UTF-8">
@@ -42,6 +42,55 @@
 			--sz-area-width: 96px;
 			--icon-area-width: 24px;
 			--icon-subtle: #c0bab0;
+
+			--gold-accent: #DEC987;
+			--gold-accent-hover: #d4c079;
+			--gold-accent-bg: rgb(223, 202, 136);
+			--gold-hover-bg: #ddca88;
+			--tooltip-bg: rgb(35, 30, 0);
+			--tooltip-text: var(--base2);
+			--pin-hover-bg: #d3d1c4;
+		}
+
+		/* ★ Dark theme: activated via data-theme="dark" on <html> */
+		[data-theme="dark"] {
+			--base03: #fdf6e3;
+			--base02: #eee8d5;
+			--base01: #93a1a1;
+			--base00: #c8c4b8;
+			--base0: #a8a49c;
+			--base1: #6a6660;
+			--base2: #2a2a2a;
+			--base3: #1e1e1e;
+			--yellow: #d4a017;
+			--orange: #e07020;
+			--red: #ff4444;
+			--magenta: #c06080;
+			--violet: #a08060;
+			--blue: #d4a017;
+			--cyan: #5abfb5;
+			--green: #8fbc5a;
+
+			--bg-color: #1e1e1e;
+			--bg-highlight: #2a2a2a;
+			--text-primary: #d4d0c8;
+			--text-secondary: #a8a49c;
+			--text-dim: #6a6660;
+			--border-color: #333333;
+			--border-strong: #555555;
+			--selection-bg: #5a3a2a;
+			--selection-text: #f0e8d8;
+			--button-primary: #d4a017;
+			--button-text: #1e1e1e;
+			--icon-subtle: #5a5650;
+
+			--gold-accent: #5a4d2a;
+			--gold-accent-hover: #6a5a30;
+			--gold-accent-bg: #4a3d20;
+			--gold-hover-bg: #3a3520;
+			--tooltip-bg: #2a2520;
+			--tooltip-text: #d4d0c8;
+			--pin-hover-bg: #3a3a3a;
 		}
 
 		* {
@@ -170,7 +219,7 @@
 		.sidebar-header {
 			padding: 0;
 			height: 51px;
-			background-color: #DEC987;
+			background-color: var(--gold-accent);
 			color: var(--text-primary);
 			display: flex;
 			align-items: center;
@@ -180,7 +229,7 @@
 		}
 
 		.sidebar-header:hover {
-			background-color: #d4c079;
+			background-color: var(--gold-accent-hover);
 		}
 
 		.sidebar-header .close-icon {
@@ -276,7 +325,7 @@
 		}
 
 		.recent-item:hover {
-			background-color: #ddca88;
+			background-color: var(--gold-hover-bg);
 		}
 
 		.delete-button {
@@ -378,8 +427,8 @@
 			color: var(--icon-subtle);
 		}
 		.qq-filter-input:focus {
-			border-color: #DEC987;
-			box-shadow: 0 0 0 1px #DEC987;
+			border-color: var(--gold-accent);
+			box-shadow: 0 0 0 1px var(--gold-accent);
 		}
 
 		.qq-iq-header {
@@ -441,7 +490,7 @@
 		}
 
 		.qq-dir .pin-icon:hover {
-			background-color: rgb(223, 202, 136);
+			background-color: var(--gold-accent-bg);
 		}
 
 		/* 图钉 hover 时：暖金色下划线延伸到左边界，标识要 pin 的文件夹 */
@@ -452,7 +501,7 @@
 			right: 0;
 			bottom: 0;
 			height: 2px;
-			background-color: rgb(223, 202, 136);
+			background-color: var(--gold-accent-bg);
 			pointer-events: none;
 		}
 
@@ -742,11 +791,11 @@
 		}
 
 		.pin-box:hover {
-			background-color: #d3d1c4;
+			background-color: var(--pin-hover-bg);
 		}
 
 		.pin-box.pinned {
-			background-color: rgb(223, 202, 136);
+			background-color: var(--gold-accent-bg);
 			color: var(--text-primary);
 		}
 
@@ -789,7 +838,7 @@
 		}
 
 		.save-button {
-			background-color: rgb(223, 202, 136);
+			background-color: var(--gold-accent-bg);
 			color: var(--text-primary);
 		}
 
@@ -931,11 +980,11 @@
 		}
 
 		.scm-btn:hover {
-			background-color: rgb(223, 202, 136);
+			background-color: var(--gold-accent-bg);
 		}
 
 		.scm-btn.active {
-			background-color: rgb(223, 202, 136);
+			background-color: var(--gold-accent-bg);
 			color: var(--text-primary);
 		}
 
@@ -967,7 +1016,7 @@
 		}
 
 		.open-btn:hover {
-			background-color: rgb(223, 202, 136);
+			background-color: var(--gold-accent-bg);
 		}
 
 		.address-bar-inner {
@@ -1112,8 +1161,8 @@
 		.dropdown-item-tooltip {
 			position: fixed;
 			pointer-events: none;
-			background: rgb(35, 30, 0);
-			color: var(--base2);
+			background: var(--tooltip-bg);
+			color: var(--tooltip-text);
 			padding: 4px 10px;
 			border-radius: 4px;
 			font-family: Tahoma, sans-serif;
@@ -1129,14 +1178,22 @@
 	</style>
 	<script>
 		// Random color scheme selector for file list selection
-		// 4 schemes with weighted probabilities: Coral(30%), Warm Apricot(30%), Bean Paste(30%), Vivid Red(10%)
+		// Theme-aware: light vs dark palettes
 		(function() {
-			const schemes = [
+			const isDark = document.documentElement.hasAttribute('data-theme') && document.documentElement.getAttribute('data-theme') === 'dark';
+			const lightSchemes = [
 				{ name: 'Coral', bg: '#e8d0c0', text: '#000000', weight: 30 },
 				{ name: 'Warm Apricot', bg: '#e8d0b0', text: '#000000', weight: 30 },
 				{ name: 'Bean Paste', bg: '#e7e4c2', text: '#000000', weight: 30 },
 				{ name: 'Vivid Red', bg: '#cb4b16', text: '#fdf6e3', weight: 10 }
 			];
+			const darkSchemes = [
+				{ name: 'Ember', bg: '#5a3a2a', text: '#f0e8d8', weight: 30 },
+				{ name: 'Bronze', bg: '#4a3520', text: '#e8d8c0', weight: 30 },
+				{ name: 'Olive Night', bg: '#3a3a20', text: '#d8d0b0', weight: 30 },
+				{ name: 'Dark Flame', bg: '#6a2a10', text: '#fdf6e3', weight: 10 }
+			];
+			const schemes = isDark ? darkSchemes : lightSchemes;
 			const totalWeight = schemes.reduce((sum, s) => sum + s.weight, 0);
 			const rand = Math.random() * totalWeight;
 			let cumulative = 0;
@@ -1147,7 +1204,7 @@
 			}
 			document.documentElement.style.setProperty('--selection-bg', selected.bg);
 			document.documentElement.style.setProperty('--selection-text', selected.text);
-			console.log('[Color Scheme] ' + selected.name + ': bg=' + selected.bg + ', text=' + selected.text);
+			console.log('[Color Scheme] ' + (isDark ? 'Dark/' : 'Light/') + selected.name + ': bg=' + selected.bg + ', text=' + selected.text);
 		})();
 	</script>
 </head>
@@ -1259,13 +1316,13 @@
 				</div>
 				<div style="display: flex; gap: 15px;">
 					<button class="button save-button" onclick="saveFile()" data-tooltip="{{I18N_NEW_FILE}}">
-						<svg width="20" height="20" viewBox="0 0 24 24" fill="#7a7874">
+						<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
 							<path
 								d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z" />
 						</svg>
 					</button>
 					<button class="button cancel-button" onclick="createFolder()" data-tooltip="{{I18N_NEW_FOLDER}}">
-						<svg width="20" height="20" viewBox="0 0 24 24" fill="#7a7874">
+						<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
 							<path
 								d="M10,4H4C2.89,4 2,4.89 2,6V20A2,2 0 0,0 4,22H20A2,2 0 0,0 22,20V8L16,2H10M13,9V3.5L18.5,9H13Z" />
 						</svg>

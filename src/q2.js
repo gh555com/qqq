@@ -762,10 +762,12 @@ function openAdminTerminal(targetPath, termType) {
         { cmd: 'gnome-terminal', args: ['--', 'bash', '-c', sudoCmd + '; exec bash'] },
         { cmd: 'konsole', args: ['-e', 'bash', '-c', sudoCmd + '; exec bash'] },
         { cmd: 'xfce4-terminal', args: ['-e', `bash -c "${sudoCmd}; exec bash"`] },
-        { cmd: 'xterm', args: ['-e', `bash -c "${sudoCmd}; exec bash"`] },
+        { cmd: 'mate-terminal', args: ['-e', `bash -c "${sudoCmd}; exec bash"`] },
+        { cmd: 'lxterminal', args: ['-e', `bash -c "${sudoCmd}; exec bash"`] },
         { cmd: 'tilix', args: ['-e', `bash -c "${sudoCmd}; exec bash"`] },
         { cmd: 'alacritty', args: ['-e', 'bash', '-c', sudoCmd + '; exec bash'] },
-        { cmd: 'kitty', args: ['bash', '-c', sudoCmd + '; exec bash'] }
+        { cmd: 'kitty', args: ['bash', '-c', sudoCmd + '; exec bash'] },
+        { cmd: 'xterm', args: ['-e', `bash -c "${sudoCmd}; exec bash"`] },
       ];
 
       // Try to open terminal one by one
@@ -2257,6 +2259,16 @@ function requestFileSizeUpdates(items){
 window.addEventListener('message', event => {
   const message = event.data;
   if (!message) return;
+
+    // ★ Runtime theme switching from VS Code
+    if (message.command === 'setTheme') {
+        if (message.theme === 'dark') {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        } else {
+            document.documentElement.removeAttribute('data-theme');
+        }
+        return;
+    }
 
     if (message.command === 'historyData') {
         if (message.key === 'fileFilter') {
@@ -3978,6 +3990,7 @@ function getWebviewContent(currentPath) {
   const inlineScript = generateWebviewScript(currentPath, config.sidebarRatio);
 
   let finalHtml = htmlTemplate
+    .replace("{{THEME_ATTR}}", global.isDarkTheme() ? 'data-theme="dark"' : '')
     .replace(/\{\{SIDEBAR_WIDTH\}\}/g, config.sidebarWidth)
     .replace(/\{\{LINE_SPACING\}\}/g, config.lineSpacing)
     .replace("{{DRIVES_HTML}}", drivesHtml + specialEntriesHtml)
@@ -4295,6 +4308,14 @@ function showSaveAsDialog() {
     }
     // Note: tracking file cleanup happens automatically when Python detects dead windows
   });
+
+  // ★ Runtime theme change: sync dark/light to webview when VS Code theme changes
+  const themeDisposable = vscode.window.onDidChangeActiveColorTheme(() => {
+    if (panel && activePanelAlive) {
+      panel.webview.postMessage({ command: 'setTheme', theme: global.isDarkTheme() ? 'dark' : 'light' });
+    }
+  });
+  panel.onDidDispose(() => { themeDisposable.dispose(); });
 
   // ★ Track panel visibility: remove from tracking when q2 becomes hidden
   panel.onDidChangeViewState(e => {

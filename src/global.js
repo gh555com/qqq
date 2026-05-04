@@ -1672,6 +1672,10 @@ function _initFFmpegAsync(context) {
 		if (ffInGlobalStorage) {
 			try {
 				await fs.promises.access(ffInGlobalStorage);
+				// ★ Linux/macOS: 确保执行权限（可能上次移动时没有 chmod）
+				if (process.platform !== 'win32') {
+					try { fs.chmodSync(ffInGlobalStorage, 0o755); } catch { }
+				}
 				ffmpegPath = ffInGlobalStorage;
 				ffprobePath = ffprobeInGlobalStorage;
 				ffmpegSource = "GLOBAL_STORAGE";
@@ -1689,6 +1693,11 @@ function _initFFmpegAsync(context) {
 					if (ffprobeInGlobalStorage) {
 						try { await fs.promises.rename(ffprobeInAssets, ffprobeInGlobalStorage); } catch { }
 					}
+					// ★ Linux/macOS: VSIX 解压丢失 +x 权限，必须 chmod
+					if (process.platform !== 'win32') {
+						try { fs.chmodSync(ffInGlobalStorage, 0o755); } catch { }
+						if (ffprobeInGlobalStorage) { try { fs.chmodSync(ffprobeInGlobalStorage, 0o755); } catch { } }
+					}
 					ffmpegPath = ffInGlobalStorage;
 					ffprobePath = ffprobeInGlobalStorage;
 					ffmpegSource = "GLOBAL_STORAGE";
@@ -1704,6 +1713,11 @@ function _initFFmpegAsync(context) {
 								await fs.promises.copyFile(ffprobeInAssets, ffprobeInGlobalStorage);
 								await fs.promises.unlink(ffprobeInAssets);
 							} catch { }
+						}
+						// ★ Linux/macOS: chmod +x
+						if (process.platform !== 'win32') {
+							try { fs.chmodSync(ffInGlobalStorage, 0o755); } catch { }
+							if (ffprobeInGlobalStorage) { try { fs.chmodSync(ffprobeInGlobalStorage, 0o755); } catch { } }
 						}
 						ffmpegPath = ffInGlobalStorage;
 						ffprobePath = ffprobeInGlobalStorage;
@@ -2655,6 +2669,9 @@ function _getThemeKind() {
 	} catch { }
 	return 'unknown';
 }
+
+function getThemeKind() { return _getThemeKind(); }
+function isDarkTheme() { const t = _getThemeKind(); return t === 'dark' || t === 'hc-dark'; }
 
 let _wqReporter = null;
 
@@ -5141,7 +5158,11 @@ module.exports = {
 	NON_TEXT_EXTS,
 
 	// URL validation (single source of truth)
-	isValidUrl
+	isValidUrl,
+
+	// Theme detection
+	getThemeKind,
+	isDarkTheme,
 };
 
 
