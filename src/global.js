@@ -2132,6 +2132,7 @@ let _durationTimer = null;
 // ★ ConfigGate (ULTIMATE Pro/Trial Config System)
 // ============================================================================
 const DEFAULT_CONFIG = {
+	"theme": "auto",
 	"roamAsStartPage": true,
 	"roamName": "的梦gaea",
 	"enlargeSmallImages": false,
@@ -2671,7 +2672,18 @@ function _getThemeKind() {
 }
 
 function getThemeKind() { return _getThemeKind(); }
-function isDarkTheme() { const t = _getThemeKind(); return t === 'dark' || t === 'hc-dark'; }
+
+// ★ Config-aware theme: respects qqq.theme setting (auto / dark / solarize light)
+function getEffectiveTheme() {
+	const themeCfg = ConfigManager.get('theme') || 'auto';
+	if (themeCfg === 'dark') return 'dark';
+	if (themeCfg === 'solarize light') return 'light';
+	// "auto" or any unknown value: follow VS Code theme
+	const vsTheme = _getThemeKind();
+	return (vsTheme === 'dark' || vsTheme === 'hc-dark') ? 'dark' : 'light';
+}
+
+function isDarkTheme() { return getEffectiveTheme() === 'dark'; }
 
 let _wqReporter = null;
 
@@ -5163,6 +5175,7 @@ module.exports = {
 	// Theme detection
 	getThemeKind,
 	isDarkTheme,
+	getEffectiveTheme,
 };
 
 

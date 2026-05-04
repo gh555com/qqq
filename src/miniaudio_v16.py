@@ -21,7 +21,8 @@ import random
 import ctypes
 import queue
 import threading
-import ctypes.wintypes as wt
+if sys.platform == 'win32':
+    import ctypes.wintypes as wt
 from concurrent.futures import ThreadPoolExecutor
 
 import array
@@ -2363,168 +2364,179 @@ class UltraFastConcurrentSFX:
 
 
 # =========================
-# ClipboardWatcher
+# ClipboardWatcher (Windows-only: Win32 message pump for clipboard changes)
+# On Linux/macOS, a no-op stub is used instead.
 # =========================
-user32 = ctypes.windll.user32
-kernel32 = ctypes.windll.kernel32
+if sys.platform == 'win32':
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
 
-# ★ 兼容修复：某些 Python 版本的 wintypes 没有 LRESULT
-if not hasattr(wt, 'LRESULT'):
-    wt.LRESULT = ctypes.c_longlong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_long
+    # ★ 兼容修复：某些 Python 版本的 wintypes 没有 LRESULT
+    if not hasattr(wt, 'LRESULT'):
+        wt.LRESULT = ctypes.c_longlong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_long
 
-WM_CLIPBOARDUPDATE = 0x031D
-WM_CLOSE = 0x0010
-HWND_MESSAGE = wt.HWND(-3)
+    WM_CLIPBOARDUPDATE = 0x031D
+    WM_CLOSE = 0x0010
+    HWND_MESSAGE = wt.HWND(-3)
 
-class WNDCLASSEXW(ctypes.Structure):
-    _fields_ = [
-        ("cbSize", wt.UINT), ("style", wt.UINT), ("lpfnWndProc", ctypes.c_void_p),
-        ("cbClsExtra", ctypes.c_int), ("cbWndExtra", ctypes.c_int), ("hInstance", wt.HINSTANCE),
-        ("hIcon", wt.HICON), ("hCursor", wt.HANDLE), ("hbrBackground", wt.HBRUSH),
-        ("lpszMenuName", wt.LPCWSTR), ("lpszClassName", wt.LPCWSTR), ("hIconSm", wt.HICON),
-    ]
+    class WNDCLASSEXW(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wt.UINT), ("style", wt.UINT), ("lpfnWndProc", ctypes.c_void_p),
+            ("cbClsExtra", ctypes.c_int), ("cbWndExtra", ctypes.c_int), ("hInstance", wt.HINSTANCE),
+            ("hIcon", wt.HICON), ("hCursor", wt.HANDLE), ("hbrBackground", wt.HBRUSH),
+            ("lpszMenuName", wt.LPCWSTR), ("lpszClassName", wt.LPCWSTR), ("hIconSm", wt.HICON),
+        ]
 
-user32.RegisterClassExW.argtypes = [ctypes.POINTER(WNDCLASSEXW)]
-user32.RegisterClassExW.restype = wt.ATOM
-user32.CreateWindowExW.argtypes = [wt.DWORD, wt.LPCWSTR, wt.LPCWSTR, wt.DWORD, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wt.HWND, wt.HMENU, wt.HINSTANCE, wt.LPVOID]
-user32.CreateWindowExW.restype = wt.HWND
-user32.DestroyWindow.argtypes = [wt.HWND]
-user32.DestroyWindow.restype = wt.BOOL
-user32.UnregisterClassW.argtypes = [wt.LPCWSTR, wt.HINSTANCE]
-user32.UnregisterClassW.restype = wt.BOOL
-user32.AddClipboardFormatListener.argtypes = [wt.HWND]
-user32.AddClipboardFormatListener.restype = wt.BOOL
-user32.RemoveClipboardFormatListener.argtypes = [wt.HWND]
-user32.RemoveClipboardFormatListener.restype = wt.BOOL
-user32.PostMessageW.argtypes = [wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM]
-user32.PostMessageW.restype = wt.BOOL
-user32.GetMessageW.argtypes = [ctypes.POINTER(wt.MSG), wt.HWND, wt.UINT, wt.UINT]
-user32.GetMessageW.restype = ctypes.c_int
-user32.TranslateMessage.argtypes = [ctypes.POINTER(wt.MSG)]
-user32.TranslateMessage.restype = wt.BOOL
-user32.DispatchMessageW.argtypes = [ctypes.POINTER(wt.MSG)]
-user32.DispatchMessageW.restype = wt.LRESULT
-user32.DefWindowProcW.argtypes = [wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM]
-user32.DefWindowProcW.restype = wt.LRESULT
-user32.PostQuitMessage.argtypes = [ctypes.c_int]
-user32.PostQuitMessage.restype = None
-kernel32.GetModuleHandleW.argtypes = [wt.LPCWSTR]
-kernel32.GetModuleHandleW.restype = wt.HMODULE
-WNDPROC_T = ctypes.WINFUNCTYPE(wt.LRESULT, wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM)
+    user32.RegisterClassExW.argtypes = [ctypes.POINTER(WNDCLASSEXW)]
+    user32.RegisterClassExW.restype = wt.ATOM
+    user32.CreateWindowExW.argtypes = [wt.DWORD, wt.LPCWSTR, wt.LPCWSTR, wt.DWORD, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wt.HWND, wt.HMENU, wt.HINSTANCE, wt.LPVOID]
+    user32.CreateWindowExW.restype = wt.HWND
+    user32.DestroyWindow.argtypes = [wt.HWND]
+    user32.DestroyWindow.restype = wt.BOOL
+    user32.UnregisterClassW.argtypes = [wt.LPCWSTR, wt.HINSTANCE]
+    user32.UnregisterClassW.restype = wt.BOOL
+    user32.AddClipboardFormatListener.argtypes = [wt.HWND]
+    user32.AddClipboardFormatListener.restype = wt.BOOL
+    user32.RemoveClipboardFormatListener.argtypes = [wt.HWND]
+    user32.RemoveClipboardFormatListener.restype = wt.BOOL
+    user32.PostMessageW.argtypes = [wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM]
+    user32.PostMessageW.restype = wt.BOOL
+    user32.GetMessageW.argtypes = [ctypes.POINTER(wt.MSG), wt.HWND, wt.UINT, wt.UINT]
+    user32.GetMessageW.restype = ctypes.c_int
+    user32.TranslateMessage.argtypes = [ctypes.POINTER(wt.MSG)]
+    user32.TranslateMessage.restype = wt.BOOL
+    user32.DispatchMessageW.argtypes = [ctypes.POINTER(wt.MSG)]
+    user32.DispatchMessageW.restype = wt.LRESULT
+    user32.DefWindowProcW.argtypes = [wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM]
+    user32.DefWindowProcW.restype = wt.LRESULT
+    user32.PostQuitMessage.argtypes = [ctypes.c_int]
+    user32.PostQuitMessage.restype = None
+    kernel32.GetModuleHandleW.argtypes = [wt.LPCWSTR]
+    kernel32.GetModuleHandleW.restype = wt.HMODULE
+    WNDPROC_T = ctypes.WINFUNCTYPE(wt.LRESULT, wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM)
 
-class ClipboardWatcher:
-    def __init__(self, callback, debounce_ms=0):
-        if not callable(callback):
-            raise TypeError("callback must be callable")
-        self._callback = callback
-        self._debounce_s = max(0.0, debounce_ms / 1000.0)
+    class ClipboardWatcher:
+        def __init__(self, callback, debounce_ms=0):
+            if not callable(callback):
+                raise TypeError("callback must be callable")
+            self._callback = callback
+            self._debounce_s = max(0.0, debounce_ms / 1000.0)
 
-        self._queue = queue.Queue()
-        self._msg_thread = None
-        self._work_thread = None
-        self._hwnd = None
-        self._wndproc_ref = None
-        self._cls_name = f"DGS_CB_{id(self):x}"
-        self._lock = threading.Lock()
-        self._ready = threading.Event()
-        self._started_ok = False
-
-    @property
-    def alive(self):
-        return self._msg_thread is not None and self._msg_thread.is_alive()
-
-    def start(self):
-        with self._lock:
-            if self.alive:
-                return
-            self._ready.clear()
-            self._started_ok = False
-            self._work_thread = threading.Thread(target=self._worker, name="cb-worker", daemon=True)
-            self._work_thread.start()
-            self._msg_thread = threading.Thread(target=self._pump, name="cb-pump", daemon=True)
-            self._msg_thread.start()
-            if not self._ready.wait(timeout=3.0) or not self._started_ok:
-                raise RuntimeError("ClipboardWatcher start failed")
-
-    def stop(self):
-        with self._lock:
-            if not self.alive:
-                return
-            if self._hwnd:
-                user32.PostMessageW(self._hwnd, WM_CLOSE, 0, 0)
-            self._msg_thread.join(timeout=3.0)
+            self._queue = queue.Queue()
             self._msg_thread = None
-            self._queue.put(_SENTINEL)
-            self._work_thread.join(timeout=3.0)
             self._work_thread = None
-
-    def _wndproc(self, hwnd, msg, wp, lp):
-        if msg == WM_CLIPBOARDUPDATE:
-            try:
-                self._queue.put_nowait(time.perf_counter())
-            except Exception:
-                pass
-            return 0
-        if msg == WM_CLOSE:
-            user32.PostQuitMessage(0)
-            return 0
-        return user32.DefWindowProcW(hwnd, msg, wp, lp)
-
-    def _worker(self):
-        last = 0.0
-        ds = self._debounce_s
-        while True:
-            ts = self._queue.get()
-            if ts is _SENTINEL:
-                break
-            if ds > 0 and (ts - last) < ds:
-                continue
-            last = ts
-            try:
-                self._callback()
-            except Exception:
-                pass
-
-    def _pump(self):
-        self._wndproc_ref = WNDPROC_T(self._wndproc)
-        hinst = kernel32.GetModuleHandleW(None)
-
-        wc = WNDCLASSEXW()
-        wc.cbSize = ctypes.sizeof(WNDCLASSEXW)
-        wc.lpfnWndProc = ctypes.cast(self._wndproc_ref, ctypes.c_void_p).value
-        wc.hInstance = hinst
-        wc.lpszClassName = self._cls_name
-        user32.RegisterClassExW(ctypes.byref(wc))
-
-        try:
-            self._hwnd = user32.CreateWindowExW(0, self._cls_name, None, 0, 0, 0, 0, 0, HWND_MESSAGE, None, hinst, None)
-            if not self._hwnd:
-                self._ready.set()
-                return
-            ok = user32.AddClipboardFormatListener(self._hwnd)
-            if not ok:
-                self._ready.set()
-                return
-            self._started_ok = True
-            self._ready.set()
-
-            msg = wt.MSG()
-            while True:
-                ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
-                if ret <= 0:
-                    break
-                user32.TranslateMessage(ctypes.byref(msg))
-                user32.DispatchMessageW(ctypes.byref(msg))
-        finally:
-            if self._hwnd:
-                try: user32.RemoveClipboardFormatListener(self._hwnd)
-                except Exception: pass
-                try: user32.DestroyWindow(self._hwnd)
-                except Exception: pass
-                self._hwnd = None
-            try: user32.UnregisterClassW(self._cls_name, hinst)
-            except Exception: pass
+            self._hwnd = None
             self._wndproc_ref = None
+            self._cls_name = f"DGS_CB_{id(self):x}"
+            self._lock = threading.Lock()
+            self._ready = threading.Event()
+            self._started_ok = False
+
+        @property
+        def alive(self):
+            return self._msg_thread is not None and self._msg_thread.is_alive()
+
+        def start(self):
+            with self._lock:
+                if self.alive:
+                    return
+                self._ready.clear()
+                self._started_ok = False
+                self._work_thread = threading.Thread(target=self._worker, name="cb-worker", daemon=True)
+                self._work_thread.start()
+                self._msg_thread = threading.Thread(target=self._pump, name="cb-pump", daemon=True)
+                self._msg_thread.start()
+                if not self._ready.wait(timeout=3.0) or not self._started_ok:
+                    raise RuntimeError("ClipboardWatcher start failed")
+
+        def stop(self):
+            with self._lock:
+                if not self.alive:
+                    return
+                if self._hwnd:
+                    user32.PostMessageW(self._hwnd, WM_CLOSE, 0, 0)
+                self._msg_thread.join(timeout=3.0)
+                self._msg_thread = None
+                self._queue.put(_SENTINEL)
+                self._work_thread.join(timeout=3.0)
+                self._work_thread = None
+
+        def _wndproc(self, hwnd, msg, wp, lp):
+            if msg == WM_CLIPBOARDUPDATE:
+                try:
+                    self._queue.put_nowait(time.perf_counter())
+                except Exception:
+                    pass
+                return 0
+            if msg == WM_CLOSE:
+                user32.PostQuitMessage(0)
+                return 0
+            return user32.DefWindowProcW(hwnd, msg, wp, lp)
+
+        def _worker(self):
+            last = 0.0
+            ds = self._debounce_s
+            while True:
+                ts = self._queue.get()
+                if ts is _SENTINEL:
+                    break
+                if ds > 0 and (ts - last) < ds:
+                    continue
+                last = ts
+                try:
+                    self._callback()
+                except Exception:
+                    pass
+
+        def _pump(self):
+            self._wndproc_ref = WNDPROC_T(self._wndproc)
+            hinst = kernel32.GetModuleHandleW(None)
+
+            wc = WNDCLASSEXW()
+            wc.cbSize = ctypes.sizeof(WNDCLASSEXW)
+            wc.lpfnWndProc = ctypes.cast(self._wndproc_ref, ctypes.c_void_p).value
+            wc.hInstance = hinst
+            wc.lpszClassName = self._cls_name
+            user32.RegisterClassExW(ctypes.byref(wc))
+
+            try:
+                self._hwnd = user32.CreateWindowExW(0, self._cls_name, None, 0, 0, 0, 0, 0, HWND_MESSAGE, None, hinst, None)
+                if not self._hwnd:
+                    self._ready.set()
+                    return
+                ok = user32.AddClipboardFormatListener(self._hwnd)
+                if not ok:
+                    self._ready.set()
+                    return
+                self._started_ok = True
+                self._ready.set()
+
+                msg = wt.MSG()
+                while True:
+                    ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+                    if ret <= 0:
+                        break
+                    user32.TranslateMessage(ctypes.byref(msg))
+                    user32.DispatchMessageW(ctypes.byref(msg))
+            finally:
+                if self._hwnd:
+                    try: user32.RemoveClipboardFormatListener(self._hwnd)
+                    except Exception: pass
+                    try: user32.DestroyWindow(self._hwnd)
+                    except Exception: pass
+                    self._hwnd = None
+                try: user32.UnregisterClassW(self._cls_name, hinst)
+                except Exception: pass
+                self._wndproc_ref = None
+
+else:
+    # ★ Linux / macOS: no-op stub (clipboard monitoring handled by Shell bridge / xclip)
+    class ClipboardWatcher:
+        def __init__(self, callback, debounce_ms=0): pass
+        @property
+        def alive(self): return False
+        def start(self): pass
+        def stop(self): pass
 
 
 class TriggerBus:

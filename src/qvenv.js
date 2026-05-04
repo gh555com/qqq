@@ -1147,6 +1147,15 @@ sys.exit(0)
                         }
                     } else {
                         cp.execSync(`tar -xzf "${zipPath}" -C "${installDir}" --strip-components=1`, { windowsHide: true });
+                        // ★ Linux/macOS: 确保 Python 二进制有执行权限
+                        try {
+                            const binDir = path.join(installDir, 'bin');
+                            if (fs.existsSync(binDir)) {
+                                for (const f of fs.readdirSync(binDir)) {
+                                    try { fs.chmodSync(path.join(binDir, f), 0o755); } catch { }
+                                }
+                            }
+                        } catch { }
                     }
                     try { fs.unlinkSync(zipPath); } catch { }
 

@@ -2127,6 +2127,16 @@ class YtDlpDownloader {
 
                 if (this.ffmpegPath) {
                     args.unshift("--ffmpeg-location", this.ffmpegPath);
+                } else {
+                    // ★ Lazy resolve: ffmpegInit may have completed after constructor
+                    try {
+                        const global = require('./global');
+                        const gPath = global.ffmpegPath();
+                        if (gPath && gPath !== 'ffmpeg' && gPath !== 'ffmpeg.exe') {
+                            this.ffmpegPath = gPath;
+                            args.unshift("--ffmpeg-location", gPath);
+                        }
+                    } catch { }
                 }
 
                 if (options.rateLimit) {
@@ -2616,6 +2626,15 @@ class UnifiedMediaDownloader {
             ...(options.ytdlp || {}),
             securityLevel,
             securityOverrides,
+            // ★ 传递 globalStorage 中的 ffmpeg 路径，否则 yt-dlp 找不到 ffmpeg 无法合并 video+audio
+            ffmpegPath: options.ytdlp?.ffmpegPath || (() => {
+                try {
+                    const global = require('./global');
+                    const gPath = global.ffmpegPath();
+                    if (gPath && gPath !== 'ffmpeg' && gPath !== 'ffmpeg.exe') return gPath;
+                } catch { }
+                return null;
+            })(),
         });
 
         this.python = new PythonEngineDownloader({

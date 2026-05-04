@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 ---
 
 
+## [16.4.0] - 2026-05-04
+
+### Added
+- **Dark theme**: Roam and Clipboard History now automatically match your VS Code color theme. Switch to a dark theme and both panels instantly follow — no setting needed. The dark palette uses warm amber/gold tones throughout; no blue elements.
+- **Roam qq area search box**: A filter box appears when you scroll-expand to 100 items, letting you quickly find any recently visited folder. Supports multi-keyword AND search (e.g. `project src` matches paths containing both words). Recent search terms are saved for quick reuse.
+- **Reorder pinned folders**: Hover over any pinned directory in the Roam sidebar to reveal up/down arrows — click to rearrange the order. Changes persist safely across multiple windows.
+
+### Improved
+- **Roam qq area capacity**: Default display increased from 20 to 33 items; scroll-expand limit raised from 60 to 100.
+- **Download file names update instantly**: Previously, files being downloaded (e.g. `.crdownload`) would show the temporary name and never refresh to the final name until you navigated away and back. Now Roam detects when a download finishes and refreshes the listing automatically.
+
+### Fixed
+- **Linux/macOS: paste anything now works**: The core "paste anything" feature (files, folders, images, HTML with embedded resources) was completely broken on Linux — only plain text worked. Fixed the clipboard detection chain so all media types are handled correctly through the Shell bridge (xclip/pngpaste).
+- **Linux/macOS: audio engine crash on startup**: The audio engine (sound effects, clipboard sounds) would crash immediately because it tried to load Windows-only APIs. Now properly isolated — audio playback works on all platforms.
+- **Linux/macOS: video download completes but fails**: Downloaded videos would show progress then roll back with "0 landed". Two causes fixed: FFmpeg wasn't given execute permission after extraction, and yt-dlp couldn't find FFmpeg (stored in extension folder, not system PATH). Both resolved — video+audio merge works correctly now.
+- **Linux: Python engine installs in a loop**: The dependency installer would nuke and retry endlessly (7+ rounds) because packages were installed to the wrong directory. Fixed the install path to match Linux Python's expected location — now succeeds in one round.
+- **Linux: terminal won't open from Roam**: Pressing `a` to open a terminal would show a notification but nothing happened. The command required sudo which silently failed. Replaced with native terminal arguments — supports gnome-terminal, konsole, xfce4-terminal, mate-terminal, lxterminal, tilix, alacritty, kitty, and xterm.
+- **Audio broker mutex error**: The broker's singleton lock on Linux failed with "_get_cache_dir is not defined". Fixed the missing function reference so only one broker instance runs at a time.
+
+---
+
+
 ## [16.3.1] - 2026-04-30
 
 ### Added
