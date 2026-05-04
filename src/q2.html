@@ -297,12 +297,38 @@
 		}
 
 		/* 历史区路径 span：flex 子元素截断 + 省略号 */
-		.recent-item > span:not(.delete-button) {
+		.recent-item > span:not(.delete-button):not(.pin-move-btn) {
 			flex: 1;
 			min-width: 0;
 			overflow: hidden;
 			text-overflow: ellipsis;
 			white-space: nowrap;
+		}
+
+		/* 固定历史区：上下移动按钮 */
+		.pin-move-group {
+			display: none;
+			flex-shrink: 0;
+			margin-left: auto;
+			gap: 0;
+		}
+		.recent-item:hover .pin-move-group {
+			display: flex;
+		}
+		.pin-move-btn {
+			padding: 0 7px;
+			cursor: pointer;
+			color: var(--text-dim);
+			opacity: 0.55;
+			font-size: 13px;
+			line-height: 1;
+			transition: opacity 0.12s, color 0.12s;
+			-webkit-user-select: none;
+			user-select: none;
+		}
+		.pin-move-btn:hover {
+			opacity: 1;
+			color: var(--text-primary);
 		}
 
 		.divider {
@@ -323,6 +349,32 @@
 		}
 		.qq-iq-section::-webkit-scrollbar {
 			display: none;                   /* Chrome/Safari/Electron */
+		}
+
+		.qq-filter-container {
+			padding: 4px 8px 2px 8px;
+			flex-shrink: 0;
+			position: relative;
+		}
+		.qq-filter-input {
+			width: 100%;
+			background: var(--base2);
+			border: 1px solid var(--border-color);
+			border-radius: 3px;
+			padding: 4px 7px;
+			font-family: Tahoma, sans-serif;
+			font-size: 12px;
+			color: var(--text-primary);
+			outline: none;
+			box-sizing: border-box;
+			transition: border-color 0.2s;
+		}
+		.qq-filter-input::placeholder {
+			color: var(--icon-subtle);
+		}
+		.qq-filter-input:focus {
+			border-color: #DEC987;
+			box-shadow: 0 0 0 1px #DEC987;
 		}
 
 		.qq-iq-header {

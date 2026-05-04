@@ -1116,7 +1116,7 @@ function setFineSCMValue(folderPath, szMode, sortBy) {
 }
 
 // ==================== History Management (New) ====================
-// qqiq: [{path, type:'dir'|'file'}] up to 60 items, newest on top
+// qqiq: [{path, type:'dir'|'file'}] up to 100 items, newest on top
 // pinnedDirs: [string] up to 6 items, newest at bottom (directories only)
 
 function _qqiqKey(p) {
@@ -1145,7 +1145,7 @@ function _insertToqqiqTop(iq, itemPath, itemType, pinnedDirs) {
   const key = cacheKeyForPath(canon);
   const filtered = iq.filter(item => _qqiqKey(item.path) !== key);
   filtered.unshift({ path: canon, type: itemType });
-  return filtered.slice(0, 60);
+  return filtered.slice(0, 100);
 }
 
 /** Record directory history (only add directories to qqiq; skip pinned ones) */
@@ -1182,7 +1182,7 @@ function recordFileHistory(filePath) {
   }
   toInsert.push({ path: canon, type: 'file' });
   iq.unshift(...toInsert);
-  iq = iq.slice(0, 60);
+  iq = iq.slice(0, 100);
   saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, iq, config.isPinned);
 }
 
@@ -1221,6 +1221,21 @@ function unpinDirectory(dirPath) {
     iq = _insertToqqiqTop(iq, canon, 'dir');
   }
   saveConfig(pinned, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, iq, config.isPinned);
+}
+
+/** Move pinned directory up or down in the list */
+function movePinnedDir(dirPath, direction) {
+  const config = getConfig();
+  const canon = canonicalizeExistingPath(dirPath) || dirPath;
+  const key = cacheKeyForPath(canon);
+  const pinned = [...(config.pinnedDirs || [])];
+  const idx = pinned.findIndex(d => cacheKeyForPath(d) === key);
+  if (idx === -1) return;
+  const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+  if (targetIdx < 0 || targetIdx >= pinned.length) return; // Already at boundary
+  // Swap
+  [pinned[idx], pinned[targetIdx]] = [pinned[targetIdx], pinned[idx]];
+  saveConfig(pinned, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, config.qqiq, config.isPinned);
 }
 
 let cachedDrives = null;
@@ -1486,8 +1501,8 @@ function showHistoryDropdown(inputEl, dropdownEl, history) {
             inputEl.value = itemText;
             hideAllDropdowns();
             inputEl.focus();
-            // ★ For file filter, trigger input event to apply filter
-            if (inputEl.id === 'fileFilterInput') {
+            // ★ For file filter or qq filter, trigger input event to apply filter
+            if (inputEl.id === 'fileFilterInput' || inputEl.id === 'qqFilterInput') {
                 inputEl.dispatchEvent(new Event('input', { bubbles: true }));
             }
         };
@@ -2256,6 +2271,12 @@ window.addEventListener('message', event => {
             if (input && dropdown) {
                 showHistoryDropdown(input, dropdown, message.history);
             }
+        } else if (message.key === 'qqFilter') {
+            const input = document.getElementById('qqFilterInput');
+            const dropdown = document.getElementById('qqFilterHistoryDropdown');
+            if (input && dropdown) {
+                showHistoryDropdown(input, dropdown, message.history);
+            }
         }
         return;
     }
@@ -2414,25 +2435,43 @@ window.addEventListener('message', event => {
     if (el) { el.style.opacity = ''; el.style.pointerEvents = ''; }
   } else if (message.command === 'updateSidebar') {
       // Dynamically update sidebar area
+      // ★ Preserve filter keyword across DOM replacement
+      const oldFilter = document.getElementById('qqFilterInput');
+      const savedKeyword = oldFilter ? oldFilter.value : '';
+
       const qqSec = document.querySelector('.sidebar .qq-iq-section');
       const divider = document.querySelector('.sidebar .divider');
+      const oldFilterContainer = document.querySelector('.sidebar .qq-filter-container');
       if (message.qqiqHtml) {
         // Has content: replace or insert
         const temp = document.createElement('div');
         temp.innerHTML = message.qqiqHtml;
         const newDivider = temp.querySelector('.divider');
+        const newFilterContainer = temp.querySelector('.qq-filter-container');
         const newSection = temp.querySelector('.qq-iq-section');
         if (qqSec && divider) {
           divider.replaceWith(newDivider || document.createElement('div'));
+          if (oldFilterContainer) oldFilterContainer.replaceWith(newFilterContainer || document.createElement('div'));
+          else if (newFilterContainer && qqSec.parentNode) qqSec.parentNode.insertBefore(newFilterContainer, qqSec);
           qqSec.replaceWith(newSection || document.createElement('div'));
         } else if (newDivider && newSection) {
           const sidebar = document.querySelector('.sidebar');
-          if (sidebar) { sidebar.appendChild(newDivider); sidebar.appendChild(newSection); }
+          if (sidebar) {
+            sidebar.appendChild(newDivider);
+            if (newFilterContainer) sidebar.appendChild(newFilterContainer);
+            sidebar.appendChild(newSection);
+          }
+        }
+        // ★ Restore filter keyword and re-apply
+        if (savedKeyword) {
+          const newFilter = document.getElementById('qqFilterInput');
+          if (newFilter) { newFilter.value = savedKeyword; applyqqiqFilter(savedKeyword); }
         }
       } else {
         // No content: remove
         if (qqSec) qqSec.remove();
         if (divider) divider.remove();
+        if (oldFilterContainer) oldFilterContainer.remove();
       }
       // Update pinned history area
       const recentList = document.querySelector('.recent-list');
@@ -2464,21 +2503,32 @@ window.addEventListener('message', event => {
     // QQ iq expand: replace entire section with full content
     const section = document.querySelector('.qq-iq-section');
     if (section && message.qqiqHtml) {
-      // qqiqHtml includes divider + section wrapper; replace parent content
+      // ★ Preserve filter keyword across DOM replacement
+      const oldFilter = document.getElementById('qqFilterInput');
+      const savedKeyword = oldFilter ? oldFilter.value : '';
+
       const sidebar = document.querySelector('.sidebar');
       if (sidebar) {
-        // Remove old divider + section, append new
-        const oldDivider = section.previousElementSibling;
+        // Remove old divider + filter + section, append new
+        const oldFilterContainer = document.querySelector('.sidebar .qq-filter-container');
+        const oldDivider = (oldFilterContainer || section).previousElementSibling;
         if (oldDivider && oldDivider.classList.contains('divider')) oldDivider.remove();
+        if (oldFilterContainer) oldFilterContainer.remove();
         section.remove();
         sidebar.insertAdjacentHTML('beforeend', message.qqiqHtml);
+
+        // ★ Restore filter keyword and re-apply
+        if (savedKeyword) {
+          const newFilter = document.getElementById('qqFilterInput');
+          if (newFilter) { newFilter.value = savedKeyword; applyqqiqFilter(savedKeyword); }
+        }
       }
     }
   }
 });
 
 // ====== QQ iq wheel expand ======
-// ★ On first wheel in qq-iq-section, tell backend to expand to full 60 items permanently.
+// ★ On first wheel in qq-iq-section, tell backend to expand to full 100 items permanently.
 // No scrollbar shown (blind-scroll). Once expanded, survives webview refresh until window restart.
 // ★ FIX: Use event delegation on .sidebar (which is never replaced) so the listener
 //   survives updateSidebar DOM replacements that destroy the .qq-iq-section element.
@@ -2496,11 +2546,92 @@ function initqqiqExpand() {
   }, { passive: true });
 }
 
+// ====== QQ iq filter ======
+// ★ Client-side AND-based multi-term filter for qq items (similar to q4 history card filter).
+// Uses event delegation on .sidebar so it survives DOM replacements.
+function initqqiqFilter() {
+  const sidebar = document.querySelector('.sidebar');
+  if (!sidebar) return;
+
+  // ★ Input event: apply filter + hide dropdown
+  sidebar.addEventListener('input', (e) => {
+    if (!e.target || e.target.id !== 'qqFilterInput') return;
+    hideAllDropdowns();
+    applyqqiqFilter(e.target.value);
+    // If cleared, show history dropdown
+    if (e.target.value === '') {
+      vscode.postMessage({ command: 'getHistory', key: 'qqFilter' });
+    }
+  });
+
+  // ★ Focus event: show history dropdown when empty
+  sidebar.addEventListener('focusin', (e) => {
+    if (!e.target || e.target.id !== 'qqFilterInput') return;
+    if (e.target.value === '') {
+      vscode.postMessage({ command: 'getHistory', key: 'qqFilter' });
+    }
+  });
+
+  // ★ Blur event: hide dropdown (unless clicking dropdown item)
+  sidebar.addEventListener('focusout', (e) => {
+    if (!e.target || e.target.id !== 'qqFilterInput') return;
+    const dropdown = document.getElementById('qqFilterHistoryDropdown');
+    const related = e.relatedTarget;
+    if (related && dropdown && dropdown.contains(related)) return;
+    hideAllDropdowns();
+  });
+
+  // ★ Prevent mousedown on dropdown from stealing focus (avoids blur before click)
+  sidebar.addEventListener('mousedown', (e) => {
+    if (e.target && e.target.closest && e.target.closest('#qqFilterHistoryDropdown')) {
+      e.preventDefault();
+    }
+  });
+
+  // ★ Keydown: Enter saves history, Escape clears and blurs
+  sidebar.addEventListener('keydown', (e) => {
+    if (!e.target || e.target.id !== 'qqFilterInput') return;
+    if (e.key === 'Enter') {
+      const val = e.target.value.trim();
+      if (val) {
+        vscode.postMessage({ command: 'saveHistory', key: 'qqFilter', value: val });
+      }
+      hideAllDropdowns();
+      e.target.blur();
+    } else if (e.key === 'Escape') {
+      e.target.value = '';
+      applyqqiqFilter('');
+      hideAllDropdowns();
+      e.target.blur();
+    }
+  });
+}
+
+function applyqqiqFilter(keyword) {
+  const section = document.querySelector('.qq-iq-section');
+  if (!section) return;
+  const kw = (keyword || '').trim().toLowerCase();
+  const terms = kw ? kw.split(/\s+/).filter(Boolean) : [];
+  const items = section.querySelectorAll('.qq-item');
+  items.forEach(item => {
+    if (terms.length === 0) {
+      item.style.display = '';
+      return;
+    }
+    // Match against full path (data-fullpath) and visible text
+    const fullpath = (item.dataset.fullpath || '').toLowerCase();
+    const text = (item.textContent || '').toLowerCase();
+    const hay = fullpath + ' ' + text;
+    const match = terms.every(t => hay.includes(t));
+    item.style.display = match ? '' : 'none';
+  });
+}
+
 // ====== DOM ======
 document.addEventListener('focusin', (e) => updateFocusType(e.target));
 document.addEventListener('click', (e) => {
   hideAllContextMenus();
-  if (!['filenameInput', 'addressInput', 'fileFilterInput'].includes((e.target && e.target.id) || '') && !(e.target && e.target.classList && e.target.classList.contains('rename-input'))) {
+  if (!['filenameInput', 'addressInput', 'fileFilterInput', 'qqFilterInput'].includes((e.target && e.target.id) || '') && !(e.target && e.target.classList && e.target.classList.contains('rename-input'))) {
     updateFocusType(e.target);
   }
 });
@@ -3154,22 +3285,34 @@ document.addEventListener('DOMContentLoaded', () => {
           if (deleteBtn) {
             e.preventDefault();
             e.stopPropagation();
-            const pathSpan = recentItem.querySelector('span:not(.delete-button)');
+            const pathSpan = recentItem.querySelector('span:not(.delete-button):not(.pin-move-btn):not(.pin-move-group)');
             if (pathSpan) unpinDir(pathSpan.textContent);
+            return;
+          }
+          // ★ Handle pin-move-btn click (up/down reorder)
+          const moveBtn = e.target.closest('.pin-move-btn');
+          if (moveBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const direction = moveBtn.dataset.dir; // 'up' or 'down'
+            const pathSpan = recentItem.querySelector('span:not(.delete-button):not(.pin-move-btn):not(.pin-move-group)');
+            if (pathSpan && direction) {
+              vscode.postMessage({ command: 'movePinnedDir', path: pathSpan.textContent, direction });
+            }
             return;
           }
           e.preventDefault(); // Prevent default to avoid focus issues
           roamTick('k')
-          const pathSpan = recentItem.querySelector('span:not(.delete-button)');
+          const pathSpan = recentItem.querySelector('span:not(.delete-button):not(.pin-move-btn):not(.pin-move-group)');
           if (pathSpan) {
             navigateTo(pathSpan.textContent);
           }
         }
       });
 
-      // ★★★ Intercept click event on delete-button to prevent inline onclick="navigateTo()" from firing ★★★
+      // ★★★ Intercept click event on delete-button and move buttons to prevent inline onclick="navigateTo()" from firing ★★★
       recentSection.addEventListener('click', (e) => {
-        if (e.target.closest('.delete-button')) {
+        if (e.target.closest('.delete-button') || e.target.closest('.pin-move-btn')) {
           e.preventDefault();
           e.stopPropagation();
         }
@@ -3475,6 +3618,7 @@ document.addEventListener('visibilitychange', () => {
 function runDeferredInitialization() {
   // 1. QQ iq wheel expand
   initqqiqExpand();
+initqqiqFilter();
 
   // 2. ResizeObserver for container
   const container = document.querySelector('.container');
@@ -3694,8 +3838,8 @@ document.addEventListener('keydown', function (e) {
 }
 
 // ==================== sidebar HTML generation (shared) ====================
-const QQ_IQ_INITIAL = 20;  // Initial display: 20 items for clean UI
-const QQ_IQ_MAX = 60;      // After wheel expand: show all (up to 60)
+const QQ_IQ_INITIAL = 33;  // Initial display: 33 items for clean UI
+const QQ_IQ_MAX = 100;     // After wheel expand: show all (up to 100)
 let _qqiqExpanded = false;  // Once expanded, stays expanded until window restart
 
 // ★ Desktop & Recycle Bin paths for exclusion (already shown in drive bar)
@@ -3746,6 +3890,7 @@ function generateSidebarHtml(config) {
   const qqiqHtml = showqqiq
     ? `
   <div class="divider"></div>
+    <div class="qq-filter-container"><input type="text" class="qq-filter-input" id="qqFilterInput" placeholder="filter..." spellcheck="false"><div id="qqFilterHistoryDropdown" class="history-dropdown"></div></div>
     <div class="qq-iq-section">
       ${displayedqqiq.map(generateqqiqItemHtml).join("")}
     </div>`
@@ -3753,10 +3898,11 @@ function generateSidebarHtml(config) {
 
   const pinnedDirsHtml = safePinnedDirs
     .map(
-      (dir) => `
-      <div class="recent-item" onclick="navigateTo('${escapeJsStringLiteral(dir)}')">
+      (dir, idx) => `
+      <div class="recent-item" data-pin-index="${idx}" onclick="navigateTo('${escapeJsStringLiteral(dir)}')">
   <span class="delete-button">\u00d7</span>
   <span>${escapeHtmlAttribute(dir)}</span>
+  <span class="pin-move-group"><span class="pin-move-btn" data-dir="up" title="Move up">▲</span><span class="pin-move-btn" data-dir="down" title="Move down">▼</span></span>
 </div>`
     )
     .join("");
@@ -4315,6 +4461,16 @@ function showSaveAsDialog() {
   // File watcher setup (6s cooldown - ignore events within 6s after refresh)
   let lastWatcherRefreshTime = 0;
   const WATCHER_COOLDOWN_MS = 6000;
+  // Temp download file extensions: browsers use these during active downloads
+  const TEMP_DOWNLOAD_EXTS = ['.crdownload', '.part', '.download', '.partial', '.tmp'];
+  let pendingDownloadCompleteTimer = null;
+  const DOWNLOAD_COMPLETE_DELAY_MS = 800;
+
+  function isTempDownloadFile(uri) {
+    const fname = uri.fsPath || uri.path || '';
+    const lower = fname.toLowerCase();
+    return TEMP_DOWNLOAD_EXTS.some(ext => lower.endsWith(ext));
+  }
 
   // ★ Exported function: update cooldown timestamp (called by both manual refresh and watcher)
   function markWatcherRefreshTime() {
@@ -4326,6 +4482,10 @@ function showSaveAsDialog() {
     if (currentWatcher) {
       currentWatcher.dispose();
       currentWatcher = null;
+    }
+    if (pendingDownloadCompleteTimer) {
+      clearTimeout(pendingDownloadCompleteTimer);
+      pendingDownloadCompleteTimer = null;
     }
 
     try {
@@ -4343,12 +4503,57 @@ function showSaveAsDialog() {
         }
       };
 
+      // ★ Force refresh bypassing cooldown (used for download-complete rename detection)
+      const forceRefresh = () => {
+        lastWatcherRefreshTime = Date.now();
+        if (activePanel && activePanelAlive && globalRefreshWebview) {
+          globalRefreshWebview();
+        }
+      };
+
+      // ★ Handle temp download file events intelligently:
+      //   - onChange for .crdownload → ignore (file still downloading, avoid noisy refresh)
+      //   - onDelete for .crdownload → download completed & browser renamed file → schedule forced refresh
+      //   - onCreate for .crdownload → new download started → normal smartRefresh
+      const onCreateHandler = (uri) => {
+        if (isTempDownloadFile(uri)) {
+          // New download started: let normal cooldown handle it
+          smartRefresh();
+          return;
+        }
+        smartRefresh();
+      };
+
+      const onChangeHandler = (uri) => {
+        if (isTempDownloadFile(uri)) {
+          // Temp file growing during download → skip entirely to avoid noisy refreshes
+          return;
+        }
+        smartRefresh();
+      };
+
+      const onDeleteHandler = (uri) => {
+        if (isTempDownloadFile(uri)) {
+          // ★ Temp download file deleted → browser likely renamed to final filename
+          // Schedule a delayed forced refresh to pick up the renamed file
+          if (pendingDownloadCompleteTimer) {
+            clearTimeout(pendingDownloadCompleteTimer);
+          }
+          pendingDownloadCompleteTimer = setTimeout(() => {
+            pendingDownloadCompleteTimer = null;
+            forceRefresh();
+          }, DOWNLOAD_COMPLETE_DELAY_MS);
+          return;
+        }
+        smartRefresh();
+      };
+
       // Use VS Code FileSystemWatcher
       const watchPattern = new vscode.RelativePattern(watchPath, "*");
       currentWatcher = vscode.workspace.createFileSystemWatcher(watchPattern);
-      currentWatcher.onDidCreate(smartRefresh);
-      currentWatcher.onDidChange(smartRefresh);
-      currentWatcher.onDidDelete(smartRefresh);
+      currentWatcher.onDidCreate(onCreateHandler);
+      currentWatcher.onDidChange(onChangeHandler);
+      currentWatcher.onDidDelete(onDeleteHandler);
 
     } catch (e) {
       global.logMessage(q('q2.log.watchStartError', e.message), "WARN");
@@ -4454,6 +4659,16 @@ function showSaveAsDialog() {
             panel.webview.postMessage({ command: "updateSidebar", qqiqHtml: sbData.qqiqHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
           }
           refreshWebview();
+        }
+        break;
+      case "movePinnedDir":
+        if (message.path && message.direction) {
+          movePinnedDir(message.path, message.direction);
+          // ★ Update sidebar immediately (uses cachedInMemoryConfig, no race condition)
+          if (panel && activePanelAlive) {
+            const sbData = generateSidebarHtml(getConfig());
+            panel.webview.postMessage({ command: "updateSidebar", qqiqHtml: sbData.qqiqHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
+          }
         }
         break;
       case "pinDirectory":

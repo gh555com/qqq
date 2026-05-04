@@ -1,0 +1,308 @@
+[2026-05-04T10:13:09.580+08:00][WARN] Rust Bridge executable not found
+[2026-05-04T10:13:09.584+08:00][WARN] Rust Bridge start failed: exe_not_found: q_engine
+[2026-05-04T10:13:09.617+08:00][WARN] Shell stderr: bash: 行 1: NODE_BIN: 未找到命令
+
+[2026-05-04T10:13:09.618+08:00][WARN] Shell stderr: bash: 行 4: IFS: 未找到命令
+
+[2026-05-04T10:13:09.622+08:00][WARN] Shell process crashed, attempting restart (1/3), delay 50ms
+[2026-05-04T10:13:10.536+08:00][WARN] [Broker] Python not ready: python_not_downloaded
+[2026-05-04T10:13:13.559+08:00][WARN] [yt-dlp] Trying to download from gh-proxy.com...
+[2026-05-04T10:13:22.493+08:00][WARN] [yt-dlp] gh-proxy.com download failed: File too small: 3204286 bytes
+[2026-05-04T10:13:22.493+08:00][WARN] [yt-dlp] Trying to download from GitHub...
+[2026-05-04T10:13:27.281+08:00][WARN] Python Bridge start failed: Broker connect failed after spawn+retries
+[2026-05-04T10:13:28.258+08:00][WARN] [Python] 官方 failed: Status: 404
+[2026-05-04T10:13:31.646+08:00][WARN] [Python] ghproxy failed: Status: 502
+[2026-05-04T10:13:31.646+08:00][WARN] [PythonInstall] ⚠ All download sources failed (1/3)
+[2026-05-04T10:13:33.480+08:00][WARN] [yt-dlp] GitHub download failed: File too small: 3204286 bytes
+[2026-05-04T10:13:33.481+08:00][WARN] [yt-dlp] Trying to download from ghproxy.net...
+[2026-05-04T10:13:39.997+08:00][WARN] [Python] 官方 failed: Status: 404
+[2026-05-04T10:13:44.498+08:00][WARN] [yt-dlp] ghproxy.net download failed: Status: 502
+[2026-05-04T10:13:50.921+08:00][WARN] [Python] ghproxy failed: Status: 502
+[2026-05-04T10:13:50.921+08:00][WARN] [PythonInstall] ⚠ All download sources failed (2/3)
+[2026-05-04T10:13:53.010+08:00][WARN] [Broker] Python not ready: python_not_downloaded
+[2026-05-04T10:14:03.023+08:00][WARN] [Python] 官方 failed: Status: 404
+[2026-05-04T10:14:14.598+08:00][WARN] [Python] ghproxy failed: Status: 502
+[2026-05-04T10:14:14.598+08:00][WARN] [PythonInstall] ⚠ All download sources failed (3/3)
+[2026-05-04T10:14:23.599+08:00][WARN] [PythonInstall] 1/3 used, 2 left
+[2026-05-04T10:14:23.600+08:00][ERROR] [PythonInstall] Giving up: 3 consecutive download failures. Last error: All download sources failed (3/3)
+[2026-05-04T10:14:23.600+08:00][ERROR] [PythonCheck] L4 failed: All download sources failed (3/3)
+[2026-05-04T10:18:11.576+08:00][WARN] [Broker] Python not ready: python_not_downloaded
+[2026-05-04T10:20:56.797+08:00][WARN] [Audio] Python Broker unavailable, audio disabled
+[2026-05-04T10:21:15.708+08:00][WARN] [AutoDetect] No content detected
+[2026-05-04T10:21:15.710+08:00][WARN] [Rollback] Rolling back task: WgRlBr
+[2026-05-04T10:21:17.522+08:00][WARN] [AutoDetect] No content detected
+[2026-05-04T10:21:17.522+08:00][WARN] [Rollback] Rolling back task: 7hQrKL
+[2026-05-04T10:21:18.972+08:00][WARN] [AutoDetect] No content detected
+[2026-05-04T10:21:18.973+08:00][WARN] [Rollback] Rolling back task: 8Keeel
+[2026-05-04T10:21:20.498+08:00][WARN] [AutoDetect] No content detected
+[2026-05-04T10:21:20.499+08:00][WARN] [Rollback] Rolling back task: gZQwkV
+[2026-05-04T10:21:21.895+08:00][WARN] [AutoDetect] No content detected
+[2026-05-04T10:21:21.895+08:00][WARN] [Rollback] Rolling back task: h14qz6
+[2026-05-04T10:22:14.713+08:00][WARN] [AutoDetect] No content detected
+[2026-05-04T10:22:14.713+08:00][WARN] [Rollback] Rolling back task: YLaxVh
+[2026-05-04T10:23:09.668+08:00][WARN] [Broker] Python not ready: python_not_downloaded
+[2026-05-04T10:27:42.027+08:00][WARN] [Audio] Python Broker unavailable, audio disabled
+[2026-05-04T10:28:10.282+08:00][WARN] [Broker] Python not ready: python_not_downloaded
+[2026-05-04T10:28:11.601+08:00][WARN] [yt-dlp] 尝试从 gh-proxy.com 下载...
+[2026-05-04T10:28:15.569+08:00][WARN] [yt-dlp] gh-proxy.com 下载失败: File too small: 3204286 bytes
+[2026-05-04T10:28:15.569+08:00][WARN] [yt-dlp] 尝试从 GitHub 下载...
+[2026-05-04T10:28:26.473+08:00][WARN] [yt-dlp] GitHub 下载失败: File too small: 3204286 bytes
+[2026-05-04T10:28:26.473+08:00][WARN] [yt-dlp] 尝试从 ghproxy.net 下载...
+[2026-05-04T10:28:30.841+08:00][WARN] [yt-dlp] ghproxy.net 下载失败: Status: 502
+[2026-05-04T10:28:30.844+08:00][ERROR] 未处理滴Promise拒绝: lockResult is not defined
+ReferenceError: lockResult is not defined
+	at Om.autoInstall (/home/q/.vscode/extensions/gh555com.image-preview-qqq-16.3.1/dist/qqq.js:169:5616)
+	at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+	at async a (/home/q/.vscode/extensions/gh555com.image-preview-qqq-16.3.1/dist/qqq.js:169:13592)
+log.ts:440  INFO Started local extension host with pid 134345.
+log.ts:440  INFO [AccountPolicyGate] apply: state=inactive, reason=undefined, isRestricted=false
+log.ts:440  INFO Settings Sync: Account status changed from uninitialized to unavailable
+log.ts:440  INFO [perf] Render performance baseline is 36ms
+log.ts:440  INFO [AccountPolicyGate] apply: state=inactive, reason=undefined, isRestricted=false
+webviewElement.ts:427 Unrecognized feature: 'local-network-access'.
+_createElement @ webviewElement.ts:427
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+default.exp-tas.com/vscode/ab:1  Failed to load resource: net::ERR_CONNECTION_TIMED_OUT
+console.ts:139 [Extension Host] [i18n] First-time auto-detected: VS Code en → en, persisted to settings
+console.ts:139 [Extension Host] [Q2] i18n test: q('q2.ui.pin') = "Pin "
+console.ts:139 [Extension Host] [i18n] First-time init: persisted language to settings: English
+console.ts:139 [Extension Host] [q2] showSaveAsDialog called, activePanel=false, activePanelAlive=false
+console.ts:139 [Extension Host] [Q4] QQQ Clipboard History (fusion-final) activating...
+console.ts:139 [Extension Host] [Q4] QQQ Clipboard History (fusion-final) activated.
+log.ts:460   ERR [Extension Host] (node:134345) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+(Use `exe --trace-deprecation ...` to show where the warning was created)
+error @ log.ts:460
+console.ts:139 [Extension Host] (node:134345) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+(Use `exe --trace-deprecation ...` to show where the warning was created)
+Gno @ console.ts:139
+index.html?id=2e0eec49-a279-4e20-8d8f-e056e336b33c&parentId=1&origin=45c0375a-e08e-4a77-9e21-da71065ee734&swVersion=5&extensionId=gh555com.Image-preview-qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1032 Unrecognized feature: 'local-network-access'.
+(anonymous) @ index.html?id=2e0eec49-a279-4e20-8d8f-e056e336b33c&parentId=1&origin=45c0375a-e08e-4a77-9e21-da71065ee734&swVersion=5&extensionId=gh555com.Image-preview-qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1032
+languageDetectionWebWorker.ts:241 ReferenceError: require is not defined
+    at r.f.require (index.js:2:702403)
+    at index.js:2:702071
+    at Array.reduce (<anonymous>)
+    at r.e (index.js:2:702049)
+    at n.loadModel (index.js:2:705059)
+    at n.runModel (index.js:2:705351)
+    at n.detectLanguagesImpl (languageDetectionWebWorker.ts:239:41)
+    at async u (languageDetectionWebWorker.ts:54:21)
+    at async n.$detectLanguage (languageDetectionWebWorker.ts:81:19)
+detectLanguagesImpl @ languageDetectionWebWorker.ts:241
+languageDetectionWebWorker.ts:241 ReferenceError: require is not defined
+    at r.f.require (index.js:2:702403)
+    at index.js:2:702071
+    at Array.reduce (<anonymous>)
+    at r.e (index.js:2:702049)
+    at n.loadModel (index.js:2:705059)
+    at n.runModel (index.js:2:705351)
+    at n.detectLanguagesImpl (languageDetectionWebWorker.ts:239:41)
+    at async u (languageDetectionWebWorker.ts:54:21)
+    at async n.$detectLanguage (languageDetectionWebWorker.ts:81:19)
+detectLanguagesImpl @ languageDetectionWebWorker.ts:241
+index.html?id=5ff48e25-a808-4b5f-b45c-24adf5f102f9&parentId=1&origin=a91a84b6-80ef-4014-87cd-703cdd5b48d6&swVersion=5&extensionId=&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&disableServiceWorker=true:1032 Unrecognized feature: 'local-network-access'.
+(anonymous) @ index.html?id=5ff48e25-a808-4b5f-b45c-24adf5f102f9&parentId=1&origin=a91a84b6-80ef-4014-87cd-703cdd5b48d6&swVersion=5&extensionId=&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&disableServiceWorker=true:1032
+languageDetectionWebWorker.ts:241 ReferenceError: require is not defined
+    at r.f.require (index.js:2:702403)
+    at index.js:2:702071
+    at Array.reduce (<anonymous>)
+    at r.e (index.js:2:702049)
+    at n.loadModel (index.js:2:705059)
+    at n.runModel (index.js:2:705351)
+    at n.detectLanguagesImpl (languageDetectionWebWorker.ts:239:41)
+    at async u (languageDetectionWebWorker.ts:54:21)
+    at async n.$detectLanguage (languageDetectionWebWorker.ts:81:19)
+detectLanguagesImpl @ languageDetectionWebWorker.ts:241
+languageDetectionWebWorker.ts:241 ReferenceError: require is not defined
+    at r.f.require (index.js:2:702403)
+    at index.js:2:702071
+    at Array.reduce (<anonymous>)
+    at r.e (index.js:2:702049)
+    at n.loadModel (index.js:2:705059)
+    at n.runModel (index.js:2:705351)
+    at n.detectLanguagesImpl (languageDetectionWebWorker.ts:239:41)
+    at async u (languageDetectionWebWorker.ts:54:21)
+    at async n.$detectLanguage (languageDetectionWebWorker.ts:81:19)
+detectLanguagesImpl @ languageDetectionWebWorker.ts:241
+languageDetectionWebWorker.ts:241 ReferenceError: require is not defined
+    at r.f.require (index.js:2:702403)
+    at index.js:2:702071
+    at Array.reduce (<anonymous>)
+    at r.e (index.js:2:702049)
+    at n.loadModel (index.js:2:705059)
+    at n.runModel (index.js:2:705351)
+    at n.detectLanguagesImpl (languageDetectionWebWorker.ts:239:41)
+    at async u (languageDetectionWebWorker.ts:54:21)
+    at async n.$detectLanguage (languageDetectionWebWorker.ts:81:19)
+detectLanguagesImpl @ languageDetectionWebWorker.ts:241
+languageDetectionWebWorker.ts:241 ReferenceError: require is not defined
+    at r.f.require (index.js:2:702403)
+    at index.js:2:702071
+    at Array.reduce (<anonymous>)
+    at r.e (index.js:2:702049)
+    at n.loadModel (index.js:2:705059)
+    at n.runModel (index.js:2:705351)
+    at n.detectLanguagesImpl (languageDetectionWebWorker.ts:239:41)
+    at async u (languageDetectionWebWorker.ts:54:21)
+    at async n.$detectLanguage (languageDetectionWebWorker.ts:81:19)
+detectLanguagesImpl @ languageDetectionWebWorker.ts:241
+languageDetectionWebWorker.ts:241 ReferenceError: require is not defined
+    at r.f.require (index.js:2:702403)
+    at index.js:2:702071
+    at Array.reduce (<anonymous>)
+    at r.e (index.js:2:702049)
+    at n.loadModel (index.js:2:705059)
+    at n.runModel (index.js:2:705351)
+    at n.detectLanguagesImpl (languageDetectionWebWorker.ts:239:41)
+    at async u (languageDetectionWebWorker.ts:54:21)
+    at async n.$detectLanguage (languageDetectionWebWorker.ts:81:19)
+detectLanguagesImpl @ languageDetectionWebWorker.ts:241
+languageDetectionWebWorker.ts:241 ReferenceError: require is not defined
+    at r.f.require (index.js:2:702403)
+    at index.js:2:702071
+    at Array.reduce (<anonymous>)
+    at r.e (index.js:2:702049)
+    at n.loadModel (index.js:2:705059)
+    at n.runModel (index.js:2:705351)
+    at n.detectLanguagesImpl (languageDetectionWebWorker.ts:239:41)
+    at async u (languageDetectionWebWorker.ts:54:21)
+    at async n.$detectLanguage (languageDetectionWebWorker.ts:81:19)
+detectLanguagesImpl @ languageDetectionWebWorker.ts:241
+languageDetectionWebWorker.ts:241 ReferenceError: require is not defined
+    at r.f.require (index.js:2:702403)
+    at index.js:2:702071
+    at Array.reduce (<anonymous>)
+    at r.e (index.js:2:702049)
+    at n.loadModel (index.js:2:705059)
+    at n.runModel (index.js:2:705351)
+    at n.detectLanguagesImpl (languageDetectionWebWorker.ts:239:41)
+    at async u (languageDetectionWebWorker.ts:54:21)
+    at async n.$detectLanguage (languageDetectionWebWorker.ts:81:19)
+detectLanguagesImpl @ languageDetectionWebWorker.ts:241
+console.ts:139 [Extension Host] [q2] showSaveAsDialog called, activePanel=false, activePanelAlive=false
+log.ts:450  WARN SettingsEditor2: Settings not included in settingsLayout.ts: extensions.requestTimeout, github.copilot.chat.agent.terminal.allowList, github.copilot.chat.agent.terminal.denyList, terminal.integrated.developer.devMode, terminal.integrated.developer.ptyHost.latency, terminal.integrated.developer.ptyHost.startupDelay, terminal.integrated.enableKittyKeyboardProtocol, terminal.integrated.enableWin32InputMode, chat.artifacts.enabled, chat.artifacts.rules.byFilePath, chat.artifacts.rules.byMemoryFilePath, chat.artifacts.rules.byMimeType, chat.autopilot.enabled, chat.autoReply, chat.contextUsage.enabled, chat.customizations.harnessSelector.enabled, chat.editing.revealNextChangeOnResolve, chat.experimental.incrementalRendering.animationStyle, chat.experimental.incrementalRendering.buffering, chat.experimental.incrementalRendering.enabled, chat.experimental.symbolTools.cacheStable, chat.experimentalSessionsWindowOverride, chat.exploreAgent.defaultModel, chat.generalPurposeAgent.enabled, chat.growthNotification.enabled, chat.newSession.defaultMode, chat.permissions.default, chat.persistentProgress.enabled, chat.pluginLocations, chat.plugins.enabled, chat.plugins.marketplaces, chat.progressBorder.enabled, chat.signInTitleBar.enabled, chat.subagents.allowInvocationsFromSubagents, chat.upvoteAnimation, chat.useClaudeHooks, chat.useCustomizationsInParentRepositories, imageCarousel.chat.enabled, imageCarousel.explorerContextMenu.enabled, accessibility.signals.chatResponseReceived, accessibility.signals.chatUserActionRequired
+warn @ log.ts:450
+console.ts:139 [Extension Host] [q2] showSaveAsDialog called, activePanel=false, activePanelAlive=false
+index.html?id=13e0fa07-eb85-4392-b3a3-f878722509c2&parentId=1&origin=5c0f48cb-28e2-4dff-9898-54f1d5beb78d&swVersion=5&extensionId=gh555com.Image-preview-qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1032 Unrecognized feature: 'local-network-access'.
+(anonymous) @ index.html?id=13e0fa07-eb85-4392-b3a3-f878722509c2&parentId=1&origin=5c0f48cb-28e2-4dff-9898-54f1d5beb78d&swVersion=5&extensionId=gh555com.Image-preview-qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1032
+await in (anonymous)
+HostMessaging.channel.port1.onmessage @ index.html?id=13e0fa07-eb85-4392-b3a3-f878722509c2&parentId=1&origin=5c0f48cb-28e2-4dff-9898-54f1d5beb78d&swVersion=5&extensionId=gh555com.Image-preview-qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:304
+VM10:21 [Color Scheme] Warm Apricot: bg=#e8d0b0, text=#000000
+workbench.html:1 [GroupMarkerNotSet(crbug.com/242999)!:A0201B007C3F0000]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader (about:flags#enable-unsafe-swiftshader) flag to opt in to lower security guarantees for trusted content.
+workbench.html:1 [.WebGL-0x210400117800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels
+workbench.html:1 [.WebGL-0x210400117800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels
+workbench.html:1 [.WebGL-0x210400117800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels
+workbench.html:1 [.WebGL-0x210400117800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat)
+raw.githubusercontent.com/kkn1n/res/qq/qqq/loq.gif:1  Failed to load resource: net::ERR_TIMED_OUT
+raw.githubusercontent.com/kkn1n/res/qq/qqq/q1_4.gif:1  Failed to load resource: net::ERR_TIMED_OUT
+raw.githubusercontent.com/kkn1n/res/qq/qqq/q23.gif:1  Failed to load resource: net::ERR_TIMED_OUT
+raw.githubusercontent.com/kkn1n/res/qq/qqq/q3_3.gif:1  Failed to load resource: net::ERR_TIMED_OUT
+raw.githubusercontent.com/kkn1n/res/qq/qqq/q6.gif:1  Failed to load resource: net::ERR_TIMED_OUT
+raw.githubusercontent.com/kkn1n/res/qq/qqq/q7.gif:1  Failed to load resource: net::ERR_TIMED_OUT
+languageDetectionWebWorker.ts:241 ReferenceError: require is not defined
+    at r.f.require (index.js:2:702403)
+    at index.js:2:702071
+    at Array.reduce (<anonymous>)
+    at r.e (index.js:2:702049)
+    at n.loadModel (index.js:2:705059)
+    at n.runModel (index.js:2:705351)
+    at n.detectLanguagesImpl (languageDetectionWebWorker.ts:239:41)
+    at async u (languageDetectionWebWorker.ts:54:21)
+    at async n.$detectLanguage (languageDetectionWebWorker.ts:81:19)
+detectLanguagesImpl @ languageDetectionWebWorker.ts:241
+await in detectLanguagesImpl
+u @ languageDetectionWebWorker.ts:54
+$detectLanguage @ languageDetectionWebWorker.ts:81
+_handleMessage @ webWorker.ts:479
+handleMessage @ webWorker.ts:453
+_handleRequestMessage @ webWorker.ts:225
+_handleMessage @ webWorker.ts:188
+handleMessage @ webWorker.ts:157
+onmessage @ webWorker.ts:460
+Wi.globalThis.onmessage @ webWorkerBootstrap.ts:31
+console.ts:139 [Extension Host] rejected promise not handled within 1 second: ReferenceError: lockResult is not defined
+Gno @ console.ts:139
+$logExtensionHostMessage @ mainThreadConsole.ts:39
+_doInvokeHandler @ rpcProtocol.ts:458
+_invokeHandler @ rpcProtocol.ts:443
+_receiveRequest @ rpcProtocol.ts:373
+_receiveOneMessage @ rpcProtocol.ts:299
+(anonymous) @ rpcProtocol.ts:161
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+fire @ ipc.net.ts:652
+(anonymous) @ localProcessExtensionHost.ts:421
+console.ts:139 [Extension Host] stack trace: ReferenceError: lockResult is not defined
+	at Om.autoInstall (/home/q/.vscode/extensions/gh555com.image-preview-qqq-16.3.1/dist/qqq.js:169:5616)
+	at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+	at async a (/home/q/.vscode/extensions/gh555com.image-preview-qqq-16.3.1/dist/qqq.js:169:13592)
+Gno @ console.ts:139
+$logExtensionHostMessage @ mainThreadConsole.ts:39
+_doInvokeHandler @ rpcProtocol.ts:458
+_invokeHandler @ rpcProtocol.ts:443
+_receiveRequest @ rpcProtocol.ts:373
+_receiveOneMessage @ rpcProtocol.ts:299
+(anonymous) @ rpcProtocol.ts:161
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+fire @ ipc.net.ts:652
+(anonymous) @ localProcessExtensionHost.ts:421
+mainThreadExtensionService.ts:79 [gh555com.Image-preview-qqq]lockResult is not defined
+$onExtensionRuntimeError @ mainThreadExtensionService.ts:79
+_doInvokeHandler @ rpcProtocol.ts:458
+_invokeHandler @ rpcProtocol.ts:443
+_receiveRequest @ rpcProtocol.ts:373
+_receiveOneMessage @ rpcProtocol.ts:299
+(anonymous) @ rpcProtocol.ts:161
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+fire @ ipc.net.ts:652
+(anonymous) @ localProcessExtensionHost.ts:421
+mainThreadExtensionService.ts:80 ReferenceError: lockResult is not defined
+	at Om.autoInstall (/home/q/.vscode/extensions/gh555com.image-preview-qqq-16.3.1/dist/qqq.js:169:5616)
+	at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+	at async a (/home/q/.vscode/extensions/gh555com.image-preview-qqq-16.3.1/dist/qqq.js:169:13592)
+$onExtensionRuntimeError @ mainThreadExtensionService.ts:80
+_doInvokeHandler @ rpcProtocol.ts:458
+_invokeHandler @ rpcProtocol.ts:443
+_receiveRequest @ rpcProtocol.ts:373
+_receiveOneMessage @ rpcProtocol.ts:299
+(anonymous) @ rpcProtocol.ts:161
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+fire @ ipc.net.ts:652
+(anonymous) @ localProcessExtensionHost.ts:421
+log.ts:460   ERR An unknown error occurred. Please consult the log for more details.
+error @ log.ts:460
+error @ log.ts:565
+error @ logService.ts:51
+handleUnexpectedError @ workbench.ts:128
+(anonymous) @ workbench.ts:109
+onUnexpectedError @ errors.ts:65
+mt @ errors.ts:110
+$onUnexpectedError @ mainThreadErrors.ts:21
+_doInvokeHandler @ rpcProtocol.ts:458
+_invokeHandler @ rpcProtocol.ts:443
+_receiveRequest @ rpcProtocol.ts:373
+_receiveOneMessage @ rpcProtocol.ts:299
+(anonymous) @ rpcProtocol.ts:161
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+fire @ ipc.net.ts:652
+(anonymous) @ localProcessExtensionHost.ts:421
+raw.githubusercontent.com/kkn1n/res/qq/qqq/key.gif:1  Failed to load resource: net::ERR_TIMED_OUT
+raw.githubusercontent.com/kkn1n/res/qq/qqq/q5_3.gif:1  Failed to load resource: net::ERR_TIMED_OUT
+raw.githubusercontent.com/kkn1n/res/qq/qqq/q_video.gif:1  Failed to load resource: net::ERR_TIMED_OUT
+raw.githubusercontent.com/kkn1n/res/qq/qqq/install.png:1  Failed to load resource: net::ERR_TIMED_OUT
+raw.githubusercontent.com/kkn1n/res/qq/qqq/i18.png:1  Failed to load resource: net::ERR_TIMED_OUT
+raw.githubusercontent.com/kkn1n/res/qq/qqq/Avira.jpg:1  Failed to load resource: net::ERR_TIMED_OUT
