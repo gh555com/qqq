@@ -82,6 +82,7 @@ const Q2_TRACKING_FILE = path.join(os.tmpdir(), 'vix_q2_windows.json');
 const _updateQ2TrackingFile = (action) => {
   // action: 'register' - add/update this window in tracking file
   if (!activePanelAlive || action !== 'register') return;
+  if (process.platform !== 'win32') return; // ★ HWND is Windows-only, skip on Linux/macOS
   if (!global.pythonBridge?.isAvailable()) return;
 
   // Get current foreground window hwnd via Python and write to file
@@ -768,6 +769,7 @@ function openAdminTerminal(targetPath, termType) {
         { cmd: 'tilix', args: ['-w', absPath] },
         { cmd: 'alacritty', args: ['--working-directory', absPath] },
         { cmd: 'kitty', args: ['--directory', absPath] },
+        { cmd: 'x-terminal-emulator', args: ['-e', `bash -c "${cdCmd}; exec bash"`] }, // ★ Debian/Ubuntu default
         { cmd: 'xterm', args: ['-e', `bash -c "${cdCmd}; exec bash"`] },
       ];
 

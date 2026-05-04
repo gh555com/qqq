@@ -3358,12 +3358,18 @@ function openFileCommand(filePath) {
 		} else if (process.platform === "darwin") {
 			cp.exec(`open "${filePath}"`);
 		} else {
-			// ★ Linux: chain xdg-open → gio open → VS Code API, checking exit code each time
+			// ★ Linux: chain xdg-open → gio open → VS Code API
+			// 注: xdg-open 即使返回 0 也可能没真正打开，加 3s 超时保底
 			const _tryLinuxOpen = (cmd, args, fallback) => {
 				const child = cp.spawn(cmd, args, { stdio: 'ignore' });
 				let done = false;
-				child.on('error', () => { if (!done) { done = true; fallback(); } });
-				child.on('close', (code) => { if (!done && code !== 0) { done = true; fallback(); } });
+				const timer = setTimeout(() => { if (!done) { done = true; } }, 3000);
+				child.on('error', () => { if (!done) { done = true; clearTimeout(timer); fallback(); } });
+				child.on('close', (code) => {
+					clearTimeout(timer);
+					if (!done && code !== 0) { done = true; fallback(); }
+					else { done = true; }
+				});
 			};
 			_tryLinuxOpen('xdg-open', [filePath], () => {
 				_tryLinuxOpen('gio', ['open', filePath], () => {
@@ -3415,17 +3421,41 @@ function revealFileInFolder(filePath) {
 		} else if (process.platform === "darwin") {
 			cp.exec(`open -R "${filePath}"`);
 		} else {
-			// ★ Linux: D-Bus FileManager1.ShowItems selects file + brings window to front
-			const fileUri = `file://${filePath.replace(/ /g, '%20')}`;
+			// ★ Linux: 多策略定位文件
+			const escapedPath = filePath.replace(/(["$`\\!])/g, '\\$1');
+			const parentDir = path.dirname(filePath);
+
+			// 1) D-Bus FileManager1.ShowItems (Nautilus/Nemo/Dolphin/Caja)
+			const fileUri = `file://${encodeURI(filePath)}`;
 			const dbusCmd = `dbus-send --session --print-reply --dest=org.freedesktop.FileManager1 --type=method_call /org/freedesktop/FileManager1 org.freedesktop.FileManager1.ShowItems array:string:"${fileUri}" string:""`;
-			cp.exec(dbusCmd, (err) => {
-				if (err) {
-					// Fallback: VS Code built-in revealFileInOS
+			cp.exec(dbusCmd, { timeout: 3000 }, (err) => {
+				if (!err) return; // ✓ D-Bus worked
+
+				// 2) Try file manager --select directly (Nautilus/Nemo/Caja/Thunar)
+				const fmCmds = [
+					{ cmd: 'nautilus', args: ['--select', filePath] },
+					{ cmd: 'nemo', args: ['--select', filePath] },
+					{ cmd: 'caja', args: ['--select', filePath] },
+					{ cmd: 'thunar', args: [parentDir] }, // Thunar 不支持 --select
+					{ cmd: 'pcmanfm', args: [parentDir] },
+				];
+				(async () => {
+					for (const fm of fmCmds) {
+						try {
+							const ok = await new Promise((r) => {
+								const c = cp.spawn(fm.cmd, fm.args, { stdio: 'ignore', detached: true });
+								c.unref();
+								c.on('error', () => r(false));
+								setTimeout(() => r(true), 500); // if no error in 500ms, likely launched
+							});
+							if (ok) return;
+						} catch { }
+					}
+					// 3) Last resort: VS Code built-in → xdg-open on parent dir
 					vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(filePath)).catch(() => {
-						const child = cp.spawn('xdg-open', [path.dirname(filePath)], { stdio: 'ignore' });
-						child.on('error', () => {});
+						cp.spawn('xdg-open', [parentDir], { stdio: 'ignore', detached: true }).unref();
 					});
-				}
+				})();
 			});
 		}
 	} catch { }

@@ -2816,6 +2816,8 @@ def _create_listen_endpoint(local_token: str):
             try:
                 if _try_connect_unix(sock_path, local_token):
                     raise RuntimeError("BROKER_ALREADY_RUNNING")
+                # ★ Stale socket (dead broker) — unlink before re-bind
+                os.unlink(sock_path)
             except RuntimeError:
                 raise
             except:
