@@ -1609,8 +1609,11 @@ async function _delayedActivate(context) {
 	function updateCodeLensStyle() {
 		const takeOver = global.getConfig("takeOverCodelensStyle");
 		if (takeOver === undefined ? true : takeOver) {
-			// Set CodeLens font family and size
-			vscode.workspace.getConfiguration("editor").update("codeLensFontFamily", "Tahoma", vscode.ConfigurationTarget.Global);
+			// ★ Cross-platform font stack: Tahoma (Win) → Liberation Sans (Linux) → DejaVu Sans (Linux) → sans-serif
+			const fontFamily = process.platform === 'win32'
+				? 'Tahoma'
+				: 'Tahoma, Liberation Sans, DejaVu Sans, sans-serif';
+			vscode.workspace.getConfiguration("editor").update("codeLensFontFamily", fontFamily, vscode.ConfigurationTarget.Global);
 			vscode.workspace.getConfiguration("editor").update("codeLensFontSize", 13, vscode.ConfigurationTarget.Global);
 		}
 	}

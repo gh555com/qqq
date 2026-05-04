@@ -46,6 +46,12 @@ node_modules/**
 !dist/kp.py
 esbuild.config.js
 
+# ★ dist 构建产物/缓存/冗余文件
+dist/metafile.json
+dist/__pycache__/**
+dist/brokerBridge.js
+dist/miniaudio_nonblocking_v15.py
+
 # 平台二进制处理
 # 1. 排除 assets 根目录下的重复 DLL (运行时由 runtimes/ 提供)
 assets/concrt140.dll
