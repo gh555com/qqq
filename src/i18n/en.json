@@ -861,6 +861,21 @@
         "notFound": "Account not found or not activated",
         "rateLimit": "Too many requests, please try later",
         "syncFailed": "Configuration sync failed",
-        "networkError": "Network error, please check your connection"
+        "networkError": "Network error, please check your connection",
+        "uploadConfirmTitle": "Upload Data to Cloud",
+        "uploadConfirmMsg": "I confirm:\n1. I am a licensed user;\n2. My clipboard and file history preferences do not contain any personal sensitive information (e.g. passwords) or any illegal content.",
+        "uploadConfirmBtn": "Confirm & Upload",
+        "uploadCancel": "Cancel",
+        "uploading": "Uploading data to cloud...",
+        "uploadSuccess": "Uploaded to cloud ({0})",
+        "uploadFailed": "Upload failed: {0}",
+        "pullConfirmTitle": "Restore Data from Cloud",
+        "pullConfirmMsg": "This will overwrite your local roam preferences and clipboard history. Continue?",
+        "pullConfirmBtn": "Confirm Restore",
+        "pulling": "Pulling data from cloud...",
+        "pullSuccess": "Restored from cloud ({0})",
+        "pullFailed": "Restore failed: {0}",
+        "pullNoData": "No data on cloud yet",
+        "errQuotaExceeded": "Data exceeds quota limit"
     }
 }

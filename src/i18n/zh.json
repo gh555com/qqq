@@ -861,6 +861,21 @@
         "notFound": "账号未找到或未激活",
         "rateLimit": "请求太频繁，请稍后再试",
         "syncFailed": "配置同步失败",
-        "networkError": "网络错误，请检查网络连接"
+        "networkError": "网络错误，请检查网络连接",
+        "uploadConfirmTitle": "上传数据到云端",
+        "uploadConfirmMsg": "我确认：\n1、我是正版用户；\n2、我的剪切板、文件记录偏好中不包括任何个人敏感信息（如密码），且不包括任何违法反动信息。",
+        "uploadConfirmBtn": "我确认并上传",
+        "uploadCancel": "取消",
+        "uploading": "正在上传数据到云端...",
+        "uploadSuccess": "已上传到云端 ({0})",
+        "uploadFailed": "上传失败：{0}",
+        "pullConfirmTitle": "从云端恢复数据",
+        "pullConfirmMsg": "这将覆盖本地的漫游偏好和剪贴板历史数据，是否继续？",
+        "pullConfirmBtn": "确认恢复",
+        "pulling": "正在从云端拉取数据...",
+        "pullSuccess": "已从云端恢复数据 ({0})",
+        "pullFailed": "恢复失败：{0}",
+        "pullNoData": "云端暂无数据",
+        "errQuotaExceeded": "数据超出配额限制"
     }
 }
