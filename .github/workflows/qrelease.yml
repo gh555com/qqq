@@ -210,13 +210,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish to VS Code Marketplace
-        if: "!contains(github.event.head_commit.message, '(q5)')"
-        run: |
-          npx @vscode/vsce publish --packagePath dist/*.vsix --allow-missing-repository --allow-star-activation || echo "Marketplace发布失败，可能是Token过期"
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-
       - name: Strip zip extra fields from VSIX (Open VSX requirement)
         if: "!contains(github.event.head_commit.message, '(q5)')"
         run: |
@@ -257,4 +250,4 @@ jobs:
         uses: peter-evans/create-or-update-comment@v3
         with:
           issue-number: ${{ github.event.issue.number }}
-          body: "🎉 **q2 发布成功**！版本 v${{ steps.get_version.outputs.VERSION }} Universal 包已发布到 Marketplace 和 Open VSX。"
+          body: "🎉 **q2 发布成功**！版本 v${{ steps.get_version.outputs.VERSION }} Universal 包已发布到 Open VSX。"
