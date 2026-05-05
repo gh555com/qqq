@@ -1127,13 +1127,13 @@ function getConfig() {
 }
 
 let saveConfigTimer = null;
-let _periodicMergeSaveTimer = null; // ★ periodic merge-save interval (multi-window safety net)
+let _q2Scheduler = null; // ★ MergeSaveScheduler instance (single source of truth)
 
 // ★★★ Multi-window merge-on-save: track explicit user actions this session
 // so merge doesn't re-add something user explicitly removed/unpinned
 const _sessionRemovedQqiqKeys = new Set();  // qqiq paths user explicitly removed
 const _sessionRemovedPinnedKeys = new Set(); // pinnedDirs user explicitly unpinned
-let _sessionConfigDirty = false; // tracks if there are unsaved config changes
+let _sessionConfigDirty = false; // tracks if there are unsaved config changes (also managed by _q2Scheduler)
 
 function saveConfig(
   pinnedDirs,
@@ -1165,6 +1165,7 @@ function saveConfig(
   // Update memory state immediately to ensure subsequent reads (e.g. refreshWebview) get correct values
   cachedInMemoryConfig = newConfig;
   _sessionConfigDirty = true;
+  if (_q2Scheduler) _q2Scheduler.markDirty();
 
   // Performance optimization: debounce. When switching directories frequently, do not sync-update globalState
   if (saveConfigTimer) clearTimeout(saveConfigTimer);
@@ -1234,6 +1235,7 @@ function _flushConfigToGlobalState() {
       globalContext.globalState.update("qqq_config", configToSave);
     }
     _sessionConfigDirty = false;
+    if (_q2Scheduler) _q2Scheduler.clearDirty();
     saveConfigTimer = null;
   } catch (e) { }
 }
@@ -5599,10 +5601,25 @@ async function activate(context) {
   getConfig();
   geq().logMessage(q('q2.log.activated'), "INFO");
 
-  // ★ Periodic merge-save: even if process is force-killed, at most 63s of data is at risk
-  _periodicMergeSaveTimer = setInterval(() => {
-    if (_sessionConfigDirty) _flushConfigToGlobalState();
-  }, 63000);
+  // ★ MergeSaveScheduler: single source of truth for periodic merge-save
+  _q2Scheduler = new global.MergeSaveScheduler({
+    name: 'Q2',
+    flush: () => { if (_sessionConfigDirty) _flushConfigToGlobalState(); },
+    reloadFromDisk: () => {
+      if (!activePanel || !activePanelAlive) return;
+      cachedInMemoryConfig = null;
+      const config = getConfig();
+      const sbData = generateSidebarHtml(config);
+      try {
+        activePanel.webview.postMessage({
+          command: "updateSidebar",
+          qqiqHtml: sbData.qqiqHtml,
+          pinnedDirsHtml: sbData.pinnedDirsHtml,
+        });
+      } catch { }
+    },
+  });
+  _q2Scheduler.start();
 
   // ★ Ultimate fix: use ConfigGate callback mechanism to receive config update notifications (resolve race condition)
   // Previously, directly listening to onDidChangeConfiguration caused reading config before sessionOverrides update
@@ -5626,9 +5643,7 @@ async function activate(context) {
     }
   });
 
-  // ★ Multi-window sync: refresh sidebar (qq area + history) when window gains focus
-  // This ensures cross-window consistency since globalState is shared but UI is per-window
-  // ★ Use debounce to avoid overwriting in-flight pin/unpin operations when clicking unfocused window
+  // ★ Multi-window sync: refresh sidebar when window gains focus via scheduler
   let focusSyncTimer = null;
   context.subscriptions.push(
     vscode.window.onDidChangeWindowState((e) => {
@@ -5636,18 +5651,7 @@ async function activate(context) {
         if (focusSyncTimer) clearTimeout(focusSyncTimer);
         focusSyncTimer = setTimeout(() => {
           focusSyncTimer = null;
-          if (!activePanel || !activePanelAlive) return;
-          // Clear config cache to force re-read from disk file (may have been modified by other windows/IDEs)
-          cachedInMemoryConfig = null;
-          const config = getConfig();
-          const sbData = generateSidebarHtml(config);
-          try {
-            activePanel.webview.postMessage({
-              command: "updateSidebar",
-              qqiqHtml: sbData.qqiqHtml,
-              pinnedDirsHtml: sbData.pinnedDirsHtml,
-            });
-          } catch { }
+          if (_q2Scheduler) _q2Scheduler.onFocus();
         }, 1400);
       }
     })
@@ -5673,8 +5677,8 @@ async function activate(context) {
 }
 
 function deactivate() {
-  // ★ Multi-window safety: flush pending debounced save immediately
-  if (_periodicMergeSaveTimer) { clearInterval(_periodicMergeSaveTimer); _periodicMergeSaveTimer = null; }
+  // ★ MergeSaveScheduler handles stop + final flush
+  if (_q2Scheduler) { _q2Scheduler.stop(); _q2Scheduler = null; }
   if (saveConfigTimer) { clearTimeout(saveConfigTimer); saveConfigTimer = null; }
   if (_sessionConfigDirty) _flushConfigToGlobalState();
 

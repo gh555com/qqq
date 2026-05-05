@@ -4086,6 +4086,7 @@ async function pullUserData() {
 			let reason = data.error || 'unknown';
 			if (data.error === 'not_purchased') reason = q('wq.errNotPurchased');
 			else if (data.error === 'rate_limit') reason = q('wq.errRateLimit');
+			else if (data.error === 'quota_exceeded') reason = q('wq.errQuotaExceeded');
 			else if (data.error === 'phone_not_registered') reason = q('wq.errPhoneNotRegistered');
 			showAutoCloseNotification('warning', q('wq.pullFailed', reason));
 			return { success: false };
@@ -6013,6 +6014,88 @@ async function getQqqStats() {
 	}
 }
 
+// ============================================================================
+// ★★★ MergeSaveScheduler — Single Source of Truth for periodic merge-save
+//
+// All modules (Q2, Q4, future) must use this scheduler instead of ad-hoc timers.
+// Responsibilities:
+//   - Periodic flush (default 63s)
+//   - Flush-on-dispose (deactivate safety)
+//   - pause()/resume() for cloud sync coordination
+//   - Atomic write utility
+//
+// NOT responsible for: merge logic, serialization, cloud sync protocol.
+// ============================================================================
+
+const MERGE_SAVE_INTERVAL_MS = 63000;
+
+class MergeSaveScheduler {
+	/**
+	 * @param {object} opts
+	 * @param {function} opts.flush - Called to persist dirty state. May be sync or async.
+	 * @param {function} [opts.reloadFromDisk] - Called on focus to re-read external changes.
+	 * @param {number} [opts.intervalMs] - Override default 63s interval.
+	 * @param {string} [opts.name] - Debug label (e.g. 'Q2', 'Q4').
+	 */
+	constructor({ flush, reloadFromDisk, intervalMs, name } = {}) {
+		if (typeof flush !== 'function') throw new Error('MergeSaveScheduler: flush is required');
+		this._flush = flush;
+		this._reloadFromDisk = reloadFromDisk || null;
+		this._intervalMs = intervalMs || MERGE_SAVE_INTERVAL_MS;
+		this._name = name || 'unnamed';
+		this._dirty = false;
+		this._timer = null;
+		this._paused = false;
+	}
+
+	/** Mark state as dirty — will be flushed on next tick or interval */
+	markDirty() { this._dirty = true; }
+
+	/** Check if dirty */
+	isDirty() { return this._dirty; }
+
+	/** Clear dirty flag (call after successful flush) */
+	clearDirty() { this._dirty = false; }
+
+	/** Start the periodic timer */
+	start() {
+		if (this._timer) return; // already running
+		this._timer = setInterval(() => {
+			if (this._dirty && !this._paused) {
+				try { this._flush(); } catch { }
+			}
+		}, this._intervalMs);
+	}
+
+	/** Stop timer + flush if dirty (call on deactivate) */
+	stop() {
+		if (this._timer) { clearInterval(this._timer); this._timer = null; }
+		if (this._dirty) {
+			try { this._flush(); } catch { }
+		}
+	}
+
+	/** Pause flushing (e.g. during cloud upload) */
+	pause() { this._paused = true; }
+
+	/** Resume flushing */
+	resume() { this._paused = false; }
+
+	/** Call on window focus — reload external changes */
+	onFocus() {
+		if (this._reloadFromDisk) {
+			try { this._reloadFromDisk(); } catch { }
+		}
+	}
+
+	/** Force an immediate flush (for explicit save actions) */
+	flushNow() {
+		if (this._dirty) {
+			try { this._flush(); } catch { }
+		}
+	}
+}
+
 module.exports = {
 	getQqqStats,
 	init,
@@ -6175,6 +6258,10 @@ module.exports = {
 	getThemeKind,
 	isDarkTheme,
 	getEffectiveTheme,
+
+	// ★ MergeSaveScheduler (single source of truth for periodic merge-save)
+	MergeSaveScheduler,
+	MERGE_SAVE_INTERVAL_MS,
 };
 
 
