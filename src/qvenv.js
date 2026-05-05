@@ -1115,6 +1115,8 @@ sys.exit(0)
                             global.logMessage(`[PythonInstall] ✓ Zip validated: ${(actualSize / 1024 / 1024).toFixed(1)}MB (source: ${name})`, "INFO");
                             downloaded = true;
                             if (isCdn) downloadedFromCdn = true;
+                            // ★ 记录下载来源溯源
+                            try { global._dlSrcMap.py = name; } catch { }
                             break;
                         } catch (e) {
                             global.logMessage(q('qvenv.sourceFailed', name, e.message), "WARN");

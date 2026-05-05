@@ -2568,6 +2568,8 @@ class YtDlpDownloader {
                     global.logMessage(q('dow.tryDownload', name), "WARN"); // ★ Changed to WARN so user can see fallback attempts
                     await tryDownload(url, timeout);
                     global.logMessage(q('dow.downloadSuccess', name), "WARN"); // ★ Changed to WARN
+                    // ★ 记录下载来源溯源
+                    try { global._dlSrcMap.yt = name; } catch { }
                     break; // Break on success
                 } catch (e) {
                     lastError = e;
