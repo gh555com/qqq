@@ -1144,7 +1144,10 @@ class ClipboardHistoryManager {
         return {
             count: gs.get('qqq_savor_count', 0),
             totalMs: gs.get('qqq_savor_total_ms', 0),
-            firstUse: gs.get('qqq_savor_first_use', Date.now())
+            firstUse: gs.get('qqq_savor_first_use', Date.now()),
+            radioCount: gs.get('qqq_savor_radio_count', 0),
+            radioTotalMs: gs.get('qqq_savor_radio_total_ms', 0),
+            radioFirstUse: gs.get('qqq_savor_radio_first_use', Date.now())
         };
     }
 
@@ -1320,12 +1323,15 @@ class ClipboardHistorySidebarProvider {
         if (state && state.playing) {
             // ★ 同步播放标志 → 让常规 ping 也携带 playing=true
             this._global.setCurrentlyPlaying(true);
+            // ★ 保留 isRadio 标志：从事件 source 或已有状态继承
+            const isRadio = state.source === 'radio' || this._pythonPlayState.isRadio;
             // Update Python playback state
             this._pythonPlayState = {
                 playing: true,
                 fileName: state.fileName,
                 loopCount: state.loopCount,
-                startTime: state.startTime || Date.now()
+                startTime: state.startTime || Date.now(),
+                isRadio: isRadio
             };
             this._postMessage({
                 command: 'playAudio',
@@ -1732,7 +1738,14 @@ class ClipboardHistorySidebarProvider {
         const avgMs = Math.floor(s.totalMs / days);
         const avgStr = formatDuration(avgMs);
 
-        return `${s.count} times, ${totalStr}; Avg per day: ${avgStr}`;
+        let result = `${s.count} local, ${totalStr}; avg ${avgStr}/d`;
+
+        if (s.radioCount > 0) {
+            const radioTotalStr = formatDuration(s.radioTotalMs);
+            result += `; radio ${s.radioCount} times, ${radioTotalStr}`;
+        }
+
+        return result;
     }
 
     _formatRoamStats(s) {

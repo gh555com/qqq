@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [16.4.1] - 2026-05-05
+
+### Improved
+- **Single Universal package**: One installation package now works on all platforms (Windows x64, Linux x64, macOS Intel, macOS Apple Silicon) — no more downloading the wrong one.
+- **80% smaller install size**: FFmpeg is no longer bundled. It downloads automatically in the background on first launch from the fastest available mirror (3 sources with automatic fallback).
+- **Media paste never blocks**: If FFmpeg is still downloading when you paste an image or media file, the extension silently waits for it to finish — no error, no manual retry needed.
+
+---
+
+
 ## [16.4.0] - 2026-05-04
 
 ### Added

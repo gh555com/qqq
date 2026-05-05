@@ -2131,13 +2131,13 @@ class YtDlpDownloader {
                 if (this.ffmpegPath) {
                     args.unshift("--ffmpeg-location", this.ffmpegPath);
                 } else {
-                    // ★ Lazy resolve: ffmpegInit may have completed after constructor
+                    // ★ Lazy resolve: wait for FFmpeg download if still in progress
                     try {
                         const global = require('./global');
-                        const gPath = global.ffmpegPath();
-                        if (gPath && gPath !== 'ffmpeg' && gPath !== 'ffmpeg.exe') {
-                            this.ffmpegPath = gPath;
-                            args.unshift("--ffmpeg-location", gPath);
+                        const { ffmpegPath: resolvedFf } = await global.ensureFFmpegReady(true);
+                        if (resolvedFf && resolvedFf !== 'ffmpeg' && resolvedFf !== 'ffmpeg.exe') {
+                            this.ffmpegPath = resolvedFf;
+                            args.unshift("--ffmpeg-location", resolvedFf);
                         }
                     } catch { }
                 }
