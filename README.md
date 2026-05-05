@@ -59,7 +59,7 @@
 
  Original name: qqq    ![Open VSX](https://img.shields.io/open-vsx/dt/gh555/qqq?label=installs&color=orange)
 
-  **macOS、Linux must go**: https://open-vsx.org/extension/gh555/qqq   ![](https://gh555.com/px?g=qqq&s=readme)
+  **macOS、Linux must go**: https://open-vsx.org/extension/gh555/qqq   ![](https://gh555.com/px?g=qqq&s=gh555.q3.readme)
 
 
  You need not have opened a note-taking application specially.
