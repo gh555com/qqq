@@ -950,7 +950,7 @@ function getConfig() {
     sidebarWidth: 100,
     sidebarRatio: 0.2,
     qqiq: [],
-    isPinned: true,
+    isPinned: false,
     szDisplayMode: "nothing",
     sortBy: "name",
   };
@@ -984,7 +984,7 @@ function getConfig() {
   if (typeof config.lineSpacing !== "number") config.lineSpacing = -2;
   if (typeof config.sidebarWidth !== "number") config.sidebarWidth = 100;
   if (typeof config.sidebarRatio !== "number") config.sidebarRatio = 0.2;
-  if (typeof config.isPinned !== "boolean") config.isPinned = true;
+  if (typeof config.isPinned !== "boolean") config.isPinned = false;
 
   // Read global settings (via ConfigGate)
   try {
