@@ -52,7 +52,6 @@ const CONSTANTS = Object.freeze({
     BATCH_SAVE_THRESHOLD: 5,
     SAVE_THROTTLE_MS: 1000,
     SAVE_RETRY_DELAY_MS: 121,
-    PERIODIC_MERGE_SAVE_MS: 63000, // ★ Periodic merge-save every 63s — each window runs its own timer
 
     // Atomic write
     SAVE_TEMP_SUFFIX: '.tmp',
@@ -384,7 +383,7 @@ class ClipboardHistoryManager {
         this._isWatching = false;
         this._watcherBusy = false;
         this._lastClipboardContent = '';
-        this._periodicMergeSaveTimer = null; // ★ periodic merge-save interval
+        this._mergeSaveScheduler = null; // ★ MergeSaveScheduler instance
 
         this._onChange = typeof opts.onChange === 'function' ? opts.onChange : null;
 
@@ -399,11 +398,13 @@ class ClipboardHistoryManager {
         // to prevent race condition where save fires before load completes and overwrites pin state
         this._loadReady = this._loadHistory().catch(() => { });
 
-        // ★ Periodic merge-save: even if process is force-killed, at most 63s of data is at risk
+        // ★ MergeSaveScheduler: single source of truth for periodic merge-save
         this._loadReady.then(() => {
-            this._periodicMergeSaveTimer = setInterval(() => {
-                if (this._dirty) this.forceSave().catch(() => { });
-            }, CONSTANTS.PERIODIC_MERGE_SAVE_MS);
+            this._mergeSaveScheduler = new global.MergeSaveScheduler({
+                name: 'Q4',
+                flush: () => { if (this._dirty) this.forceSave().catch(() => { }); },
+            });
+            this._mergeSaveScheduler.start();
         });
     }
 
@@ -1219,8 +1220,7 @@ class ClipboardHistoryManager {
 
     async dispose() {
         this.stopWatching();
-        if (this._periodicMergeSaveTimer) clearInterval(this._periodicMergeSaveTimer);
-        this._periodicMergeSaveTimer = null;
+        if (this._mergeSaveScheduler) { this._mergeSaveScheduler.stop(); this._mergeSaveScheduler = null; }
         await this._loadReady; // Ensure pending writes gated on loadReady complete before saving
         if (this._saveTimer) clearTimeout(this._saveTimer);
         if (this._dirty) await this.forceSave();
