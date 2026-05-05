@@ -444,7 +444,29 @@ class DaemonBridge extends EventEmitter {
 // - Uses endpoint.json + token.txt for discovery and authentication
 const pythonBridge = new BrokerBridge("Python");
 
-// ★ Listen for Broker events to refresh engine cache
+// ★ 全局音频播放状态追踪（用于 savor 统计，不依赖 q4 侧边栏）
+let _globalAudioState = { startTime: 0, isRadio: false };
+
+function _recordSavorUsage(durationMs, isRadio) {
+	if (!extensionContext) return;
+	const gs = extensionContext.globalState;
+	const prefix = isRadio ? 'qqq_savor_radio' : 'qqq_savor';
+	const countKey = prefix + '_count';
+	const totalMsKey = prefix + '_total_ms';
+	const firstUseKey = prefix + '_first_use';
+
+	const count = (Number(gs.get(countKey, 0)) || 0) + 1;
+	const totalMs = (Number(gs.get(totalMsKey, 0)) || 0) + durationMs;
+
+	if (!gs.get(firstUseKey)) {
+		gs.update(firstUseKey, Date.now());
+	}
+
+	gs.update(countKey, count);
+	gs.update(totalMsKey, totalMs);
+}
+
+// ★ Listen for Broker events to refresh engine cache & track savor usage
 pythonBridge.on('event', (evt) => {
 	if (evt.event === 'broker_connected') {
 		logMessage("[Broker] Connected, refreshing engine cache", "DEBUG");
@@ -454,6 +476,20 @@ pythonBridge.on('event', (evt) => {
 		logMessage("[Broker] Disconnected", "DEBUG");
 		invalidateEngineCache();
 		clearEngineAvailable("P"); // ★ 清除 Python 引擎可用时间戳
+	} else if (evt.event === 'audio_state_changed') {
+		// ★ 全局 savor 统计：不管 q4 侧边栏是否打开，都记录播放时长
+		if (evt.playing) {
+			_globalAudioState.startTime = Date.now();
+			_globalAudioState.isRadio = evt.source === 'radio';
+		} else {
+			if (_globalAudioState.startTime > 0) {
+				const dur = Date.now() - _globalAudioState.startTime;
+				if (dur > 500) {
+					_recordSavorUsage(dur, _globalAudioState.isRadio);
+				}
+				_globalAudioState.startTime = 0;
+			}
+		}
 	}
 });
 
@@ -1790,25 +1826,260 @@ function _initFFmpegAsync(context) {
 			return;
 		} catch { }
 
-		// Not found, fallback to system PATH
+		// Not found locally — attempt runtime download
 		ffmpegSource = "NOT_FOUND";
 		ffmpegPath = ffName;
 		ffprobePath = ffprobeName;
-		logMessage("FFmpeg not found, fallback to system PATH", "DEBUG");
+		logMessage("FFmpeg not found locally, attempting runtime download...", "INFO");
+
+		const downloaded = await _downloadFFmpeg(globalStoragePath);
+		if (downloaded) {
+			const dlFf = path.join(globalStoragePath, ffName);
+			const dlFfprobe = path.join(globalStoragePath, ffprobeName);
+			if (process.platform !== 'win32') {
+				try { fs.chmodSync(dlFf, 0o755); } catch { }
+				try { fs.chmodSync(dlFfprobe, 0o755); } catch { }
+			}
+			ffmpegPath = dlFf;
+			ffprobePath = fs.existsSync(dlFfprobe) ? dlFfprobe : ffprobeName;
+			ffmpegSource = "GLOBAL_STORAGE";
+			logMessage(`FFmpeg downloaded to: ${dlFf}`, "INFO");
+		} else {
+			logMessage("FFmpeg download failed, fallback to system PATH", "WARN");
+		}
 	})();
 
 	return _ffmpegInitPromise;
 }
 
 /**
+ * ★ FFmpeg runtime download — 3-source fallback (npmmirror → npmjs → cdn.gh555.com)
+ * Downloads @ffmpeg-installer tgz, extracts ffmpeg binary to globalStorage
+ */
+async function _downloadFFmpeg(globalStoragePath) {
+	if (!globalStoragePath) return false;
+
+	const platform = process.platform;
+	const arch = process.arch;
+	const isWin = platform === 'win32';
+
+	// Platform → npm package mapping
+	const pkgMap = {
+		'win32_x64': { pkg: 'win32-x64', ver: '4.1.0' },
+		'win32_arm64': { pkg: 'win32-x64', ver: '4.1.0' }, // ARM64 uses x64 via emulation
+		'linux_x64': { pkg: 'linux-x64', ver: '4.1.0' },
+		'darwin_x64': { pkg: 'darwin-x64', ver: '4.1.0' },
+		'darwin_arm64': { pkg: 'darwin-arm64', ver: '4.1.5' },
+	};
+
+	const key = `${platform}_${arch}`;
+	const mapping = pkgMap[key];
+	if (!mapping) {
+		logMessage(`[FFmpeg] Unsupported platform: ${key}`, "WARN");
+		return false;
+	}
+
+	const { pkg, ver } = mapping;
+	const tgzName = `${pkg}-${ver}.tgz`;
+
+	// 3-source fallback URLs
+	const gh555Map = {
+		'win32-x64-4.1.0.tgz': 'https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/H6ZIXGHS7XMDA.tgz',
+		'linux-x64-4.1.0.tgz': 'https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/HER7VOA2L4BIY.tgz',
+		'darwin-x64-4.1.0.tgz': 'https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/O6UXJ2RYAST3S.tgz',
+		'darwin-arm64-4.1.5.tgz': 'https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/SCHAWYWVS2CQM.tgz',
+	};
+	const sources = [
+		{ name: 'npmmirror', url: `https://registry.npmmirror.com/@ffmpeg-installer/${pkg}/-/${tgzName}` },
+		{ name: 'npmjs', url: `https://registry.npmjs.org/@ffmpeg-installer/${pkg}/-/${tgzName}` },
+		{ name: 'cdn.gh555', url: gh555Map[tgzName] || `https://cdn.gh555.com/ffmpeg/${tgzName}` },
+	];
+
+	try {
+		await fs.promises.mkdir(globalStoragePath, { recursive: true });
+	} catch { }
+
+	const ffTarget = path.join(globalStoragePath, isWin ? 'ffmpeg.exe' : 'ffmpeg');
+
+	for (const source of sources) {
+		try {
+			logMessage(`[FFmpeg] Trying ${source.name}: ${source.url}`, "INFO");
+
+			// All sources are tgz — download then extract
+			const tgzPath = path.join(globalStoragePath, tgzName);
+			await _httpDownloadFile(source.url, tgzPath, 120000);
+			await _extractFFmpegFromTgz(tgzPath, ffTarget, isWin);
+			try { fs.unlinkSync(tgzPath); } catch { }
+
+			// Validate
+			if (fs.existsSync(ffTarget)) {
+				const stat = fs.statSync(ffTarget);
+				if (stat.size > 5 * 1024 * 1024) { // FFmpeg should be >5MB
+					logMessage(`[FFmpeg] Downloaded from ${source.name} (${(stat.size / 1024 / 1024).toFixed(1)} MB)`, "INFO");
+					return true;
+				}
+				logMessage(`[FFmpeg] File too small from ${source.name}: ${stat.size} bytes`, "WARN");
+				try { fs.unlinkSync(ffTarget); } catch { }
+			}
+		} catch (e) {
+			logMessage(`[FFmpeg] ${source.name} failed: ${e.message}`, "WARN");
+		}
+	}
+
+	return false;
+}
+
+/**
+ * HTTP(S) file download with redirect support
+ */
+function _httpDownloadFile(url, targetPath, timeoutMs = 60000) {
+	return new Promise((resolve, reject) => {
+		const http = require('http');
+		const https = require('https');
+		const doReq = (targetUrl, redirects = 0) => {
+			if (redirects > 5) return reject(new Error("Too many redirects"));
+			const urlObj = new URL(targetUrl);
+			const transport = urlObj.protocol === 'http:' ? http : https;
+			const req = transport.get({
+				hostname: urlObj.hostname,
+				port: urlObj.port || (urlObj.protocol === 'http:' ? 80 : 443),
+				path: urlObj.pathname + urlObj.search,
+				timeout: timeoutMs,
+				headers: { 'User-Agent': 'Mozilla/5.0 (VSCode-qqq)' }
+			}, (res) => {
+				if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+					res.resume();
+					return doReq(new URL(res.headers.location, targetUrl).href, redirects + 1);
+				}
+				if (res.statusCode !== 200) {
+					res.resume();
+					return reject(new Error(`HTTP ${res.statusCode}`));
+				}
+				const file = fs.createWriteStream(targetPath);
+				res.pipe(file);
+				file.on('finish', () => { file.close(); resolve(); });
+				file.on('error', (e) => { try { fs.unlinkSync(targetPath); } catch { } reject(e); });
+			});
+			req.on('error', (e) => reject(new Error(`Network: ${e.code || e.message}`)));
+			req.on('timeout', () => { req.destroy(); reject(new Error("Timeout")); });
+		};
+		doReq(url);
+	});
+}
+
+/**
+ * Extract ffmpeg binary from @ffmpeg-installer tgz package
+ * Structure: package/ffmpeg (or package/ffmpeg.exe)
+ */
+function _extractFFmpegFromTgz(tgzPath, targetPath, isWin) {
+	return new Promise((resolve, reject) => {
+		const zlib = require('zlib');
+		const ffBinName = isWin ? 'ffmpeg.exe' : 'ffmpeg';
+
+		// tar format: 512-byte header blocks followed by file data
+		const gunzip = zlib.createGunzip();
+		const input = fs.createReadStream(tgzPath);
+		const chunks = [];
+
+		input.pipe(gunzip);
+		gunzip.on('data', (chunk) => chunks.push(chunk));
+		gunzip.on('error', (e) => reject(new Error(`Gunzip: ${e.message}`)));
+		gunzip.on('end', () => {
+			try {
+				const tarData = Buffer.concat(chunks);
+				let offset = 0;
+				let found = false;
+
+				while (offset < tarData.length - 512) {
+					// Read tar header (512 bytes)
+					const header = tarData.slice(offset, offset + 512);
+					const name = header.slice(0, 100).toString('utf8').replace(/\0/g, '').trim();
+
+					if (!name) break; // End of archive
+
+					// File size in octal (bytes 124-135)
+					const sizeStr = header.slice(124, 136).toString('utf8').replace(/\0/g, '').trim();
+					const fileSize = parseInt(sizeStr, 8) || 0;
+
+					offset += 512; // Past header
+
+					// Check if this is the ffmpeg binary
+					const basename = name.split('/').pop();
+					if (basename === ffBinName && fileSize > 1024 * 1024) {
+						const fileData = tarData.slice(offset, offset + fileSize);
+						fs.writeFileSync(targetPath, fileData);
+						found = true;
+						break;
+					}
+
+					// Skip file data (padded to 512-byte boundary)
+					offset += Math.ceil(fileSize / 512) * 512;
+				}
+
+				if (found) resolve();
+				else reject(new Error(`${ffBinName} not found in tgz`));
+			} catch (e) {
+				reject(new Error(`Tar extract: ${e.message}`));
+			}
+		});
+	});
+}
+
+/**
  * Ensure FFmpeg is ready before use
  * Call this before any FFmpeg operation (e.g., decorators, video processing)
  * Returns immediately if already initialized
+ * If download is in progress, waits with optional progress notification
+ * If previous download failed, retries once
  */
-async function ensureFFmpegReady() {
+async function ensureFFmpegReady(showProgress = false) {
 	if (_ffmpegInitPromise) {
-		await _ffmpegInitPromise;
+		if (showProgress && ffmpegSource === 'NOT_FOUND' && vscode) {
+			// ★ FFmpeg 正在下载中，向用户显示进度
+			await vscode.window.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: 'qqq: FFmpeg downloading...',
+				cancellable: false
+			}, async () => {
+				await _ffmpegInitPromise;
+			});
+		} else {
+			await _ffmpegInitPromise;
+		}
 	}
+
+	// ★ 如果之前下载失败，用户主动触发时重试一次
+	if (showProgress && ffmpegSource === 'NOT_FOUND' && extensionContext) {
+		const globalStoragePath = extensionContext.globalStorageUri?.fsPath;
+		if (globalStoragePath) {
+			logMessage("[FFmpeg] Previous download failed, retrying...", "INFO");
+			const isWin = process.platform === 'win32';
+			const ffName = isWin ? 'ffmpeg.exe' : 'ffmpeg';
+			const ffprobeName = isWin ? 'ffprobe.exe' : 'ffprobe';
+
+			const downloaded = await (vscode ? vscode.window.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: 'qqq: FFmpeg downloading...',
+				cancellable: false
+			}, () => _downloadFFmpeg(globalStoragePath)) : _downloadFFmpeg(globalStoragePath));
+
+			if (downloaded) {
+				const dlFf = path.join(globalStoragePath, ffName);
+				const dlFfprobe = path.join(globalStoragePath, ffprobeName);
+				if (process.platform !== 'win32') {
+					try { fs.chmodSync(dlFf, 0o755); } catch { }
+					try { fs.chmodSync(dlFfprobe, 0o755); } catch { }
+				}
+				ffmpegPath = dlFf;
+				ffprobePath = fs.existsSync(dlFfprobe) ? dlFfprobe : ffprobeName;
+				ffmpegSource = "GLOBAL_STORAGE";
+				logMessage(`[FFmpeg] Retry succeeded: ${dlFf}`, "INFO");
+			} else {
+				logMessage("[FFmpeg] Retry also failed", "WARN");
+			}
+		}
+	}
+
 	return { ffmpegPath, ffprobePath, ffmpegSource };
 }
 
@@ -2833,6 +3104,19 @@ class WqReporter {
 				item.t0 = _clampInt(Math.floor(t0Raw / 1000), 1577836800, nowSec);
 			}
 			vig.savor = item;
+		}
+
+		// savor_radio 电台播放统计
+		const radioN = _clampInt(gs.get('qqq_savor_radio_count', 0), 0, 1000000);
+		if (radioN > 0) {
+			const item = { n: radioN };
+			const ms = _clampInt(gs.get('qqq_savor_radio_total_ms', 0), 0, Number.MAX_SAFE_INTEGER);
+			if (ms > 0) item.ms = ms;
+			const t0Raw = gs.get('qqq_savor_radio_first_use');
+			if (t0Raw && typeof t0Raw === 'number') {
+				item.t0 = _clampInt(Math.floor(t0Raw / 1000), 1577836800, nowSec);
+			}
+			vig.savor_radio = item;
 		}
 
 		// paste - {count, totalSize, firstUse}

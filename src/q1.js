@@ -573,6 +573,9 @@ async function getMediaInfo(filePath, mtimeMsRaw) {
 	const cached = resolutionCache.get(filePath);
 	if (cached && cached.mtime === mtimeMs) return cached;
 
+	// ★ 等待 FFmpeg 初始化完成（非阻塞：如果已完成则立即返回，如果正在下载则等待）
+	await global.ensureFFmpegReady();
+
 	const cacheKey = `probe:info:${filePath}:${mtimeMs}`;
 	return scheduleProbe(cacheKey, async () => _getMediaInfoInternal(filePath, mtimeMs));
 }
