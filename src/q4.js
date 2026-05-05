@@ -1733,18 +1733,22 @@ class ClipboardHistorySidebarProvider {
             return `${sec}s`;
         };
 
-        const totalStr = formatDuration(s.totalMs);
-        const days = Math.max(1, Math.ceil((Date.now() - s.firstUse) / 86400000));
-        const avgMs = Math.floor(s.totalMs / days);
+        // 本地统计
+        const localTotalStr = formatDuration(s.totalMs);
+        // 电台统计
+        const radioTotalStr = formatDuration(s.radioTotalMs || 0);
+        // 合并日均：本地+电台总时长 ÷ 最早首次使用到今天
+        const combinedTotalMs = (s.totalMs || 0) + (s.radioTotalMs || 0);
+        const firstUse = Math.min(s.firstUse || Date.now(), s.radioFirstUse || Date.now());
+        const days = Math.max(1, Math.ceil((Date.now() - firstUse) / 86400000));
+        const avgMs = Math.floor(combinedTotalMs / days);
         const avgStr = formatDuration(avgMs);
 
-        let result = `${s.count} local, ${totalStr}; avg ${avgStr}/d`;
-
+        let result = `${s.count} local, ${localTotalStr}`;
         if (s.radioCount > 0) {
-            const radioTotalStr = formatDuration(s.radioTotalMs);
-            result += `; radio ${s.radioCount} times, ${radioTotalStr}`;
+            result += `; ${s.radioCount} radio, ${radioTotalStr}`;
         }
-
+        result += `; avg ${avgStr}/d`;
         return result;
     }
 

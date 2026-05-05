@@ -446,24 +446,60 @@ const pythonBridge = new BrokerBridge("Python");
 
 // ★ 全局音频播放状态追踪（用于 savor 统计，不依赖 q4 侧边栏）
 let _globalAudioState = { startTime: 0, isRadio: false };
+let _savorDurationTimer = null;
 
-function _recordSavorUsage(durationMs, isRadio) {
+// ★ 点击播放/循环时立即记录次数（不依赖播放结束）
+function _recordSavorCount(isRadio) {
 	if (!extensionContext) return;
 	const gs = extensionContext.globalState;
 	const prefix = isRadio ? 'qqq_savor_radio' : 'qqq_savor';
 	const countKey = prefix + '_count';
-	const totalMsKey = prefix + '_total_ms';
 	const firstUseKey = prefix + '_first_use';
 
 	const count = (Number(gs.get(countKey, 0)) || 0) + 1;
-	const totalMs = (Number(gs.get(totalMsKey, 0)) || 0) + durationMs;
 
 	if (!gs.get(firstUseKey)) {
 		gs.update(firstUseKey, Date.now());
 	}
 
 	gs.update(countKey, count);
+}
+
+// ★ 记录播放时长（纯时长，不计数）
+function _recordSavorDuration(durationMs, isRadio) {
+	if (!extensionContext) return;
+	if (durationMs < 500) return;
+	const gs = extensionContext.globalState;
+	const prefix = isRadio ? 'qqq_savor_radio' : 'qqq_savor';
+	const totalMsKey = prefix + '_total_ms';
+
+	const totalMs = (Number(gs.get(totalMsKey, 0)) || 0) + durationMs;
 	gs.update(totalMsKey, totalMs);
+}
+
+// ★ 开始63秒周期时长记录（最多丢最后一段）
+function _startSavorDurationTimer(isRadio) {
+	_stopSavorDurationTimer();
+	_savorDurationTimer = setInterval(() => {
+		if (_globalAudioState.startTime > 0) {
+			_recordSavorDuration(63000, _globalAudioState.isRadio);
+			_globalAudioState.startTime += 63000;
+		}
+	}, 63000);
+}
+
+function _stopSavorDurationTimer() {
+	if (_savorDurationTimer) {
+		clearInterval(_savorDurationTimer);
+		_savorDurationTimer = null;
+	}
+	// 记录自上次 tick 以来剩余的零头时长
+	if (_globalAudioState.startTime > 0) {
+		const dur = Date.now() - _globalAudioState.startTime;
+		if (dur > 500) {
+			_recordSavorDuration(dur, _globalAudioState.isRadio);
+		}
+	}
 }
 
 // ★ Listen for Broker events to refresh engine cache & track savor usage
@@ -477,18 +513,19 @@ pythonBridge.on('event', (evt) => {
 		invalidateEngineCache();
 		clearEngineAvailable("P"); // ★ 清除 Python 引擎可用时间戳
 	} else if (evt.event === 'audio_state_changed') {
-		// ★ 全局 savor 统计：不管 q4 侧边栏是否打开，都记录播放时长
+		// ★ 全局 savor 统计：次数在触发瞬间记，时长每63秒刷
 		if (evt.playing) {
+			const isRadio = evt.source === 'radio';
+			// 点按钮瞬间 → 次数+1
+			_recordSavorCount(isRadio);
 			_globalAudioState.startTime = Date.now();
-			_globalAudioState.isRadio = evt.source === 'radio';
+			_globalAudioState.isRadio = isRadio;
+			// 开始63秒周期刷时长
+			_startSavorDurationTimer(isRadio);
 		} else {
-			if (_globalAudioState.startTime > 0) {
-				const dur = Date.now() - _globalAudioState.startTime;
-				if (dur > 500) {
-					_recordSavorUsage(dur, _globalAudioState.isRadio);
-				}
-				_globalAudioState.startTime = 0;
-			}
+			// 停止 → 停定时器，刷最后一段零头
+			_stopSavorDurationTimer();
+			_globalAudioState.startTime = 0;
 		}
 	}
 });
