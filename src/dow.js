@@ -2553,23 +2553,24 @@ class YtDlpDownloader {
             // ★ Cascading download strategy: gh-proxy.com → GitHub → ghproxy.net → CDN
             const downloadUrls = [
                 // ★ gh-proxy.com (fastest in CN)
-                { url: officialUrl.replace('https://github.com/', 'https://gh-proxy.com/https://github.com/'), timeout: 60000, name: 'gh-proxy.com' },
+                { url: officialUrl.replace('https://github.com/', 'https://gh-proxy.com/https://github.com/'), timeout: 60000, name: 'proxy' },
                 // ★ GitHub official
-                { url: officialUrl, timeout: 60000, name: 'GitHub' },
+                { url: officialUrl, timeout: 60000, name: 'gh' },
                 // ★ ghproxy.net (backup)
-                { url: mirrorUrl, timeout: 60000, name: 'ghproxy.net' },
+                { url: mirrorUrl, timeout: 60000, name: 'proxy2' },
                 // ★ CDN (gh555.com ultimate fallback)
-                { url: cdnUrl, timeout: 60000, name: 'CDN' },
+                { url: cdnUrl, timeout: 60000, name: 'cdn' },
             ];
 
             let lastError = null;
             for (const { url, timeout, name } of downloadUrls) {
                 try {
+                    const _dlStart = Date.now();
                     global.logMessage(q('dow.tryDownload', name), "WARN"); // ★ Changed to WARN so user can see fallback attempts
                     await tryDownload(url, timeout);
                     global.logMessage(q('dow.downloadSuccess', name), "WARN"); // ★ Changed to WARN
                     // ★ 记录下载来源溯源
-                    try { global._dlSrcMap.yt = name; } catch { }
+                    try { global._dlSrcMap.yt = `${name}:${((Date.now() - _dlStart) / 1000).toFixed(1)}`; } catch { }
                     break; // Break on success
                 } catch (e) {
                     lastError = e;

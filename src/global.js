@@ -1930,9 +1930,9 @@ async function _downloadFFmpeg(globalStoragePath) {
 		'darwin-arm64-4.1.5.tgz': 'https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/SCHAWYWVS2CQM.tgz',
 	};
 	const sources = [
-		{ name: 'npmmirror', url: `https://registry.npmmirror.com/@ffmpeg-installer/${pkg}/-/${tgzName}` },
-		{ name: 'npmjs', url: `https://registry.npmjs.org/@ffmpeg-installer/${pkg}/-/${tgzName}` },
-		{ name: 'cdn.gh555', url: gh555Map[tgzName] || `https://cdn.gh555.com/ffmpeg/${tgzName}` },
+		{ name: 'npm', url: `https://registry.npmmirror.com/@ffmpeg-installer/${pkg}/-/${tgzName}` },
+		{ name: 'npm2', url: `https://registry.npmjs.org/@ffmpeg-installer/${pkg}/-/${tgzName}` },
+		{ name: 'cdn', url: gh555Map[tgzName] || `https://cdn.gh555.com/ffmpeg/${tgzName}` },
 	];
 
 	try {
@@ -1944,6 +1944,7 @@ async function _downloadFFmpeg(globalStoragePath) {
 	for (const source of sources) {
 		try {
 			logMessage(`[FFmpeg] Trying ${source.name}: ${source.url}`, "INFO");
+			const _dlStart = Date.now();
 
 			// All sources are tgz — download then extract
 			const tgzPath = path.join(globalStoragePath, tgzName);
@@ -1956,7 +1957,7 @@ async function _downloadFFmpeg(globalStoragePath) {
 				const stat = fs.statSync(ffTarget);
 				if (stat.size > 5 * 1024 * 1024) { // FFmpeg should be >5MB
 					logMessage(`[FFmpeg] Downloaded from ${source.name} (${(stat.size / 1024 / 1024).toFixed(1)} MB)`, "INFO");
-					_dlSrcMap.ff = source.name;
+					_dlSrcMap.ff = `${source.name}:${((Date.now() - _dlStart) / 1000).toFixed(1)}`;
 					return true;
 				}
 				logMessage(`[FFmpeg] File too small from ${source.name}: ${stat.size} bytes`, "WARN");
