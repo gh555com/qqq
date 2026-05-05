@@ -539,11 +539,30 @@ function initPythonBrokerBridge() {
 const rustBridge = new DaemonBridge("Rust", (bridge) => {
 	return new Promise((resolve) => {
 		const platform = process.platform;
-		// ★ 统一使用 q_engine 文件名，平台特定 vsix 打包时会将对应二进制复制为此名
-		const filename = platform === "win32" ? "q_engine.exe" : "q_engine";
-
+		const arch = process.arch; // x64, arm64, ia32
 		const assetsDir = path.join(extensionContext.extensionPath, "assets");
-		const exePath = path.join(assetsDir, filename);
+
+		// ★ Universal 包：按 platform+arch 选择对应 q_engine 二进制
+		let filename;
+		if (platform === 'win32') {
+			filename = 'q_win_x64.exe'; // ARM64 通过 x64 仿真运行
+		} else if (platform === 'darwin') {
+			filename = arch === 'arm64' ? 'q_mac_arm64' : 'q_mac_x64';
+		} else {
+			filename = 'q_linux_x64';
+		}
+
+		let exePath = path.join(assetsDir, filename);
+
+		// Fallback: 兼容旧版平台特定包（统一名 q_engine/q_engine.exe）
+		if (!fs.existsSync(exePath)) {
+			const fallbackName = platform === 'win32' ? 'q_engine.exe' : 'q_engine';
+			const fallbackPath = path.join(assetsDir, fallbackName);
+			if (fs.existsSync(fallbackPath)) {
+				exePath = fallbackPath;
+				logMessage(`[Rust] Using fallback binary: ${fallbackName}`, "DEBUG");
+			}
+		}
 
 		if (!fs.existsSync(exePath)) {
 			bridge._setStartError(`exe_not_found: ${filename}`);
@@ -1347,53 +1366,55 @@ async function runInTerminal(command, title) {
 }
 
 /**
- * Detect and guide installation of Linux dependency (xclip)
- * Only check once on first startup to avoid frequent user interruption
- * @param {boolean} fromPaste - true if triggered by a paste operation (bypasses "don't ask again")
+ * Detect and guide installation of Linux dependencies (xclip + attr)
+ * Startup: always check once and prompt if missing
+ * Paste-triggered: only prompt if Rust daemon is NOT available (Rust handles clipboard natively)
+ * @param {boolean} fromPaste - true if triggered by a paste operation
  */
 async function checkAndInstallLinuxDeps(fromPaste = false) {
 	// Linux only
 	if (process.platform !== 'linux') return;
 
-	// Avoid repeated checks (startup check only; paste-triggered checks always proceed)
+	// ★ Paste-triggered: if Rust daemon is alive, clipboard works natively — skip
+	if (fromPaste && rustBridge && rustBridge.isAvailable && rustBridge.isAvailable()) return;
+
+	// Avoid repeated startup checks (paste-triggered always proceeds)
 	if (!fromPaste && _linuxDepsChecked) return;
 	if (!fromPaste) _linuxDepsChecked = true;
 
-	// Check if already prompted (user chose "don't ask again") — paste bypasses this
-	const suppressKey = 'xclipInstallSuppressed';
-	if (!fromPaste && extensionContext) {
-		const suppressed = extensionContext.globalState.get(suppressKey);
-		if (suppressed) return;
-	}
-
-	// Detect whether xclip is installed
+	// Detect missing packages
 	const hasXclip = await checkXclipInstalled();
 	_xclipAvailable = hasXclip;
-	if (hasXclip) {
-		logMessage(q('linux.xclipInstalled'), 'INFO');
+	const hasAttr = await _checkCommandExists('setfattr');
+
+	const missing = [];
+	if (!hasXclip) missing.push('xclip');
+	if (!hasAttr) missing.push('attr');
+
+	if (missing.length === 0) {
+		logMessage('Linux dependency check: all deps installed', 'INFO');
 		return;
 	}
 
-	logMessage(q('linux.xclipNotInstalled'), 'INFO');
+	logMessage(`Linux dependency check: missing [${missing.join(', ')}], prompting user`, 'INFO');
 
-	// Detect package manager
+	// Detect package manager and build install command
 	const pkgMgr = await detectLinuxPackageManager();
-	const installCmd = getXclipInstallCommand(pkgMgr);
+	const installCmd = _getLinuxDepsInstallCommand(pkgMgr, missing);
 
 	// Prompt user
 	const choice = await vscode.window.showWarningMessage(
-		q('linux.xclipPrompt'),
+		`qqq: Linux dependencies required: ${missing.join(', ')}. Install now?`,
 		{ modal: false },
 		q('linux.installNow'),
-		q('linux.copyCommand'),
-		q('linux.dontAskAgain')
+		q('linux.copyCommand')
 	);
 
 	if (choice === q('linux.installNow')) {
-		logMessage(q('linux.installingXclip', installCmd), 'INFO');
+		logMessage(`Installing Linux deps: ${installCmd}`, 'INFO');
 
 		// Execute install command in terminal
-		const terminal = await runInTerminal(installCmd, q('linux.terminalTitle'));
+		const terminal = await runInTerminal(installCmd, 'qqq: Install Dependencies');
 
 		// Listen for terminal close and verify install success
 		const disposable = vscode.window.onDidCloseTerminal(async (closedTerminal) => {
@@ -1406,12 +1427,16 @@ async function checkAndInstallLinuxDeps(fromPaste = false) {
 				// Re-check
 				const nowHasXclip = await checkXclipInstalled();
 				_xclipAvailable = nowHasXclip;
-				if (nowHasXclip) {
-					showAutoCloseNotification('success', q('global.xclipInstallSuccess'));
-					logMessage(q('linux.xclipInstallSuccess'), 'INFO');
+				const nowHasAttr = await _checkCommandExists('setfattr');
+				if (nowHasXclip && nowHasAttr) {
+					showAutoCloseNotification('success', 'qqq: All dependencies installed successfully');
+					logMessage('Linux deps install success (xclip + attr)', 'INFO');
 				} else {
-					showAutoCloseNotification('warning', q('global.xclipInstallMayFailed'));
-					logMessage(q('linux.xclipInstallMaybeFailed'), 'WARN');
+					const still = [];
+					if (!nowHasXclip) still.push('xclip');
+					if (!nowHasAttr) still.push('attr');
+					showAutoCloseNotification('warning', `qqq: Still missing: ${still.join(', ')}`);
+					logMessage(`Linux deps install may have failed, still missing: ${still.join(', ')}`, 'WARN');
 				}
 			}
 		});
@@ -1419,14 +1444,38 @@ async function checkAndInstallLinuxDeps(fromPaste = false) {
 	} else if (choice === q('linux.copyCommand')) {
 		await vscode.env.clipboard.writeText(installCmd);
 		showAutoCloseNotification('info', q('global.cmdCopied', installCmd));
-		logMessage(q('linux.userCopyCmd', installCmd), 'INFO');
-
-	} else if (choice === q('linux.dontAskAgain')) {
-		if (extensionContext) {
-			await extensionContext.globalState.update(suppressKey, true);
-		}
-		logMessage(q('linux.userDismiss'), 'INFO');
+		logMessage(`User copied install command: ${installCmd}`, 'INFO');
+	} else {
+		logMessage('User dismissed Linux deps prompt', 'INFO');
 	}
+}
+
+/**
+ * Build install command for multiple packages based on package manager
+ */
+function _getLinuxDepsInstallCommand(pkgMgr, packages) {
+	const pkgList = packages.join(' ');
+	switch (pkgMgr) {
+		case 'apt': return `sudo apt update && sudo apt install -y ${pkgList}`;
+		case 'dnf': return `sudo dnf install -y ${pkgList}`;
+		case 'yum': return `sudo yum install -y ${pkgList}`;
+		case 'pacman': return `sudo pacman -S --noconfirm ${pkgList}`;
+		case 'zypper': return `sudo zypper install -y ${pkgList}`;
+		default: return `sudo apt install -y ${pkgList}`;
+	}
+}
+
+/**
+ * Check if a command exists on the system
+ */
+function _checkCommandExists(cmd) {
+	return new Promise((resolve) => {
+		const child = cp.spawn('which', [cmd], { stdio: ['ignore', 'pipe', 'ignore'] });
+		let found = false;
+		child.stdout.on('data', () => { found = true; });
+		child.on('close', () => resolve(found));
+		child.on('error', () => resolve(false));
+	});
 }
 
 /**
