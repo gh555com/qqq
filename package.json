@@ -410,6 +410,14 @@
       {
         "command": "qqq.clearCache",
         "title": "%cmd.clearCache%"
+      },
+      {
+        "command": "qqq.uploadUserData",
+        "title": "%cmd.uploadUserData%"
+      },
+      {
+        "command": "qqq.pullUserData",
+        "title": "%cmd.pullUserData%"
       }
     ],
     "keybindings": [

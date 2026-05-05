@@ -82,5 +82,7 @@
     "cmd.exportZip": "qqq: 导出 zip",
     "cmd.downloadVideosFromUrl": "qqq: 在当前光标位置插入网络视频",
     "cmd.savorMoments": "qqq: 偿还给自己",
-    "cmd.clearCache": "qqq: 清除缓存"
+    "cmd.clearCache": "qqq: 清除缓存",
+    "cmd.uploadUserData": "qqq: 上传数据到云端",
+    "cmd.pullUserData": "qqq: 从云端恢复数据"
 }

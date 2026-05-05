@@ -1816,6 +1816,10 @@ function _registerCommands(context) {
 			vscode.env.openExternal(vscode.Uri.parse(global.buildGh555Url('/gaea/d/qqq', 'profile')));
 		}),
 
+		// ★ Cloud user data sync commands (upload/pull roam config + clipboard history)
+		safeRegisterCommand('qqq.uploadUserData', global.withReady(() => global.uploadUserData())),
+		safeRegisterCommand('qqq.pullUserData', global.withReady(() => global.pullUserData())),
+
 
 
 		// ★ Ultimate version: unified settings change entry point (via ConfigGate)
