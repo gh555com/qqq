@@ -59,7 +59,7 @@
 
  Original name: qqq
 
-  **macOS & Linux  Enable.** [Details](#how-to-install)  ![](https://gh555.com/px?g=qqq&s=gh555.q3.readme)
+  **qqq 16.4.1+ required for Linux / macOS.** [Details](#how-to-install)  ![](https://gh555.com/px?g=qqq&s=gh555.q3.readme)
 
 
  You need not have opened a note-taking application specially.
@@ -259,7 +259,7 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
 
   ## How to install ##
 
-  A single universal installer for Windows, Linux and macOS, compatible with all operating systems and processor architectures. Simply install or download now — no installation options, no choices required. One package works for everything.
+ **qqq 16.4.1+**: A single universal installer for Windows, Linux and macOS, compatible with all operating systems and processor architectures. Simply install or download now — no installation options, no choices required. One package works for everything.
 On the other hand, Linux and macOS versions have received relatively limited testing. If you encounter any issues while using the product on Linux or macOS, please contact us directly at ky@gh555.com to help improve the product together.
 
 For the best practice, download qqq from the official Marketplace at https://marketplace.visualstudio.com/items?itemName=gh555com.q3. or, actually, the best way is to simply open any of your IDEs, type "q3" directly into the official extension marketplace in the sidebar, and install it:
@@ -300,11 +300,8 @@ Virus detection or submission: https://www.avira.com/en/analysis/submit
 </p>
 
 
- Fact: VS Code is incomplete without qqq.
 
-
-
- > the whisper is: I miss you 的梦0.
+  the whisper is: I miss you 的梦0.
 
 
 
