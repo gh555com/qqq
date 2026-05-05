@@ -117,10 +117,7 @@ jobs:
           if [[ "${{ matrix.os }}" == *"windows"* ]]; then
             cp Cargo_win.toml Cargo.toml
             mkdir -p .cargo
-            cat > .cargo/config.toml << 'EOF'
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
-EOF
+            printf '[target.x86_64-pc-windows-msvc]\nrustflags = ["-C", "target-feature=+crt-static"]\n' > .cargo/config.toml
             rustup target add ${{ matrix.target }}
             cargo build --release --target ${{ matrix.target }}
             cp target/${{ matrix.target }}/release/q.exe ../${{ matrix.asset_name }}
