@@ -51,9 +51,12 @@ dist/metafile.json
 dist/__pycache__/**
 dist/brokerBridge.js
 dist/miniaudio_nonblocking_v15.py
+# ★ 运行时下载的大文件（用户安装后自动下载）
+dist/yt-dlp*
+dist/python_engine*
 
 # 平台二进制处理
-# 1. 排除 assets 根目录下的重复 DLL (运行时由 runtimes/ 提供)
+# 1. 排除 assets 根目录下的重复 DLL (运行时由 runtimes/x64 提供)
 assets/concrt140.dll
 assets/msvcp140.dll
 assets/msvcp140_1.dll
@@ -61,12 +64,10 @@ assets/msvcp140_2.dll
 assets/vccorlib140.dll
 assets/vcruntime140.dll
 assets/vcruntime140_1.dll
-# 2. 排除平台特定源二进制文件 (q_engine.exe 由 CI 构建时动态生成，不排除)
-assets/q_win_*
-assets/q_linux_*
-assets/q_mac_*
-assets/q_x64
-assets/q_arm64
+# ★ 不再支持 win32-ia32，排除 x86 DLL
+assets/runtimes/x86/**
+# 2. q_engine 平台二进制：4个全部打入 Universal 包（运行时按 platform+arch 选用）
+# assets/q_win_x64.exe, assets/q_linux_x64, assets/q_mac_x64, assets/q_mac_arm64
 # 3. 排除备份文件
 assets/*.bak
 
