@@ -74,7 +74,7 @@
 
 ## 4. Settings 字段完整定义
 
-### 4.1 默认模板（21项）
+### 4.1 默认模板（22项）
 
 服务器对**未付费用户**或**用户从未保存过配置**时，返回此默认模板：
 
@@ -82,6 +82,7 @@
 {
   "ok": true,
   "settings": {
+    "theme": "auto",
     "language": "中文",
     "performanceMode": "optmum",
     "ioEngine": "v16  auto",
@@ -112,6 +113,7 @@
 
 | 字段 | 类型 | 合法值 | 默认值 |
 |------|------|--------|--------|
+| `theme` | string | `"auto"` `"dark"` `"solarize light"` | `"auto"` |
 | `language` | string | `"中文"` `"繁體中文"` `"English"` `"日本語"` `"Deutsch"` `"Русский"` `"العربية"` `"한국어"` `"Español"` `"Français"` `"Português BR"` | `"中文"` |
 | `performanceMode` | string | `"extreme"` `"accelerated"` `"optmum"` | `"optmum"` |
 | `ioEngine` | string | `"v16  auto"` `"Exclude Python"` | `"v16  auto"` |
@@ -154,7 +156,7 @@
 | 用户已保存配置 | 返回 `ok: true` + 用户配置 |
 | 用户未注册 | 返回 `ok: false` + `error: "phone_not_registered"` |
 | 用户未购买 | 返回 `ok: false` + `error: "not_purchased"` |
-| 存储时收到未知字段 | **丢弃**（只存已定义的 21 个字段） |
+| 存储时收到未知字段 | **丢弃**（只存已定义的 22 个字段） |
 
 ### 5.3 版本升级
 
@@ -187,7 +189,7 @@
 | 优化点 | 说明 |
 |--------|------|
 | **无增量同步** | 每次拉取完整配置，避免复杂的 diff 逻辑 |
-| **无压缩** | 21 字段 JSON 约 800 字节，无需 gzip |
+| **无压缩** | 22 字段 JSON 约 800 字节，无需 gzip |
 | **无签名** | 配置非敏感数据，无需加密/签名 |
 | **单向拉取** | 客户端只拉不推（推送由其他接口处理） |
 
@@ -220,7 +222,7 @@
 - [ ] 返回 `Content-Type: application/json`
 - [ ] `ok` 字段为布尔型
 - [ ] `phone` 字段为脱敏手机号（带国家码，中间4位用`*`替换，如 `+86138****5678`）
-- [ ] `settings` 字段包含全部 21 项（可选：只返回用户修改过的项）
+- [ ] `settings` 字段包含全部 22 项（可选：只返回用户修改过的项）
 - [ ] `v` 字段为整数（当前固定返回 `1`）
 - [ ] 错误时 `error` 字段为上述错误码之一
 - [ ] 用户未注册返回 `phone_not_registered`，未购买返回 `not_purchased`
@@ -228,6 +230,60 @@
 
 ---
 
-**文档版本**: 1.0
-**最后更新**: 2026-03-21
+**文档版本**: 1.1
+**最后更新**: 2026-05-05
 **维护者**: QQQ 客户端 & 服务端
+
+---
+
+## 附录 A：v1.1 变更 — 新增 `theme` 字段
+
+### A.1 背景
+
+客户端 v16.x 新增了面板主题色选择功能（`qqq.theme`），允许用户选择面板配色方案。该配置项属于正版用户云同步配置，需要服务端在 `settings` 中新增 `theme` 字段的存储与下发。
+
+### A.2 新增字段
+
+| 字段 | 类型 | 合法值 | 默认值 | 说明 |
+|------|------|--------|--------|------|
+| `theme` | string | `"auto"` `"dark"` `"solarize light"` | `"auto"` | 面板主题色 |
+
+### A.3 各枚举值含义
+
+| 值 | 行为 |
+|----|------|
+| `"auto"` | 跟随 VS Code 当前配色方案自动切换明暗 |
+| `"dark"` | 强制暗色面板（暖色调，无蓝色元素） |
+| `"solarize light"` | 强制亮色面板（经典暖色调） |
+
+### A.4 i18n 展示文案（中文，与客户端 package.nls.zh-cn.json 一致）
+
+| 位置 | 文案 |
+|------|------|
+| 设置分类标题 | 👁️ 观察 |
+| 配置项描述 | 👁️ 面板主题： |
+| 枚举：auto | 自动：跟随 VS Code 配色方案 |
+| 枚举：dark | 暗色：暖色调暗色面板（无蓝色元素） |
+| 枚举：solarize light | Solarize Light：经典暖色亮色面板 |
+
+### A.5 服务端所需操作
+
+1. **数据库**：在用户配置表中新增 `theme` 列（`VARCHAR(20) DEFAULT 'auto'`）
+2. **写入**：客户端修改 theme 后会通过现有配置保存接口上传，服务端校验值在 `["auto", "dark", "solarize light"]` 白名单内，否则忽略
+3. **读取**：`POST /api/gaea/qqq/config` 响应的 `settings` 对象中始终包含 `theme` 字段（用户从未设置过则返回默认值 `"auto"`）
+4. **兼容**：老客户端收到 `theme` 字段会自动忽略（未知字段走默认值逻辑），无破坏性
+
+### A.6 ALTER TABLE 参考
+
+```sql
+ALTER TABLE <配置表>
+  ADD COLUMN IF NOT EXISTS theme VARCHAR(20) NOT NULL DEFAULT 'auto';
+```
+
+### A.7 校验规则
+
+| 检查项 | 规则 |
+|--------|------|
+| 类型 | string |
+| 合法值白名单 | `auto`, `dark`, `solarize light` |
+| 非法值处理 | 丢弃，使用默认值 `"auto"` |

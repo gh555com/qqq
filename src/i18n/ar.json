@@ -638,6 +638,7 @@
             "copyException": "[Clipboard] استثناء عملية النسخ: {0}",
             "copyFallbackText": "[Clipboard] جميع المحركات غير متاحة، تم نسخ المسارات كنص عادي",
             "shellClipboardFailed": "فشل معالجة الحافظة Shell: {0}",
+            "noEnginesForImage": "[ClipboardImage] جميع المحركات غير متاحة، لا يمكن حفظ لقطة الشاشة",
             "topLevelError": "خطأ المستوى الأعلى: {0}",
             "extractedVideoUrls": "[SmartPaste] تم استخراج {0} رابط فيديو من HTML",
             "createDirFailed": "فشل إنشاء الدليل {0}: {1}",
@@ -694,6 +695,9 @@
             "urlEmpty": "الرابط لا يمكن أن يكون فارغاً",
             "urlInvalid": "يرجى إدخال رابط صالح",
             "selectVideoDir": "اختر دليل تنزيل الفيديو"
+        },
+        "toast": {
+            "enginesNotReady": "المحركات قيد التهيئة، يرجى إعادة المحاولة بعد لحظات"
         }
     },
     "python": {

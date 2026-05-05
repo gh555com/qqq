@@ -12,6 +12,88 @@ const { BrokerBridge } = require('./brokerBridge');
 const NO_TRACK_ENV = { ...process.env, QQQ_NO_TRACK: "1" };
 
 // ============================================================================
+// ★★★ qlok: Unified cross-process download lock (single source of truth) ★★★
+// All component downloads (FF, PY, YT, Chrome) use this ONE mechanism.
+// Uses OS-level O_EXCL for atomic file creation — no race possible.
+// ============================================================================
+
+/**
+ * Try to acquire qlok atomically (non-blocking, instant return)
+ * @param {string} qlokPath - Path to .qlok file
+ * @param {number} staleMs - Lock expires after this (default 5 min)
+ * @returns {{acquired: boolean, release: Function}}
+ */
+function tryAcquireQlok(qlokPath, staleMs = 300000) {
+	const dir = path.dirname(qlokPath);
+	if (!fs.existsSync(dir)) {
+		try { fs.mkdirSync(dir, { recursive: true }); } catch { }
+	}
+
+	// Clean stale qlok
+	try {
+		const st = fs.statSync(qlokPath);
+		if (Date.now() - st.mtimeMs > staleMs) {
+			fs.unlinkSync(qlokPath);
+		}
+	} catch { /* doesn't exist, good */ }
+
+	// Atomic exclusive create
+	try {
+		const fd = fs.openSync(qlokPath, "wx");
+		fs.writeFileSync(fd, `${process.pid}\n${Date.now()}`, "utf8");
+		fs.closeSync(fd);
+		return {
+			acquired: true,
+			release: () => { try { fs.unlinkSync(qlokPath); } catch { } }
+		};
+	} catch (e) {
+		if (e.code === "EEXIST") {
+			return { acquired: false, release: () => {} };
+		}
+		// Other errors (permission etc.) - proceed anyway
+		return { acquired: true, release: () => {} };
+	}
+}
+
+/**
+ * Check if a qlok is currently active (exists and not stale)
+ * @param {string} qlokPath - Path to .qlok file
+ * @param {number} staleMs - Lock expires after this
+ * @returns {boolean}
+ */
+function isQlokActive(qlokPath, staleMs = 300000) {
+	try {
+		const st = fs.statSync(qlokPath);
+		return Date.now() - st.mtimeMs < staleMs;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Await qlok with polling (blocking variant for downloads that must wait)
+ * @param {string} qlokPath - Path to .qlok file
+ * @param {object} opts - { waitMs, pollMs, staleMs }
+ * @returns {Promise<{acquired: boolean, release: Function}>}
+ */
+async function awaitQlok(qlokPath, opts = {}) {
+	const waitMs = Math.max(0, Number(opts.waitMs ?? 15000));
+	const pollMs = Math.max(20, Number(opts.pollMs ?? 500));
+	const staleMs = Math.max(0, Number(opts.staleMs ?? 300000));
+	const start = Date.now();
+
+	while (true) {
+		const result = tryAcquireQlok(qlokPath, staleMs);
+		if (result.acquired) return result;
+
+		if (Date.now() - start >= waitMs) {
+			return { acquired: false, release: () => {} };
+		}
+		await new Promise(r => setTimeout(r, pollMs));
+	}
+}
+
+// ============================================================================
 // ★ 引擎可用时间戳追踪（用于状态栏按检测顺序显示引擎标签）
 // ============================================================================
 const _engineAvailableTimestamps = { R: 0, P: 0, N: 0 };
@@ -1941,34 +2023,82 @@ async function _downloadFFmpeg(globalStoragePath) {
 
 	const ffTarget = path.join(globalStoragePath, isWin ? 'ffmpeg.exe' : 'ffmpeg');
 
-	for (const source of sources) {
+	// ★ Check if another window already downloaded FFmpeg (race condition guard)
+	if (fs.existsSync(ffTarget)) {
 		try {
-			logMessage(`[FFmpeg] Trying ${source.name}: ${source.url}`, "INFO");
-			const _dlStart = Date.now();
-
-			// All sources are tgz — download then extract
-			const tgzPath = path.join(globalStoragePath, tgzName);
-			await _httpDownloadFile(source.url, tgzPath, 120000);
-			await _extractFFmpegFromTgz(tgzPath, ffTarget, isWin);
-			try { fs.unlinkSync(tgzPath); } catch { }
-
-			// Validate
-			if (fs.existsSync(ffTarget)) {
-				const stat = fs.statSync(ffTarget);
-				if (stat.size > 5 * 1024 * 1024) { // FFmpeg should be >5MB
-					logMessage(`[FFmpeg] Downloaded from ${source.name} (${(stat.size / 1024 / 1024).toFixed(1)} MB)`, "INFO");
-					_dlSrcMap.ff = `${source.name}:${((Date.now() - _dlStart) / 1000).toFixed(1)}`;
-					return true;
-				}
-				logMessage(`[FFmpeg] File too small from ${source.name}: ${stat.size} bytes`, "WARN");
-				try { fs.unlinkSync(ffTarget); } catch { }
+			const stat = fs.statSync(ffTarget);
+			if (stat.size > 5 * 1024 * 1024) {
+				logMessage(`[FFmpeg] Already exists (${(stat.size / 1024 / 1024).toFixed(1)} MB), skip download`, "INFO");
+				return true;
 			}
-		} catch (e) {
-			logMessage(`[FFmpeg] ${source.name} failed: ${e.message}`, "WARN");
-		}
+		} catch { }
 	}
 
-	return false;
+	// ★★★ qlok: atomic cross-window lock (single source of truth)
+	const qlokPath = path.join(globalStoragePath, 'ff_downloading.qlok');
+	const qlok = tryAcquireQlok(qlokPath, 180000); // 3 min stale
+
+	if (!qlok.acquired) {
+		logMessage('[FFmpeg] Another window is downloading, waiting...', 'INFO');
+		// Wait up to 60s for the other window to finish
+		for (let i = 0; i < 120; i++) {
+			await new Promise(r => setTimeout(r, 500));
+			if (fs.existsSync(ffTarget)) {
+				try {
+					const stat = fs.statSync(ffTarget);
+					if (stat.size > 5 * 1024 * 1024) {
+						logMessage(`[FFmpeg] Other window completed download (${(stat.size / 1024 / 1024).toFixed(1)} MB)`, "INFO");
+						return true;
+					}
+				} catch { }
+			}
+			if (!isQlokActive(qlokPath, 180000)) break; // Other window released or stale
+		}
+		// Final check
+		if (fs.existsSync(ffTarget)) {
+			try {
+				if (fs.statSync(ffTarget).size > 5 * 1024 * 1024) return true;
+			} catch { }
+		}
+		return false;
+	}
+
+	// ★ Use unique temp name to avoid multi-window race on same tgz file
+	const tgzPath = path.join(globalStoragePath, `_dl_${process.pid}_${tgzName}`);
+
+	try {
+		for (const source of sources) {
+			try {
+				logMessage(`[FFmpeg] Trying ${source.name}: ${source.url}`, "INFO");
+				const _dlStart = Date.now();
+
+				// All sources are tgz — download then extract
+				await _httpDownloadFile(source.url, tgzPath, 120000);
+				await _extractFFmpegFromTgz(tgzPath, ffTarget, isWin);
+				try { fs.unlinkSync(tgzPath); } catch { }
+
+				// Validate
+				if (fs.existsSync(ffTarget)) {
+					const stat = fs.statSync(ffTarget);
+					if (stat.size > 5 * 1024 * 1024) { // FFmpeg should be >5MB
+						logMessage(`[FFmpeg] Downloaded from ${source.name} (${(stat.size / 1024 / 1024).toFixed(1)} MB)`, "INFO");
+						_dlSrcMap.ff = `${source.name}:${((Date.now() - _dlStart) / 1000).toFixed(1)}`;
+						return true;
+					}
+					logMessage(`[FFmpeg] File too small from ${source.name}: ${stat.size} bytes`, "WARN");
+					try { fs.unlinkSync(ffTarget); } catch { }
+				}
+			} catch (e) {
+				logMessage(`[FFmpeg] ${source.name} failed: ${e.message}`, "WARN");
+				try { fs.unlinkSync(tgzPath); } catch { }
+			}
+		}
+
+		try { fs.unlinkSync(tgzPath); } catch { }
+		return false;
+	} finally {
+		qlok.release(); // ★ Always release qlok
+	}
 }
 
 /**
@@ -2022,10 +2152,13 @@ function _extractFFmpegFromTgz(tgzPath, targetPath, isWin) {
 		const gunzip = zlib.createGunzip();
 		const input = fs.createReadStream(tgzPath);
 		const chunks = [];
+		let rejected = false;
+		const fail = (e) => { if (!rejected) { rejected = true; reject(e); } };
 
+		input.on('error', (e) => fail(new Error(`Read tgz: ${e.message}`)));
 		input.pipe(gunzip);
 		gunzip.on('data', (chunk) => chunks.push(chunk));
-		gunzip.on('error', (e) => reject(new Error(`Gunzip: ${e.message}`)));
+		gunzip.on('error', (e) => fail(new Error(`Gunzip: ${e.message}`)));
 		gunzip.on('end', () => {
 			try {
 				const tarData = Buffer.concat(chunks);
@@ -4811,8 +4944,26 @@ function getActiveEngineState(pythonBridge, rustBridge, shellBridge) {
 
 async function tryOneByOne(callback) {
 	// ★ Simplified: directly use cached effective engine order
-	const effectiveOrder = getEffectiveEngineOrder();
+	let effectiveOrder = getEffectiveEngineOrder();
 	const bridges = { "python": pythonBridge, "rust": rustBridge, "shell": shellBridge };
+
+	// ★ Cold-start guard: if no engines available, wait up to 3s for any to become ready
+	if (effectiveOrder.length === 0) {
+		logMessage("[tryOneByOne] No engines available, waiting up to 3s...", "INFO");
+		for (let i = 0; i < 6; i++) {
+			await new Promise(r => setTimeout(r, 500));
+			invalidateEngineCache();
+			effectiveOrder = getEffectiveEngineOrder();
+			if (effectiveOrder.length > 0) {
+				logMessage(`[tryOneByOne] Engine(s) ready after ${(i + 1) * 500}ms: [${effectiveOrder.join(',')}]`, "INFO");
+				break;
+			}
+		}
+		if (effectiveOrder.length === 0) {
+			logMessage("[tryOneByOne] Still no engines after 3s wait", "WARN");
+			return null;
+		}
+	}
 
 	for (const name of effectiveOrder) {
 		const bridge = bridges[name];
@@ -5528,6 +5679,13 @@ module.exports = {
 	getActiveEngineCode,
 	getActiveEngineName,
 	invalidateEngineCache,  // ★ Refresh engine cache
+	getEffectiveEngineOrder, // ★ Check effective engine list (for h.js toast)
+
+	// ★★★ qlok: Unified download lock (single source of truth)
+	tryAcquireQlok,
+	isQlokActive,
+	awaitQlok,
+
 	extensionPath: () => extensionContext?.extensionPath,
 	extensionId: () => extensionContext?.extension?.id,
 	cfgNs,  // ★ 动态配置命名空间（"qqq" 或 "q3"，取决于 package.json name）

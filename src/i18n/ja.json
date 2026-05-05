@@ -638,6 +638,7 @@
             "copyException": "[Clipboard] コピー操作例外: {0}",
             "copyFallbackText": "[Clipboard] すべてのエンジンが利用不可、パスをプレーンテキストとしてコピー",
             "shellClipboardFailed": "Shell クリップボード処理に失敗: {0}",
+            "noEnginesForImage": "[ClipboardImage] 全エンジン利用不可、スクリーンショット保存不可",
             "topLevelError": "トップレベルエラー: {0}",
             "extractedVideoUrls": "[SmartPaste] HTMLから {0} 個の動画URLを抽出",
             "createDirFailed": "ディレクトリ作成失敗 {0}: {1}",
@@ -694,6 +695,9 @@
             "urlEmpty": "URLは空にできません",
             "urlInvalid": "有効なURLを入力してください",
             "selectVideoDir": "動画ダウンロードディレクトリを選択"
+        },
+        "toast": {
+            "enginesNotReady": "エンジン初期化中です。少々お待ちください"
         }
     },
     "python": {

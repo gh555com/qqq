@@ -549,37 +549,37 @@ function ensureNotSymlink(p, failFast) {
     return { ok: true };
 }
 
-async function acquireDownloadLock(destPath, opts) {
-    const lockPath = String(destPath) + ".lock";
+async function acquireDownloadQlok(destPath, opts) {
+    const qlokPath = String(destPath) + ".qlok";
     const waitMs = Math.max(0, Number(opts?.downloadLockWaitMs ?? 15_000));
     const pollMs = Math.max(20, Number(opts?.downloadLockPollMs ?? 120));
     const staleMs = Math.max(0, Number(opts?.downloadLockStaleMs ?? 60_000));
     const start = Date.now();
 
-    ensureDirForFile(lockPath);
+    ensureDirForFile(qlokPath);
 
     while (true) {
 
         let fd = null;
         try {
-            fd = fs.openSync(lockPath, "wx");
+            fd = fs.openSync(qlokPath, "wx");
             try {
                 fs.writeFileSync(fd, `${process.pid}\n${Date.now()}\n`, { encoding: "utf8" });
             } catch { }
             safeClose(fd);
             return {
                 ok: true,
-                release: () => safeUnlink(lockPath),
+                release: () => safeUnlink(qlokPath),
             };
         } catch (e) {
             safeClose(fd);
 
 
             try {
-                const st = fs.statSync(lockPath);
+                const st = fs.statSync(qlokPath);
                 if (staleMs > 0 && Date.now() - st.mtimeMs > staleMs) {
 
-                    safeUnlink(lockPath);
+                    safeUnlink(qlokPath);
 
                     continue;
                 }
@@ -866,7 +866,7 @@ class SmartHttpDownloader {
 
         let lock = null;
         if (this.security.enableDownloadLock) {
-            const lr = await acquireDownloadLock(task.destPath, this.config);
+            const lr = await acquireDownloadQlok(task.destPath, this.config);
             if (!lr.ok) {
                 const r = this._resultFail(task, lr.error);
                 onProgress && onProgress(task, { type: "error", attempt: 0, ...r });
@@ -2437,7 +2437,7 @@ class YtDlpDownloader {
             }
 
             // ★ CROSS-PROCESS LOCK: Prevent multiple windows from downloading simultaneously
-            const lockResult_ = await acquireDownloadLock(installPath, {
+            const lockResult_ = await acquireDownloadQlok(installPath, {
                 downloadLockWaitMs: 121000,  // Wait up to 121s for other window to finish
                 downloadLockStaleMs: 300000, // Lock expires after 300s (safety)
                 downloadLockPollMs: 500
@@ -2550,15 +2550,15 @@ class YtDlpDownloader {
                 });
             };
 
-            // ★ Cascading download strategy: gh-proxy.com → GitHub → ghproxy.net → CDN
+            // ★ Cascading download strategy: proxy (fast in CN) → GitHub → proxy2 → CDN (gh555 fallback)
             const downloadUrls = [
-                // ★ gh-proxy.com (fastest in CN)
+                // ★ gh-proxy.com (GitHub proxy, usually fast in CN)
                 { url: officialUrl.replace('https://github.com/', 'https://gh-proxy.com/https://github.com/'), timeout: 60000, name: 'proxy' },
-                // ★ GitHub official
+                // ★ GitHub official (may be slow in CN)
                 { url: officialUrl, timeout: 60000, name: 'gh' },
-                // ★ ghproxy.net (backup)
+                // ★ ghproxy.net (backup proxy)
                 { url: mirrorUrl, timeout: 60000, name: 'proxy2' },
-                // ★ CDN (gh555.com ultimate fallback)
+                // ★ CDN (gh555.com — own CDN, ultimate fallback)
                 { url: cdnUrl, timeout: 60000, name: 'cdn' },
             ];
 

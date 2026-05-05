@@ -638,6 +638,7 @@
             "copyException": "[Clipboard] 複製操作異常: {0}",
             "copyFallbackText": "[Clipboard] 所有引擎皆不可用，已將路徑以純文字複製",
             "shellClipboardFailed": "Shell 剪貼簿處理失敗: {0}",
+            "noEnginesForImage": "[ClipboardImage] 引擎全部不可用，無法儲存擷取畫面",
             "topLevelError": "頂層錯誤: {0}",
             "extractedVideoUrls": "[SmartPaste] 從 HTML 擷取了 {0} 個影片URL",
             "createDirFailed": "建立目錄失敗 {0}: {1}",
@@ -694,6 +695,9 @@
             "urlEmpty": "URL不能為空",
             "urlInvalid": "請輸入有效滴URL",
             "selectVideoDir": "選擇影片下載目錄"
+        },
+        "toast": {
+            "enginesNotReady": "引擎正在初始化，請稍後重試貼上"
         }
     },
     "python": {

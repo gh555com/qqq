@@ -638,6 +638,7 @@
             "copyException": "[Clipboard] Exceção na operação de cópia: {0}",
             "copyFallbackText": "[Clipboard] Todos os mecanismos indisponíveis, caminhos copiados como texto simples",
             "shellClipboardFailed": "Falha no processamento da área de transferência Shell: {0}",
+            "noEnginesForImage": "[ClipboardImage] Todos os mecanismos indisponíveis, não foi possível salvar a captura",
             "topLevelError": "Erro de nível superior: {0}",
             "extractedVideoUrls": "[SmartPaste] {0} URLs de vídeo extraídas do HTML",
             "createDirFailed": "Falha ao criar diretório {0}: {1}",
@@ -694,6 +695,9 @@
             "urlEmpty": "URL não pode estar vazio",
             "urlInvalid": "Por favor digite uma URL válida",
             "selectVideoDir": "Selecionar diretório de download de vídeo"
+        },
+        "toast": {
+            "enginesNotReady": "Mecanismos inicializando, tente novamente em instantes"
         }
     },
     "python": {

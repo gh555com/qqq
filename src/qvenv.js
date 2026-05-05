@@ -16,62 +16,18 @@ let vscode = null;
 try { vscode = require("vscode"); } catch { }
 
 // ============================================================================
-// ★ Cross-process Install Marker (atomic, prevents multi-window race)
+// ★ qlok: Use global unified download lock (single source of truth)
 // ============================================================================
-
-/**
- * Try to acquire install marker atomically (no waiting, instant return)
- * Uses OS-level O_EXCL to guarantee only one process wins
- * @param {string} markerPath - Path to marker file
- * @param {number} staleMs - Marker expires after this (default 5 min)
- * @returns {{acquired: boolean, release: Function}}
- */
-function tryAcquireMarker(markerPath, staleMs = 300000) {
-    // Ensure directory exists
-    const dir = path.dirname(markerPath);
-    if (!fs.existsSync(dir)) {
-        try { fs.mkdirSync(dir, { recursive: true }); } catch { }
-    }
-
-    // Clean stale marker
-    try {
-        const st = fs.statSync(markerPath);
-        if (Date.now() - st.mtimeMs > staleMs) {
-            fs.unlinkSync(markerPath);
-        }
-    } catch { /* doesn't exist, good */ }
-
-    // Atomic exclusive create
-    try {
-        const fd = fs.openSync(markerPath, "wx");
-        fs.writeFileSync(fd, `${process.pid}\n${Date.now()}`, "utf8");
-        fs.closeSync(fd);
-        return {
-            acquired: true,
-            release: () => { try { fs.unlinkSync(markerPath); } catch { } }
-        };
-    } catch (e) {
-        if (e.code === "EEXIST") {
-            return { acquired: false, release: () => {} };
-        }
-        // Other errors - proceed anyway
-        return { acquired: true, release: () => {} };
-    }
+function _getGlobalQlok() {
+    try { return require('./global'); } catch { return null; }
 }
-
-/**
- * Check if install is in progress (marker exists and not stale)
- * @param {string} markerPath - Path to marker file
- * @param {number} staleMs - Marker expires after this
- * @returns {boolean}
- */
-function isMarkerActive(markerPath, staleMs = 300000) {
-    try {
-        const st = fs.statSync(markerPath);
-        return Date.now() - st.mtimeMs < staleMs;
-    } catch {
-        return false;
-    }
+function tryAcquireQlok(p, staleMs) {
+    const g = _getGlobalQlok();
+    return g ? g.tryAcquireQlok(p, staleMs) : { acquired: true, release: () => {} };
+}
+function isQlokActive(p, staleMs) {
+    const g = _getGlobalQlok();
+    return g ? g.isQlokActive(p, staleMs) : false;
 }
 
 // ============================================================================
@@ -542,8 +498,8 @@ sys.exit(0)
 
         // ★ CRITICAL: Check if another window is installing
         // Prevents checking intermediate state (half-installed deps)
-        const markerPath = path.join(context.globalStorageUri.fsPath, "python_installing.marker");
-        if (isMarkerActive(markerPath, 300000)) {
+        const qlokPath = path.join(context.globalStorageUri.fsPath, "python_installing.qlok");
+        if (isQlokActive(qlokPath, 300000)) {
             markImperfect('install_in_progress');
             return {
                 perfect: false,
@@ -554,14 +510,14 @@ sys.exit(0)
             };
         }
 
-        // ★ FIX: Actively clean stale marker (process crashed without releasing)
-        // If marker exists but is stale (>5min), the installer process is dead — clean it
+        // ★ FIX: Actively clean stale qlok (process crashed without releasing)
+        // If qlok exists but is stale (>5min), the installer process is dead — clean it
         try {
-            if (fs.existsSync(markerPath)) {
-                fs.unlinkSync(markerPath);
+            if (fs.existsSync(qlokPath)) {
+                fs.unlinkSync(qlokPath);
                 try {
                     const global = require('./global');
-                    global.logMessage("[PythonCheck] Cleaned stale install marker (installer process likely crashed)", "WARN");
+                    global.logMessage("[PythonCheck] Cleaned stale install qlok (installer process likely crashed)", "WARN");
                 } catch { }
             }
         } catch { }
@@ -896,7 +852,7 @@ sys.exit(0)
     /**
      * ★ Full Python auto-install workflow
      * Includes download, extract, pip install, pywin32 config, slimming
-     * ★ Multi-window safe: uses atomic marker to prevent concurrent installs
+     * ★ Multi-window safe: uses atomic qlok to prevent concurrent installs
      */
     /**
      * ★ Nuke python_engine directory completely (for self-healing retry)
@@ -959,11 +915,11 @@ sys.exit(0)
     async autoInstall(context) {
         const global = require('./global');
 
-        // ★ Atomic marker to prevent multi-window concurrent installs
-        const markerPath = path.join(context.globalStorageUri.fsPath, "python_installing.marker");
-        const marker = tryAcquireMarker(markerPath, 300000);
+        // ★ Atomic qlok to prevent multi-window concurrent installs
+        const qlokPath = path.join(context.globalStorageUri.fsPath, "python_installing.qlok");
+        const qlok = tryAcquireQlok(qlokPath, 300000);
 
-        if (!marker.acquired) {
+        if (!qlok.acquired) {
             global.logMessage("[PythonInstall] Another window is installing, skip this window", "INFO");
             return { success: false, error: 'install_in_progress', skipped: true };
         }
@@ -1335,7 +1291,7 @@ for p in [os.path.join(site_packages, 'win32'), os.path.join(site_packages, 'win
             global.logMessage(`[PythonInstall] Giving up: ${reason}. Last error: ${lastError}`, 'ERROR');
             return { success: false, error: lastError };
         } finally {
-            marker.release();
+            qlok.release();
         }
     }
 }
