@@ -638,6 +638,7 @@
             "copyException": "[Clipboard] 복사 작업 예외: {0}",
             "copyFallbackText": "[Clipboard] 모든 엔진 사용 불가, 경로를 일반 텍스트로 복사",
             "shellClipboardFailed": "Shell 클립보드 처리 실패: {0}",
+            "noEnginesForImage": "[ClipboardImage] 모든 엔진 사용 불가, 스크린샷 저장 불가",
             "topLevelError": "최상위 오류: {0}",
             "extractedVideoUrls": "[SmartPaste] HTML에서 {0}개의 동영상 URL 추출",
             "createDirFailed": "디렉토리 생성 실패 {0}: {1}",
@@ -694,6 +695,9 @@
             "urlEmpty": "URL을 비워둘 수 없습니다",
             "urlInvalid": "유효한 URL을 입력하세요",
             "selectVideoDir": "동영상 다운로드 디렉토리 선택"
+        },
+        "toast": {
+            "enginesNotReady": "엔진 초기화 중입니다. 잠시 후 다시 붙여넣기 해주세요"
         }
     },
     "python": {

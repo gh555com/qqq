@@ -591,46 +591,13 @@ class Qvideo {
         return code === 403 || code === 401 || (error && error.toString().includes('403'));
     }
 
-    // ★ Cross-process marker for multi-window download protection
-    _tryAcquireMarker(markerPath, staleMs = 300000) {
-        // Ensure directory exists
-        const dir = path.dirname(markerPath);
-        if (!fs.existsSync(dir)) {
-            try { fs.mkdirSync(dir, { recursive: true }); } catch { }
-        }
-
-        // Clean stale marker
-        try {
-            const st = fs.statSync(markerPath);
-            if (Date.now() - st.mtimeMs > staleMs) {
-                fs.unlinkSync(markerPath);
-            }
-        } catch { /* doesn't exist */ }
-
-        // Atomic exclusive create
-        try {
-            const fd = fs.openSync(markerPath, "wx");
-            fs.writeFileSync(fd, `${process.pid}\n${Date.now()}`, "utf8");
-            fs.closeSync(fd);
-            return {
-                acquired: true,
-                release: () => { try { fs.unlinkSync(markerPath); } catch { } }
-            };
-        } catch (e) {
-            if (e.code === "EEXIST") {
-                return { acquired: false, release: () => {} };
-            }
-            return { acquired: true, release: () => {} };
-        }
+    // ★ qlok: delegate to global unified lock (single source of truth)
+    _tryAcquireQlok(qlokPath, staleMs = 300000) {
+        return global.tryAcquireQlok(qlokPath, staleMs);
     }
 
-    _isMarkerActive(markerPath, staleMs = 300000) {
-        try {
-            const st = fs.statSync(markerPath);
-            return Date.now() - st.mtimeMs < staleMs;
-        } catch {
-            return false;
-        }
+    _isQlokActive(qlokPath, staleMs = 300000) {
+        return global.isQlokActive(qlokPath, staleMs);
     }
 
     _deduplicateTasks(tasks) {
@@ -2339,17 +2306,17 @@ $of = $vi.OriginalFilename;
         if (this._isTaskCancelled(task)) return;
 
         // ★ Check if another window is downloading Chrome
-        const markerPath = path.join(this.chromeHome, 'chrome_downloading.marker');
-        if (this._isMarkerActive(markerPath, 600000)) { // 10 min for large download
+        const qlokPath = path.join(this.chromeHome, 'chrome_downloading.qlok');
+        if (this._isQlokActive(qlokPath, 600000)) { // 10 min for large download
             this.log("[Chrome] Another window is downloading Chrome, please wait");
             global.showAutoCloseNotification('info', 'Another window is downloading Chrome, please wait for it to complete.');
             return;
         }
 
-        // ★ Try to acquire marker
-        const marker = this._tryAcquireMarker(markerPath, 600000);
-        if (!marker.acquired) {
-            this.log("[Chrome] Failed to acquire download marker, another window may be downloading");
+        // ★ Try to acquire qlok
+        const qlok = this._tryAcquireQlok(qlokPath, 600000);
+        if (!qlok.acquired) {
+            this.log("[Chrome] Failed to acquire download qlok, another window may be downloading");
             global.showAutoCloseNotification('info', 'Another window is downloading Chrome, please wait for it to complete.');
             return;
         }
@@ -2452,8 +2419,8 @@ $of = $vi.OriginalFilename;
 
         await this._startSniffer(task, exePath, url, targetDir, { rememberKey: this.KEY_DEDICATED_BROWSER });
         } finally {
-            // ★ Always release marker
-            marker.release();
+            // ★ Always release qlok
+            qlok.release();
         }
     }
 

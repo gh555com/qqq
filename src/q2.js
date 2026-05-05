@@ -942,6 +942,119 @@ async function getCommandHistory(key) {
   return globalContext.globalState.get(fullKey, []);
 }
 
+// ==================== Home Directory Storage (cross-IDE, cross-package, survives reinstall) ====================
+const Q2_STORAGE_DIR = 'roam';
+const Q2_CONFIG_FILE = 'config.json';
+const Q2_FINE_SCM_FILE = 'folder-prefs.json';
+const Q2_HISTORY_FILE = 'history.json'; // last-visited-dir + command history
+
+let _q2StorageDir = null;
+let _q2ConfigPath = null;
+let _q2FineSCMPath = null;
+let _q2HistoryPath = null;
+
+/**
+ * ★ Initialize home directory storage: ~/.qqq/roam/
+ * Survives IDE uninstall/reinstall, shared across all IDEs and extension packages.
+ */
+function _initQ2Storage() {
+  try {
+    const homeDir = os.homedir();
+    _q2StorageDir = path.join(homeDir, '.qqq', Q2_STORAGE_DIR);
+    if (!fs.existsSync(_q2StorageDir)) fs.mkdirSync(_q2StorageDir, { recursive: true });
+    _q2ConfigPath = path.join(_q2StorageDir, Q2_CONFIG_FILE);
+    _q2FineSCMPath = path.join(_q2StorageDir, Q2_FINE_SCM_FILE);
+    _q2HistoryPath = path.join(_q2StorageDir, Q2_HISTORY_FILE);
+
+    // ★ Auto-migration from globalState to home directory (one-time)
+    _migrateConfigFromGlobalState();
+    _migrateFineSCMFromGlobalState();
+    _migrateHistoryFromGlobalState();
+  } catch (e) {
+    console.error('[Q2] _initQ2Storage failed (non-fatal):', e.message);
+  }
+}
+
+/** ★ One-time migration: config from globalState to file */
+function _migrateConfigFromGlobalState() {
+  try {
+    if (_q2ConfigPath && fs.existsSync(_q2ConfigPath)) return; // already has file data
+    if (!globalContext) return;
+    const stored = globalContext.globalState.get("qqq_config");
+    if (!stored) return;
+    _writeFileAtomicSync(_q2ConfigPath, JSON.stringify(stored, null, 2));
+    console.log('[Q2] ★ Migrated config from globalState to home directory');
+  } catch (e) {
+    console.error('[Q2] config migration failed (non-fatal):', e.message);
+  }
+}
+
+/** ★ One-time migration: fine-grained SCM from globalState to file */
+function _migrateFineSCMFromGlobalState() {
+  try {
+    if (_q2FineSCMPath && fs.existsSync(_q2FineSCMPath)) return;
+    if (!globalContext) return;
+    const stored = globalContext.globalState.get("qqq_fine_scm");
+    if (!stored) return;
+    _writeFileAtomicSync(_q2FineSCMPath, JSON.stringify(stored, null, 2));
+    console.log('[Q2] ★ Migrated folder-prefs from globalState to home directory');
+  } catch (e) {
+    console.error('[Q2] fine-scm migration failed (non-fatal):', e.message);
+  }
+}
+
+/** ★ One-time migration: last-visited-dir from globalState to file */
+function _migrateHistoryFromGlobalState() {
+  try {
+    if (_q2HistoryPath && fs.existsSync(_q2HistoryPath)) return;
+    if (!globalContext) return;
+    const lastDir = globalContext.globalState.get("qqq_last_visited_dir");
+    if (!lastDir) return;
+    const data = { lastVisitedDir: lastDir };
+    _writeFileAtomicSync(_q2HistoryPath, JSON.stringify(data, null, 2));
+    console.log('[Q2] ★ Migrated history from globalState to home directory');
+  } catch (e) {
+    console.error('[Q2] history migration failed (non-fatal):', e.message);
+  }
+}
+
+/** ★ Atomic write (sync version for migration; async version below for normal saves) */
+function _writeFileAtomicSync(targetPath, content) {
+  const dir = path.dirname(targetPath);
+  const tmpPath = path.join(dir, `${path.basename(targetPath)}.${crypto.randomBytes(4).toString('hex')}.tmp`);
+  fs.writeFileSync(tmpPath, content, 'utf8');
+  try {
+    fs.renameSync(tmpPath, targetPath);
+  } catch {
+    try { if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath); } catch { }
+    fs.renameSync(tmpPath, targetPath);
+  }
+}
+
+/** ★ Atomic write (async version for normal save operations) */
+async function _writeFileAtomicAsync(targetPath, content) {
+  const dir = path.dirname(targetPath);
+  const tmpPath = path.join(dir, `${path.basename(targetPath)}.${crypto.randomBytes(4).toString('hex')}.tmp`);
+  await fs.promises.writeFile(tmpPath, content, 'utf8');
+  try {
+    await fs.promises.rename(tmpPath, targetPath);
+  } catch {
+    try { if (fs.existsSync(targetPath)) await fs.promises.unlink(targetPath); } catch { }
+    await fs.promises.rename(tmpPath, targetPath);
+  }
+}
+
+/** Read JSON file with fallback to empty object */
+function _readJsonFile(filePath) {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return null;
+    const raw = fs.readFileSync(filePath, 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 // ==================== Config Read/Write ====================
 function getConfig() {
   const defaultConfig = {
@@ -962,8 +1075,11 @@ function getConfig() {
     return cachedInMemoryConfig;
   }
 
-  // ★ Ultimate best solution: tolerant config loading to prevent globalState returning unexpected values
-  const storedConfig = globalContext.globalState.get("qqq_config") || {};
+  // ★ Primary source: home directory file; fallback: globalState (pre-migration installs)
+  let storedConfig = _readJsonFile(_q2ConfigPath);
+  if (!storedConfig) {
+    storedConfig = globalContext.globalState.get("qqq_config") || {};
+  }
   const config = { ...defaultConfig, ...storedConfig };
 
   // Migrate old data: recentDirs -> pinnedDirs
@@ -1056,18 +1172,19 @@ function saveConfig(
 }
 
 /**
- * ★★★ Multi-window merge-on-save: before writing, read fresh globalState and merge
+ * ★★★ Multi-window merge-on-save: before writing, read fresh file from disk and merge
  * - pinnedDirs from disk are kept unless user explicitly unpinned this session
  * - qqiq items from disk (other windows) are adopted unless explicitly removed this session
  * - Memory items (this window's intent) always take priority for ordering
+ * ★ Storage: ~/.qqq/roam/config.json (cross-IDE, cross-package, survives reinstall)
  */
 function _flushConfigToGlobalState() {
-  if (!globalContext || !cachedInMemoryConfig) return;
+  if (!cachedInMemoryConfig) return;
   try {
     const memCfg = cachedInMemoryConfig;
 
-    // ★ Read fresh state from globalState (another window may have written)
-    const diskConfig = globalContext.globalState.get("qqq_config") || {};
+    // ★ Read fresh state from disk file (another window/IDE/package may have written)
+    const diskConfig = _readJsonFile(_q2ConfigPath) || {};
     const diskPinned = Array.isArray(diskConfig.pinnedDirs) ? diskConfig.pinnedDirs : [];
     const diskQqiq = Array.isArray(diskConfig.qqiq) ? diskConfig.qqiq : [];
 
@@ -1107,38 +1224,66 @@ function _flushConfigToGlobalState() {
       qqiq: finalQqiq,
       isPinned: memCfg.isPinned,
     };
-    globalContext.globalState.update("qqq_config", configToSave);
+
+    // ★ Write to home directory file (atomic)
+    if (_q2ConfigPath) {
+      _writeFileAtomicSync(_q2ConfigPath, JSON.stringify(configToSave, null, 2));
+    }
+    // ★ Also write to globalState for backward compatibility (older versions of the extension)
+    if (globalContext) {
+      globalContext.globalState.update("qqq_config", configToSave);
+    }
     _sessionConfigDirty = false;
     saveConfigTimer = null;
   } catch (e) { }
 }
 
 // ==================== Last Visited Directory Storage ====================
-// Save immediately to ensure even if it crashes we can restore the last visited directory
-const LAST_VISITED_DIR_KEY = "qqq_last_visited_dir";
+// ★ Storage: ~/.qqq/roam/history.json (cross-IDE, cross-package, survives reinstall)
 
 function getLastVisitedDir() {
-  if (!globalContext) return null;
   try {
-    return globalContext.globalState.get(LAST_VISITED_DIR_KEY) || null;
-  } catch { return null; }
+    // ★ Primary source: home directory file
+    const data = _readJsonFile(_q2HistoryPath);
+    if (data && data.lastVisitedDir) return data.lastVisitedDir;
+    // Fallback: globalState
+    if (globalContext) {
+      return globalContext.globalState.get("qqq_last_visited_dir") || null;
+    }
+  } catch { }
+  return null;
 }
 
 function saveLastVisitedDir(dirPath) {
-  if (!globalContext || !dirPath) return;
+  if (!dirPath) return;
   try {
-    globalContext.globalState.update(LAST_VISITED_DIR_KEY, dirPath);
+    // ★ Read existing history data, update lastVisitedDir, write back
+    const data = _readJsonFile(_q2HistoryPath) || {};
+    data.lastVisitedDir = dirPath;
+    if (_q2HistoryPath) {
+      _writeFileAtomicSync(_q2HistoryPath, JSON.stringify(data, null, 2));
+    }
+    // Backward compatibility
+    if (globalContext) {
+      globalContext.globalState.update("qqq_last_visited_dir", dirPath);
+    }
   } catch { }
 }
 
 // ==================== Fine-grained SCM Storage ====================
-// Stored separately from config to avoid affecting other config items
-const FINE_SCM_KEY = "qqq_fine_scm";
+// ★ Storage: ~/.qqq/roam/folder-prefs.json (cross-IDE, cross-package, survives reinstall)
+// LRU eviction: keep at most 500 folder preference entries
+const FINE_SCM_MAX_ENTRIES = 500;
 
 function getFineSCM(folderPath) {
-  if (!globalContext || !folderPath) return { szMode: null, sortBy: null };
+  if (!folderPath) return { szMode: null, sortBy: null };
   try {
-    const allFineSCM = globalContext.globalState.get(FINE_SCM_KEY) || {};
+    // ★ Primary source: home directory file; fallback: globalState
+    let allFineSCM = _readJsonFile(_q2FineSCMPath);
+    if (!allFineSCM && globalContext) {
+      allFineSCM = globalContext.globalState.get("qqq_fine_scm") || {};
+    }
+    if (!allFineSCM) return { szMode: null, sortBy: null };
     const key = cacheKeyForPath(folderPath);
     const scm = allFineSCM[key];
     if (scm) {
@@ -1154,19 +1299,35 @@ function getFineSCM(folderPath) {
 }
 
 function setFineSCMValue(folderPath, szMode, sortBy) {
-  if (!globalContext || !folderPath) return;
+  if (!folderPath) return;
   try {
-    const allFineSCM = globalContext.globalState.get(FINE_SCM_KEY) || {};
+    // ★ Read fresh from disk (multi-window merge: adopt other windows' changes)
+    let allFineSCM = _readJsonFile(_q2FineSCMPath) || {};
     const key = cacheKeyForPath(folderPath);
 
     // If both are null, delete this entry
     if (szMode === null && sortBy === null) {
       delete allFineSCM[key];
     } else {
-      allFineSCM[key] = { szMode, sortBy };
+      allFineSCM[key] = { szMode, sortBy, ts: Date.now() };
     }
 
-    globalContext.globalState.update(FINE_SCM_KEY, allFineSCM);
+    // ★ LRU eviction: if over limit, remove oldest entries by timestamp
+    const keys = Object.keys(allFineSCM);
+    if (keys.length > FINE_SCM_MAX_ENTRIES) {
+      const sorted = keys.sort((a, b) => (allFineSCM[a].ts || 0) - (allFineSCM[b].ts || 0));
+      const toRemove = sorted.slice(0, keys.length - FINE_SCM_MAX_ENTRIES);
+      for (const k of toRemove) delete allFineSCM[k];
+    }
+
+    // ★ Write to home directory file (atomic)
+    if (_q2FineSCMPath) {
+      _writeFileAtomicSync(_q2FineSCMPath, JSON.stringify(allFineSCM, null, 2));
+    }
+    // Backward compatibility
+    if (globalContext) {
+      globalContext.globalState.update("qqq_fine_scm", allFineSCM);
+    }
   } catch (e) {
     geq().logMessage(q('q2.log.saveScmError', e.message), "WARN");
   }
@@ -5414,6 +5575,10 @@ async function activate(context) {
     return;
   }
   globalContext = context;
+
+  // ★ Initialize home directory storage before anything else reads config
+  _initQ2Storage();
+
   const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
   if (!extensionPath) {
     global.logMessage("q2.activate: extensionPath is undefined!", "ERROR");
@@ -5472,7 +5637,7 @@ async function activate(context) {
         focusSyncTimer = setTimeout(() => {
           focusSyncTimer = null;
           if (!activePanel || !activePanelAlive) return;
-          // Clear config cache to force re-read from globalState (may have been modified by other windows)
+          // Clear config cache to force re-read from disk file (may have been modified by other windows/IDEs)
           cachedInMemoryConfig = null;
           const config = getConfig();
           const sbData = generateSidebarHtml(config);

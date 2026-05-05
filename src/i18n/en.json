@@ -638,6 +638,7 @@
             "copyException": "[Clipboard] Copy operation exception: {0}",
             "copyFallbackText": "[Clipboard] All engines unavailable, copied paths as plain text",
             "shellClipboardFailed": "Shell clipboard handling failed: {0}",
+            "noEnginesForImage": "[ClipboardImage] All engines unavailable, cannot save screenshot",
             "topLevelError": "Top level error: {0}",
             "extractedVideoUrls": "[SmartPaste] Extracted {0} video URLs from HTML",
             "createDirFailed": "Failed to create directory {0}: {1}",
@@ -694,6 +695,9 @@
             "urlEmpty": "URL cannot be empty",
             "urlInvalid": "Please enter a valid URL",
             "selectVideoDir": "Select video download directory"
+        },
+        "toast": {
+            "enginesNotReady": "Engines initializing, please retry paste shortly"
         }
     },
     "python": {

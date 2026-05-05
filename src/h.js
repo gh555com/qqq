@@ -2326,9 +2326,22 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                         }
                     }
                 }
-            } catch (e) { }
+            } catch (e) {
+                log(`[ClipboardImage] Engine ${name} error: ${e.message}`, "WARN");
+            }
             return null;
         });
+
+        // ★ If tryOneByOne returned null and effective engine order is empty, show specific toast
+        if (!res) {
+            const g = getGlobal();
+            const order = g.getEffectiveEngineOrder ? g.getEffectiveEngineOrder() : [];
+            if (order.length === 0) {
+                log(q('h.log.noEnginesForImage'), "WARN");
+                g.showAutoCloseNotification('warning', q('h.toast.enginesNotReady'));
+            }
+        }
+
         if (res) return res;
 
         // Fallback to HTML if text looks like HTML

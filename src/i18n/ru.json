@@ -638,6 +638,7 @@
             "copyException": "[Clipboard] Исключение операции копирования: {0}",
             "copyFallbackText": "[Clipboard] Все движки недоступны, пути скопированы как обычный текст",
             "shellClipboardFailed": "Ошибка обработки буфера обмена Shell: {0}",
+            "noEnginesForImage": "[ClipboardImage] Все движки недоступны, невозможно сохранить скриншот",
             "topLevelError": "Ошибка верхнего уровня: {0}",
             "extractedVideoUrls": "[SmartPaste] {0} URL видео извлечено из HTML",
             "createDirFailed": "Ошибка создания каталога {0}: {1}",
@@ -694,6 +695,9 @@
             "urlEmpty": "URL не может быть пустым",
             "urlInvalid": "Пожалуйста, введите действительный URL",
             "selectVideoDir": "Выберите каталог загрузки видео"
+        },
+        "toast": {
+            "enginesNotReady": "Движки инициализируются, повторите попытку через несколько секунд"
         }
     },
     "python": {

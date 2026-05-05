@@ -638,6 +638,7 @@
             "copyException": "[Clipboard] Kopiervorgang Ausnahme: {0}",
             "copyFallbackText": "[Clipboard] Alle Engines nicht verfügbar, Pfade als Klartext kopiert",
             "shellClipboardFailed": "Shell Zwischenablage-Verarbeitung fehlgeschlagen: {0}",
+            "noEnginesForImage": "[ClipboardImage] Alle Engines nicht verfügbar, Screenshot kann nicht gespeichert werden",
             "topLevelError": "Fehler auf oberster Ebene: {0}",
             "extractedVideoUrls": "[SmartPaste] {0} Video-URLs aus HTML extrahiert",
             "createDirFailed": "Verzeichnis erstellen fehlgeschlagen {0}: {1}",
@@ -694,6 +695,9 @@
             "urlEmpty": "URL darf nicht leer sein",
             "urlInvalid": "Bitte gültige URL eingeben",
             "selectVideoDir": "Video-Download-Verzeichnis auswählen"
+        },
+        "toast": {
+            "enginesNotReady": "Engines werden initialisiert, bitte versuchen Sie es gleich erneut"
         }
     },
     "python": {

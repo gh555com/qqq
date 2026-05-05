@@ -504,29 +504,29 @@ class BrokerBridge extends EventEmitter {
 			}
 
 			// ★ Step 1: 跨窗口 spawn 锁 - 确保只有一个窗口尝试 spawn
-			const spawnMarkerPath = path.join(getCacheDir(), "broker_spawning.marker");
-			const markerMaxAge = 30000; // 30秒超时（spawn + Broker 启动应该足够）
+			const spawnQlokPath = path.join(getCacheDir(), "broker_spawning.qlok");
+			const qlokMaxAge = 30000; // 30秒超时（spawn + Broker 启动应该足够）
 
 			try {
 				// 检查是否有其他窗口正在 spawn
-				if (fs.existsSync(spawnMarkerPath)) {
-					const stat = fs.statSync(spawnMarkerPath);
+				if (fs.existsSync(spawnQlokPath)) {
+					const stat = fs.statSync(spawnQlokPath);
 					const age = Date.now() - stat.mtimeMs;
-					if (age < markerMaxAge) {
+					if (age < qlokMaxAge) {
 						// 其他窗口正在 spawn，等待后重试连接
 						resolve();
 						return;
 					}
-					// Marker 过期，删除它
-					try { fs.unlinkSync(spawnMarkerPath); } catch { }
+					// qlok 过期，删除它
+					try { fs.unlinkSync(spawnQlokPath); } catch { }
 				}
 
-				// 创建 spawn marker（原子写入）
-				const markerContent = JSON.stringify({ pid: process.pid, time: Date.now() });
-				fs.writeFileSync(spawnMarkerPath, markerContent, { flag: 'wx' }); // wx = exclusive create
+				// 创建 spawn qlok（原子写入）
+				const qlokContent = JSON.stringify({ pid: process.pid, time: Date.now() });
+				fs.writeFileSync(spawnQlokPath, qlokContent, { flag: 'wx' }); // wx = exclusive create
 			} catch (e) {
 				if (e.code === 'EEXIST') {
-					// 另一个窗口刚刚创建了 marker，等待
+					// 另一个窗口刚刚创建了 qlok，等待
 					resolve();
 					return;
 				}
@@ -584,8 +584,8 @@ class BrokerBridge extends EventEmitter {
 						}
 					}
 				} catch { }
-				// 清理 spawn marker
-				try { fs.unlinkSync(spawnMarkerPath); } catch { }
+				// 清理 spawn qlok
+				try { fs.unlinkSync(spawnQlokPath); } catch { }
 				resolve();
 				return;
 			}
@@ -598,8 +598,8 @@ class BrokerBridge extends EventEmitter {
 					const global = require('./global');
 					global.logMessage(`[Broker] Missing path: python=${!!pythonPath}, script=${!!scriptPath}`, "WARN");
 				} catch { }
-				// 清理 spawn marker
-				try { fs.unlinkSync(spawnMarkerPath); } catch { }
+				// 清理 spawn qlok
+				try { fs.unlinkSync(spawnQlokPath); } catch { }
 				resolve();
 				return;
 			}
@@ -610,8 +610,8 @@ class BrokerBridge extends EventEmitter {
 					const global = require('./global');
 					global.logMessage(`[Broker] Script not found: ${scriptPath}`, "WARN");
 				} catch { }
-				// 清理 spawn marker
-				try { fs.unlinkSync(spawnMarkerPath); } catch { }
+				// 清理 spawn qlok
+				try { fs.unlinkSync(spawnQlokPath); } catch { }
 				resolve();
 				return;
 			}
@@ -681,7 +681,7 @@ class BrokerBridge extends EventEmitter {
 				};
 				child.once('exit', exitHandler);
 
-				// ★ 3秒后断开 stdout/stderr 监听，让进程独立运行，并清理 spawn marker
+				// ★ 3秒后断开 stdout/stderr 监听，让进程独立运行，并清理 spawn qlok
 				setTimeout(() => {
 					try {
 						child.stdout?.removeAllListeners();
@@ -690,8 +690,8 @@ class BrokerBridge extends EventEmitter {
 						child.stderr?.destroy();
 						child.removeListener('exit', exitHandler);
 					} catch { }
-					// 清理 spawn marker（Broker 应该已经启动）
-					try { fs.unlinkSync(spawnMarkerPath); } catch { }
+					// 清理 spawn qlok（Broker 应该已经启动）
+					try { fs.unlinkSync(spawnQlokPath); } catch { }
 				}, 3000);
 
 				// ★ Note: Windows does NOT use unref() - child stays attached
@@ -704,8 +704,8 @@ class BrokerBridge extends EventEmitter {
 					const global = require('./global');
 					global.logMessage(`[Broker] Spawn failed: ${e.message}`, "WARN");
 				} catch { }
-				// 清理 spawn marker
-				try { fs.unlinkSync(spawnMarkerPath); } catch { }
+				// 清理 spawn qlok
+				try { fs.unlinkSync(spawnQlokPath); } catch { }
 			}
 
 			resolve();

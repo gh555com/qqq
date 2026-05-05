@@ -638,6 +638,7 @@
             "copyException": "[Clipboard] Excepción en operación de copia: {0}",
             "copyFallbackText": "[Clipboard] Todos los motores no disponibles, rutas copiadas como texto plano",
             "shellClipboardFailed": "Fallo en procesamiento de portapapeles Shell: {0}",
+            "noEnginesForImage": "[ClipboardImage] Todos los motores no disponibles, no se puede guardar la captura",
             "topLevelError": "Error de nivel superior: {0}",
             "extractedVideoUrls": "[SmartPaste] {0} URLs de video extraídas del HTML",
             "createDirFailed": "Error al crear directorio {0}: {1}",
@@ -694,6 +695,9 @@
             "urlEmpty": "URL no puede estar vacío",
             "urlInvalid": "Por favor ingrese una URL válida",
             "selectVideoDir": "Seleccionar directorio de descarga de video"
+        },
+        "toast": {
+            "enginesNotReady": "Motores inicializando, por favor reintente en un momento"
         }
     },
     "python": {
