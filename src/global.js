@@ -1710,6 +1710,9 @@ let ffprobePath = null;
 let ffmpegSource = "NOT_FOUND";
 let _ffmpegInitPromise = null; // ★ Async FFmpeg init promise
 
+// ★ 下载来源溯源（供 ping 上报 dl_src 字段）
+const _dlSrcMap = {}; // e.g. { ff: 'npmmirror', yt: 'GitHub', py: '淘宝NPM' }
+
 // ★ Ultimate optimal: global deactivation flag
 let _isDeactivated = false;
 
@@ -1953,6 +1956,7 @@ async function _downloadFFmpeg(globalStoragePath) {
 				const stat = fs.statSync(ffTarget);
 				if (stat.size > 5 * 1024 * 1024) { // FFmpeg should be >5MB
 					logMessage(`[FFmpeg] Downloaded from ${source.name} (${(stat.size / 1024 / 1024).toFixed(1)} MB)`, "INFO");
+					_dlSrcMap.ff = source.name;
 					return true;
 				}
 				logMessage(`[FFmpeg] File too small from ${source.name}: ${stat.size} bytes`, "WARN");
@@ -3299,10 +3303,17 @@ class WqReporter {
 				// ★ 引擎在线快照（0/1），服务器侧累加
 				eng_r: (rustBridge?.isAvailable?.() === true || rustBridge?.available === true) ? 1 : 0,
 				eng_p: pythonBridge?.isAvailable?.() === true ? 1 : 0,
-				eng_n: (shellBridge?.isAvailable?.() === true || shellBridge?.available === true) ? 1 : 0
+				eng_n: (shellBridge?.isAvailable?.() === true || shellBridge?.available === true) ? 1 : 0,
+				// ★ 运行时二进制就绪状态（0/1）
+				eng_ff: (ffmpegPath && ffmpegSource !== 'NOT_FOUND') ? 1 : 0,
+				eng_yt: (() => { try { const d = require('./dow').getSharedDownloader(); return d.ytdlp?.ytdlpPath ? 1 : 0; } catch { return 0; } })()
 			};
 			if (userId) body.doer_id = userId;
 			if (playing || _isCurrentlyPlaying) body.playing = true;
+
+			// ★ 下载来源溯源（紧凑字符串："ff:npmmirror;yt:GitHub;py:淘宝NPM"）
+			const dlParts = Object.entries(_dlSrcMap).map(([k, v]) => `${k}:${v}`);
+			if (dlParts.length > 0) body.dl_src = dlParts.join(';');
 
 			const vig = this._collectVig();
 			if (vig) body.vig = vig;
@@ -5522,6 +5533,7 @@ module.exports = {
 	ffmpegPath: () => ffmpegPath,
 	ffprobePath: () => ffprobePath,
 	ensureFFmpegReady,
+	_dlSrcMap, // ★ 下载来源溯源（dow.js/qvenv.js 写入）
 
 	// Formatting helpers (for CodeLens etc.)
 	formatBytes,
