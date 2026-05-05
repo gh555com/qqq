@@ -1066,8 +1066,8 @@ sys.exit(0)
 
             // Cascading download URLs: ① official → ② mirror → ③ CDN (gh555.com ultimate fallback)
             const downloadUrls = platform === 'win32'
-                ? [{ url: mirrorUrl, timeout: 30000, name: '淘宝NPM' }, { url: officialUrl, timeout: 30000, name: '官方' }, { url: cdnUrl, timeout: 60000, name: 'CDN', isCdn: true }]
-                : [{ url: officialUrl, timeout: 15000, name: '官方' }, { url: mirrorUrl, timeout: 60000, name: 'ghproxy' }, { url: cdnUrl, timeout: 60000, name: 'CDN', isCdn: true }];
+                ? [{ url: mirrorUrl, timeout: 30000, name: 'npm' }, { url: officialUrl, timeout: 30000, name: 'gh' }, { url: cdnUrl, timeout: 60000, name: 'cdn', isCdn: true }]
+                : [{ url: officialUrl, timeout: 15000, name: 'gh' }, { url: mirrorUrl, timeout: 60000, name: 'proxy' }, { url: cdnUrl, timeout: 60000, name: 'cdn', isCdn: true }];
             let downloadedFromCdn = false; // ★ Track if CDN was used (Windows CDN = complete env)
 
             // Python embed amd64 ~7.3MB, win32 ~6.5MB, standalone tar.gz ~20MB+; anything under 5MB is corrupt
@@ -1093,6 +1093,7 @@ sys.exit(0)
                     let downloaded = false;
                     for (const { url, timeout, name, isCdn } of downloadUrls) {
                         try {
+                            const _dlStart = Date.now();
                             global.logMessage(q('qvenv.trySource', name), "INFO");
                             const result = await downloadFile(url, zipPath, timeout);
                             global.logMessage(q('qvenv.sourceSuccess', name), "INFO");
@@ -1116,7 +1117,7 @@ sys.exit(0)
                             downloaded = true;
                             if (isCdn) downloadedFromCdn = true;
                             // ★ 记录下载来源溯源
-                            try { global._dlSrcMap.py = name; } catch { }
+                            try { global._dlSrcMap.py = `${name}:${((Date.now() - _dlStart) / 1000).toFixed(1)}`; } catch { }
                             break;
                         } catch (e) {
                             global.logMessage(q('qvenv.sourceFailed', name, e.message), "WARN");

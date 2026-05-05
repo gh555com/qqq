@@ -84,23 +84,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # ★ 4 架构精简策略 (win_x64, linux_x64, darwin_x64, darwin_arm64)
           - os: ubuntu-22.04
             asset_name: q_linux_x64
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-22.04
-            asset_name: q_linux_arm64
-            target: aarch64-unknown-linux-gnu
-          # Win7 compatible targets (also works on Win8/10/11)
           - os: windows-2022
             asset_name: q_win_x64.exe
-            target: x86_64-win7-windows-msvc
-          - os: windows-2022
-            asset_name: q_win_x86.exe
-            target: i686-win7-windows-msvc
-          # ARM64 has no Win7 (Win7 doesn't support ARM64)
-          - os: windows-2022
-            asset_name: q_win_arm64.exe
-            target: aarch64-pc-windows-msvc
+            target: x86_64-pc-windows-msvc
           - os: macos-14
             asset_name: q_mac_x64
             target: x86_64-apple-darwin
@@ -115,58 +105,28 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu')
         run: |
           sudo apt-get update
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            # ARM64 交叉编译: 只装工具链，禁用 icons feature 避免 GTK arm64 依赖
-            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          else
-            # x64 原生编译: 完整依赖
-            sudo apt-get install -y libglib2.0-dev libcairo2-dev libpango1.0-dev libgdk-pixbuf2.0-dev libgtk-3-dev
-          fi
+          sudo apt-get install -y libglib2.0-dev libcairo2-dev libpango1.0-dev libgdk-pixbuf2.0-dev libgtk-3-dev
 
-      - name: Set up Rust (nightly for Win7 targets)
-        if: contains(matrix.target, 'win7')
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rust-src
-
-      - name: Set up Rust (stable for others)
-        if: "!contains(matrix.target, 'win7')"
+      - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Rust binary
         shell: bash
         run: |
           cd rust
-          if [[ "${{ matrix.target }}" == *"win7"* ]]; then
-            # Win7 target: use nightly + build-std
+          if [[ "${{ matrix.os }}" == *"windows"* ]]; then
             cp Cargo_win.toml Cargo.toml
-            RUSTFLAGS="-C target-feature=+crt-static" cargo +nightly build --release \
-              --target ${{ matrix.target }} \
-              -Z build-std=std,panic_abort
-            ls -lh target/${{ matrix.target }}/release/q.exe
-            cp target/${{ matrix.target }}/release/q.exe ../${{ matrix.asset_name }}
-          elif [[ "${{ matrix.os }}" == *"windows"* ]]; then
-            # ARM64 Windows: use stable + static CRT
-            cp Cargo_win.toml Cargo.toml
+            mkdir -p .cargo
+            cat > .cargo/config.toml << 'EOF'
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+EOF
             rustup target add ${{ matrix.target }}
-            RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target ${{ matrix.target }}
-            ls -lh target/${{ matrix.target }}/release/q.exe
+            cargo build --release --target ${{ matrix.target }}
             cp target/${{ matrix.target }}/release/q.exe ../${{ matrix.asset_name }}
           else
-            # Linux/macOS
             rustup target add ${{ matrix.target }}
-            if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-              export PKG_CONFIG_ALLOW_CROSS=1
-              export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
-              export PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu
-              export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
-              export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
-              export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-              # ARM64 交叉编译禁用 icons feature（避免 GTK arm64 依赖）
-              cargo build --release --target ${{ matrix.target }} --no-default-features
-            else
-              cargo build --release --target ${{ matrix.target }}
-            fi
+            cargo build --release --target ${{ matrix.target }}
             cp target/${{ matrix.target }}/release/q ../${{ matrix.asset_name }}
             chmod +x ../${{ matrix.asset_name }}
           fi
@@ -178,7 +138,7 @@ jobs:
           path: ${{ matrix.asset_name }}
 
   # ==========================================
-  # 3. 发布 Job (汇总产物 + VSIX + Marketplace)
+  # 3. 发布 Job (汇总产物 + Universal VSIX + Marketplace)
   # ==========================================
   q2-release:
     name: "🚀 q2: Finalize Release"
@@ -198,7 +158,7 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: assets
+          path: artifacts
           merge-multiple: true
 
       - name: Setup Node
@@ -208,26 +168,32 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: |
-          npm install
-          # 使用 --force 绕过平台检查，并显式锁定每一个平台二进制包的版本
-          npm install \
-            @ffmpeg-installer/win32-x64@4.1.0 \
-            @ffmpeg-installer/win32-ia32@4.1.0 \
-            @ffmpeg-installer/linux-x64@4.1.0 \
-            @ffmpeg-installer/linux-arm64@4.1.4 \
-            @ffmpeg-installer/darwin-x64@4.1.0 \
-            @ffmpeg-installer/darwin-arm64@4.1.5 \
-            --no-save --force
+        run: npm install
 
-      - name: Build and Package Platform-Specific VSIXs
+      # ★ 将 4 个 Rust 产物复制到 assets/（Universal 包全部包含）
+      - name: Prepare Rust artifacts
         run: |
-          node qqqworkflow/git_help.js package
+          echo "📋 Available artifacts:"
+          ls -la artifacts/ 2>/dev/null || echo "No artifacts directory"
+          cp artifacts/q_* assets/ 2>/dev/null || true
+          chmod +x assets/q_linux_x64 assets/q_mac_x64 assets/q_mac_arm64 2>/dev/null || true
+          # 移除 x86 DLL（不再支持 win32-ia32）
+          rm -rf assets/runtimes/x86
+          echo "📋 Assets after copy:"
+          ls -la assets/q_* 2>/dev/null || echo "No q_engine binaries found"
 
-      - name: Cleanup temporary build artifacts
+      - name: Bundle
         run: |
-          # Remove q_engine.exe/q_engine (temporary files from packaging)
-          rm -f assets/q_engine assets/q_engine.exe
+          npm run bundle
+          node -e "require('./qqqworkflow/esbuild.config').transformPackageJsonConfigKeys()"
+
+      # ★ Universal 单包：包含 4 个 q_engine，不注入 FFmpeg（运行时下载）
+      - name: Package Universal VSIX
+        run: |
+          PKG_NAME=$(node -p "require('./package.json').name")
+          npx @vscode/vsce package -o dist/${PKG_NAME}-universal.vsix --allow-missing-repository --allow-star-activation --no-dependencies
+          echo "📦 Universal VSIX created:"
+          ls -lh dist/*.vsix
 
       - name: Get version
         id: get_version
@@ -249,7 +215,8 @@ jobs:
 
       - name: Publish to VS Code Marketplace
         if: "!contains(github.event.head_commit.message, '(q5)')"
-        run: npm run ci:publish || echo "Marketplace发布失败，可能是Token过期"
+        run: |
+          npx @vscode/vsce publish --packagePath dist/*.vsix --allow-missing-repository --allow-star-activation || echo "Marketplace发布失败，可能是Token过期"
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
@@ -269,8 +236,6 @@ jobs:
         if: "!contains(github.event.head_commit.message, '(q5)')"
         run: |
           npm install -g ovsx
-          # 发布所有平台包到 Open VSX（带重试+延时，防止服务端过载 502）
-          failed_list=""
           for vsix in dist/*.vsix; do
             pkg_ok=false
             for attempt in 1 2 3; do
@@ -284,14 +249,9 @@ jobs:
             done
             if [ "$pkg_ok" = false ]; then
               echo "❌ Open VSX publish $vsix failed after 3 attempts"
-              failed_list="$failed_list $vsix"
+              echo "::warning::Open VSX 发布失败: $vsix"
             fi
-            # 每个包之间间隔 5 秒，避免服务端过载
-            sleep 5
           done
-          if [ -n "$failed_list" ]; then
-            echo "::warning::Open VSX 发布失败的包:$failed_list"
-          fi
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
 
@@ -300,111 +260,4 @@ jobs:
         uses: peter-evans/create-or-update-comment@v3
         with:
           issue-number: ${{ github.event.issue.number }}
-          body: "🎉 **q2 发布成功**！版本 v${{ steps.get_version.outputs.VERSION }} 的全平台产物和 VSIX 插件已就绪。"
-
-  # ==========================================
-  # 4. q12: 仅编译 Win64 + 打通用包（可网站手动上传）
-  # ==========================================
-  q12-build-win64:
-    name: "🏗️ q12: Build Win64"
-    if: github.event_name == 'push' && contains(github.event.head_commit.message, '(q12)')
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Rust (nightly for Win7)
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rust-src
-
-      - name: Build Rust binary (Win7-compatible x64)
-        shell: bash
-        run: |
-          cd rust
-          cp Cargo_win.toml Cargo.toml
-          RUSTFLAGS="-C target-feature=+crt-static" cargo +nightly build --release \
-            --target x86_64-win7-windows-msvc \
-            -Z build-std=std,panic_abort
-          cp target/x86_64-win7-windows-msvc/release/q.exe ../q_win_x64.exe
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: q_win_x64.exe
-          path: q_win_x64.exe
-
-  q12-universal-package:
-    name: "📦 q12: Universal VSIX"
-    needs: q12-build-win64
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 🛡️ Checkout Private Workflow Assets
-        uses: actions/checkout@v4
-        with:
-          repository: kkn1n/qqqworkflow
-          token: ${{ secrets.GH_PAT }}
-          path: qqqworkflow
-          ref: qq
-
-      - name: Download Win64 binary
-        uses: actions/download-artifact@v4
-        with:
-          name: q_win_x64.exe
-          path: assets
-
-      - name: Rename binary to q_engine.exe
-        run: cp assets/q_win_x64.exe assets/q_engine.exe
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: "npm"
-
-      - name: Install dependencies
-        run: |
-          npm install
-          npm install @ffmpeg-installer/win32-x64@4.1.0 --no-save --force
-
-      - name: Embed FFmpeg (Win64)
-        run: cp node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe assets/ffmpeg.exe
-
-      - name: Bundle
-        run: npm run bundle
-
-      - name: Transform config keys for Settings UI grouping
-        run: node -e "require('./qqqworkflow/esbuild.config').transformPackageJsonConfigKeys()"
-
-      - name: Package universal VSIX
-        run: |
-          PKG_NAME=$(node -p "require('./package.json').name")
-          VERSION=$(node -p "require('./package.json').version")
-          npx @vscode/vsce package --allow-missing-repository --allow-star-activation --no-dependencies -o "dist/${PKG_NAME}-${VERSION}-universal.vsix"
-
-      - name: Strip zip extra fields from VSIX
-        run: |
-          for vsix in dist/*.vsix; do
-            tmpdir=$(mktemp -d)
-            unzip -q "$vsix" -d "$tmpdir"
-            rm "$vsix"
-            (cd "$tmpdir" && zip -X -r "$OLDPWD/$vsix" .)
-            rm -rf "$tmpdir"
-            echo "✅ Stripped extra fields: $vsix"
-          done
-
-      - name: Get version
-        id: get_version
-        run: echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.get_version.outputs.VERSION }}-universal
-          name: "Universal v${{ steps.get_version.outputs.VERSION }} (手动上传用)"
-          files: dist/*.vsix
-          generate_release_notes: false
-          body: "通用 VSIX 包（内含 Win64 引擎），可直接在 VS Code Marketplace 网站手动上传。"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          body: "🎉 **q2 发布成功**！版本 v${{ steps.get_version.outputs.VERSION }} Universal 包已发布到 Marketplace 和 Open VSX。"
