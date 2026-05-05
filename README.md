@@ -57,9 +57,9 @@
  Full source code transparency, security, and auditability are guaranteed. [Feedback & Issues](https://github.com/gh555com/qqq/issues)
 
 
- Original name: qqq    ![Open VSX](https://img.shields.io/open-vsx/dt/gh555/qqq?label=installs&color=orange)
+ Original name: qqq
 
-  **macOS、Linux must go**: https://open-vsx.org/extension/gh555/qqq   ![](https://gh555.com/px?g=qqq&s=gh555.q3.readme)
+  **macOS & Linux  Enable.** [Details](#how-to-install)  ![](https://gh555.com/px?g=qqq&s=gh555.q3.readme)
 
 
  You need not have opened a note-taking application specially.
@@ -259,6 +259,9 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
 
   ## How to install ##
 
+  A single universal installer for Windows, Linux and macOS, compatible with all operating systems and processor architectures. Simply install or download now — no installation options, no choices required. One package works for everything.
+On the other hand, Linux and macOS versions have received relatively limited testing. If you encounter any issues while using the product on Linux or macOS, please contact us directly at ky@gh555.com to help improve the product together.
+
 For the best practice, download qqq from the official Marketplace at https://marketplace.visualstudio.com/items?itemName=gh555com.q3. or, actually, the best way is to simply open any of your IDEs, type "q3" directly into the official extension marketplace in the sidebar, and install it:
 <p align="left">
   <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/GRLS3C7UE2NTE.png" alt="How to install">
@@ -269,8 +272,6 @@ and then you can switch languages: zh、zh-tw、en、ja、de、ko、ru、ar、es
   <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/2JTYBVFI3CWBS.png" alt="i18n">
 </p>
 
-
- All  operating system (Windows, Linux, macOS) and processor architecture (x64, ARM, ARM64, Apple Silicon) in: https://github.com/gh555com/qqq/releases or https://open-vsx.org/extension/gh555/qqq
 
 
  ## About qqq Resource Footprint

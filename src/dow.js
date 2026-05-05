@@ -2438,32 +2438,36 @@ class YtDlpDownloader {
 
             // ★ CROSS-PROCESS LOCK: Prevent multiple windows from downloading simultaneously
             const lockResult_ = await acquireDownloadQlok(installPath, {
-                downloadLockWaitMs: 121000,  // Wait up to 121s for other window to finish
-                downloadLockStaleMs: 300000, // Lock expires after 300s (safety)
-                downloadLockPollMs: 500
+                downloadLockWaitMs: 600000,  // Wait up to 600s (proxy can take 5min+)
+                downloadLockStaleMs: 600000, // Lock expires after 600s (safety)
+                downloadLockPollMs: 2000
             });
             lockResult = lockResult_;
 
             if (!lockResult.ok) {
-                // Another window is downloading, wait and check if it completed
+                // Another window held lock for >600s; poll for file appearing
                 global.logMessage('[yt-dlp] Another window is downloading, waiting...', 'INFO');
-                await sleep(5000);
-                // Re-check if file now exists and is valid
-                if (fs.existsSync(installPath)) {
-                    const stat = fs.statSync(installPath);
-                    if (stat.size > MIN_SIZE) {
-                        const { spawnSync } = require('child_process');
-                        const r = spawnSync(installPath, ['--version'], {
-                            encoding: 'utf8',
-                            windowsHide: true,
-                            timeout: 5000
-                        });
-                        if (r.status === 0 && (r.stdout || '').match(/^\d+/)) {
-                            this.ytdlpPath = installPath;
-                            return { success: true, path: installPath };
+                let found = false;
+                for (let i = 0; i < 12; i++) {
+                    await sleep(5000);
+                    if (fs.existsSync(installPath)) {
+                        const stat = fs.statSync(installPath);
+                        if (stat.size > MIN_SIZE) {
+                            const { spawnSync } = require('child_process');
+                            const r = spawnSync(installPath, ['--version'], {
+                                encoding: 'utf8',
+                                windowsHide: true,
+                                timeout: 5000
+                            });
+                            if (r.status === 0 && (r.stdout || '').match(/^\d+/)) {
+                                this.ytdlpPath = installPath;
+                                found = true;
+                                break;
+                            }
                         }
                     }
                 }
+                if (found) return { success: true, path: installPath };
                 return { success: false, error: 'lock_timeout' };
             }
 

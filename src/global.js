@@ -670,6 +670,8 @@ function initPythonBrokerBridge() {
 						if (ok) {
 							logMessage("[Broker] Broker hot-started successfully", "INFO");
 							invalidateEngineCache();
+							// ★ Notify listeners (e.g., q2 hwnd tracking)
+							_fireBrokerReadyCallbacks();
 						}
 					} catch (e) {
 						logMessage(`[Broker] Broker hot-start failed: ${e.message}`, "WARN");
@@ -1436,7 +1438,11 @@ function updateStatusBarNow() {
 // ★ Linux dependency detection and install guidance
 // ============================================================================
 let _linuxDepsChecked = false;
+let _linuxDepsPastePrompted = false; // ★ Only prompt once per session during paste
 let _xclipAvailable = null; // null = unknown, true/false = cached result
+const _brokerReadyCallbacks = []; // ★ Fired when broker becomes available
+function onBrokerReady(fn) { _brokerReadyCallbacks.push(fn); }
+function _fireBrokerReadyCallbacks() { for (const fn of _brokerReadyCallbacks) try { fn(); } catch {} }
 
 /**
  * Detect whether xclip is installed on Linux
@@ -1531,11 +1537,21 @@ async function checkAndInstallLinuxDeps(fromPaste = false) {
 	if (process.platform !== 'linux') return;
 
 	// ★ Paste-triggered: if Rust daemon is alive, clipboard works natively — skip
-	if (fromPaste && rustBridge && rustBridge.isAvailable && rustBridge.isAvailable()) return;
+	// Note: only skip for image/text paste; file paste still needs xclip for file list detection
+	if (fromPaste && rustBridge && rustBridge.isAvailable && rustBridge.isAvailable() && _xclipAvailable !== false) return;
+
+	// ★ Paste-triggered: max once per session to avoid spamming on every paste
+	if (fromPaste && _linuxDepsPastePrompted) return;
 
 	// Avoid repeated startup checks (paste-triggered always proceeds)
 	if (!fromPaste && _linuxDepsChecked) return;
 	if (!fromPaste) _linuxDepsChecked = true;
+
+	// ★ Cooldown: applies after user has been informed at least once (ever_prompted=true)
+	if (!fromPaste && extensionContext) {
+		const dismissedAt = extensionContext.globalState.get('linux_deps_dismissed_ts', 0) || 0;
+		if (dismissedAt && (Date.now() - dismissedAt) < 7 * 24 * 3600 * 1000) return;
+	}
 
 	// Detect missing packages
 	const hasXclip = await checkXclipInstalled();
@@ -1557,10 +1573,15 @@ async function checkAndInstallLinuxDeps(fromPaste = false) {
 	const pkgMgr = await detectLinuxPackageManager();
 	const installCmd = _getLinuxDepsInstallCommand(pkgMgr, missing);
 
-	// Prompt user
+	// ★ Prompt user — use modal for first-ever prompt (hard to miss), non-modal for paste-triggered
+	const isFirstEver = !extensionContext || !extensionContext.globalState.get('linux_deps_ever_prompted');
+	const useModal = isFirstEver && !fromPaste;
+	if (isFirstEver && extensionContext) extensionContext.globalState.update('linux_deps_ever_prompted', true);
+	if (fromPaste) _linuxDepsPastePrompted = true; // ★ Don't prompt again this session for paste
+
 	const choice = await vscode.window.showWarningMessage(
-		`qqq: Linux dependencies required: ${missing.join(', ')}. Install now?`,
-		{ modal: false },
+		`qqq: ${missing.includes('xclip') ? 'xclip is required for file/image paste. ' : ''}Missing: ${missing.join(', ')}`,
+		{ modal: useModal },
 		q('linux.installNow'),
 		q('linux.copyCommand')
 	);
@@ -1586,6 +1607,8 @@ async function checkAndInstallLinuxDeps(fromPaste = false) {
 				if (nowHasXclip && nowHasAttr) {
 					showAutoCloseNotification('success', 'qqq: All dependencies installed successfully');
 					logMessage('Linux deps install success (xclip + attr)', 'INFO');
+					// ★ Clear cooldown on successful install
+					if (extensionContext) extensionContext.globalState.update('linux_deps_dismissed_ts', undefined);
 				} else {
 					const still = [];
 					if (!nowHasXclip) still.push('xclip');
@@ -1600,8 +1623,15 @@ async function checkAndInstallLinuxDeps(fromPaste = false) {
 		await vscode.env.clipboard.writeText(installCmd);
 		showAutoCloseNotification('info', q('global.cmdCopied', installCmd));
 		logMessage(`User copied install command: ${installCmd}`, 'INFO');
+		// ★ User acknowledged — set 7-day cooldown (they have the command, can install later)
+		if (extensionContext) extensionContext.globalState.update('linux_deps_dismissed_ts', Date.now());
 	} else {
+		// ★ User dismissed — if they've already seen the modal once, they know about it
+		// Set cooldown to avoid nagging (shorter: 3 days for startup, respect paste)
 		logMessage('User dismissed Linux deps prompt', 'INFO');
+		if (extensionContext && extensionContext.globalState.get('linux_deps_ever_prompted')) {
+			extensionContext.globalState.update('linux_deps_dismissed_ts', Date.now());
+		}
 	}
 }
 
@@ -1752,6 +1782,9 @@ async function startDaemons() {
 				logMessage("All daemons failed, using spawn fallback", "WARN");
 			}
 			updateStatusBarNow();
+
+			// ★ Notify broker-ready listeners (e.g., q2 hwnd re-registration)
+			if (pythonBridge.isAvailable()) _fireBrokerReadyCallbacks();
 
 			// ★ Start clipboard watcher when Python is available (kope sfx)
 			if (pythonBridge.isAvailable()) {
@@ -4020,6 +4053,8 @@ async function _httpsGet(urlPath, timeoutMs = 10000) {
  *   3. Poll GET /auth/poll?session={id} every 2s until token or timeout (3min)
  *   4. On success → save token locally
  */
+let _authInProgress = null; // ★ Lock: prevent multiple concurrent auth sessions
+
 async function _ensureAuth() {
 	// Check existing token
 	const stored = _getAuthToken();
@@ -4027,6 +4062,14 @@ async function _ensureAuth() {
 		return { token: stored.token, phone: stored.phone || '' };
 	}
 
+	// ★ If auth already in progress, return the same promise (don't open new browser tab)
+	if (_authInProgress) return _authInProgress;
+
+	_authInProgress = _doAuthFlow();
+	try { return await _authInProgress; } finally { _authInProgress = null; }
+}
+
+async function _doAuthFlow() {
 	// No token — automatically open browser for login (no extra confirmation)
 	const sessionId = _generateSessionId();
 	const deviceName = _buildDeviceName();
@@ -4082,7 +4125,7 @@ async function _ensureAuth() {
 				await new Promise(r => setTimeout(r, AUTH_POLL_INTERVAL_MS));
 				if (cancelToken.isCancellationRequested) return null;
 				try {
-					const resp = await _httpsGet(`/gaea/qqq/auth/poll?session=${sessionId}`);
+					const resp = await _httpsGet(`/gaea/qqq/auth/poll?session=${sessionId}&device_name=${encodeURIComponent(deviceName)}`);
 					if (resp.ok && resp.token) {
 						return { token: resp.token, phone: resp.phone || '' };
 					}
@@ -6414,6 +6457,7 @@ module.exports = {
 	cancelScans,
 	triggerSystemPaste,
 	checkAndInstallLinuxDeps,
+	onBrokerReady,
 	getActiveEngineCode,
 	getActiveEngineName,
 	invalidateEngineCache,  // ★ Refresh engine cache

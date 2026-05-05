@@ -2163,11 +2163,11 @@ class ClipboardHistorySidebarProvider {
         .icon-all-settings { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTE5LjE0IDEyLjk0Yy4wNC0uMy4wNi0uNjEuMDYtLjk0IDAtLjMyLS4wMi0uNjQtLjA3LS45NGwyLjAzLTEuNThjLjE4LS4xNC4yMy0uNDEuMTItLjYxbC0xLjkyLTMuMzJjLS4xMi0uMjItLjM3LS4yOS0uNTktLjIybC0yLjM5Ljk2Yy0uNS0uMzgtMS4wMy0uNy0xLjYyLS45NGwtLjM2LTIuNTRjLS4wNC0uMjQtLjI0LS40MS0uNDgtLjQxaC0zLjg0Yy0uMjQgMC0uNDMuMTctLjQ3LjQxbC0uMzYgMi41NGMtLjU5LjI0LTEuMTMuNTctMS42Mi45NGwtMi4zOS0uOTZjLS4yMi0uMDgtLjQ3IDAtLjU5LjIybC0xLjkyIDMuMzJjLS4xMi4yLS4wNy40Ny4xMi42MWwyLjAzIDEuNThjLS4wNS4zLS4wOS42My0uMDkuOTRzLjAyLjY0LjA3Ljk0bC0yLjAzIDEuNThjLS4xOC4xNC0uMjMuNDEtLjEyLjYxbDEuOTIgMy4zMmMuMTIuMjIuMzcuMjkuNTkuMjJsMi4zOS0uOTZjLjUuMzggMS4wMy43IDEuNjIuOTRsLjM2IDIuNTRjLjA1LjI0LjI0LjQxLjQ4LjQxaDMuODRjLjI0IDAgLjQ0LS4xNy40Ny0uNDFsLjM2LTIuNTRjLjU5LS4yNCAxLjEzLS41NiAxLjYyLS45NGwyLjM5Ljk2Yy4yMi4wOC40NyAwIC41OS0uMjJsMS45Mi0zLjMyYy4xMi0uMjIuMDctLjQ3LS4xMi0uNjFsLTIuMDEtMS41OHpNMTIgMTUuNmMtMS45OCAwLTMuNi0xLjYyLTMuNi0zLjZzMS42Mi0zLjYgMy42LTMuNiAzLjYgMS42MiAzLjYgMy42LTEuNjIgMy42LTMuNiAzLjZ6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
 
         /* ★ A/Q cloud sync buttons */
-        .aq-btn-group { display: flex; gap: 4px; }
-        .aq-btn { border-color: transparent !important; background: transparent !important; }
-        .aq-btn:hover { background: var(--card-bg) !important; border-color: var(--border-color) !important; }
-        .icon-aq-upload, .icon-aq-download { width: 14px; height: 14px; display: inline-block; vertical-align: middle; }
-        .aq-phone { font-size: 11px; color: #545454; font-family: Tahoma, sans-serif; vertical-align: middle; margin-right: 2px; }
+        #settingsCard:hover { transform: none; }
+        .aq-btn-wrap { display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle; pointer-events: auto; }
+        .aq-btn { pointer-events: auto; }
+        .icon-aq-upload, .icon-aq-download { width: 16px; height: 16px; display: inline-block; vertical-align: middle; }
+        .aq-phone { font-size: 13px; color: #545454; font-family: Verdana, sans-serif; vertical-align: middle; }
         [data-theme="dark"] .aq-phone { color: #999; }
         /* ★ Gold state: token verified */
         .aq-btn.aq-gold { color: #8b6914; }
@@ -2500,11 +2500,7 @@ class ClipboardHistorySidebarProvider {
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.allSettings" id="settingsCard">
-                    <div class="btn-group aq-btn-group" id="aqBtnGroup" style="display:none;">
-                        <button class="action-mini-btn aq-btn" id="btnAqUpload" title="Upload to Cloud"><span class="icon-aq-upload"></span></button>
-                        <button class="action-mini-btn aq-btn" id="btnAqDownload" title="Download from Cloud"><span class="icon-aq-download"></span></button>
-                    </div>
-                    <div class="text-content"><span id="aq-phone" class="aq-phone" style="display:none;"></span> <span class="icon-all-settings"></span> <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="allSettings-stats">${allSettingsStats}</span>
+                    <div class="text-content"><span id="aq-phone" class="aq-phone" style="display:none;"></span><span class="spacer-25"></span><span class="icon-all-settings"></span><span class="aq-btn-wrap" id="aqBtnGroup" style="display:none;"><button class="action-mini-btn aq-btn" id="btnAqUpload" title="Upload to Cloud"><span class="icon-aq-upload"></span></button><button class="action-mini-btn aq-btn" id="btnAqDownload" title="Download from Cloud"><span class="icon-aq-download"></span></button></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="allSettings-stats">${allSettingsStats}</span>
                     </div>
                 </div>
             </div>
@@ -2970,8 +2966,8 @@ class ClipboardHistorySidebarProvider {
             post('getCleanFreakMode', {});
 
             // ★ A/Q cloud sync buttons: SVG icons (arrow into cloud / arrow out of cloud)
-            var aqUploadSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" width="14" height="14"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" fill="currentColor" opacity=".85"/><path d="M12 18V9M8 12l4-4 4 4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-            var aqDownloadSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" width="14" height="14"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" fill="currentColor" opacity=".85"/><path d="M12 9v9M8 15l4 4 4-4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            var aqUploadSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" fill="currentColor" opacity=".85"/><path d="M12 18V9M8 12l4-4 4 4" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            var aqDownloadSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" fill="currentColor" opacity=".85"/><path d="M12 9v9M8 15l4 4 4-4" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
             if (el.btnAqUpload) el.btnAqUpload.querySelector('.icon-aq-upload').innerHTML = aqUploadSvg;
             if (el.btnAqDownload) el.btnAqDownload.querySelector('.icon-aq-download').innerHTML = aqDownloadSvg;
 
@@ -2984,7 +2980,7 @@ class ClipboardHistorySidebarProvider {
                 if (!el.aqBtnGroup) return;
                 var settingsCard = document.getElementById('settingsCard');
                 if (state.visible) {
-                    el.aqBtnGroup.style.display = 'flex';
+                    el.aqBtnGroup.style.display = 'inline-flex';
                     if (el.aqPhone && state.phoneTail) {
                         el.aqPhone.textContent = state.phoneTail;
                         el.aqPhone.style.display = 'inline';

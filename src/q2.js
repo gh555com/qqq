@@ -4520,6 +4520,13 @@ function showSaveAsDialog() {
   // ★ Immediately register this window as having visible q2
   _updateQ2TrackingFile('register')
 
+  // ★ Re-register hwnd when broker becomes ready (fixes Space+Q delay after broker restart)
+  if (process.platform === 'win32') {
+    global.onBrokerReady(() => {
+      if (activePanelAlive) _updateQ2TrackingFile('register');
+    });
+  }
+
   const iconPath = path.join(globalContext.extensionPath, "assets", "icon.png");
   if (fs.existsSync(iconPath)) panel.iconPath = vscode.Uri.file(iconPath);
 
