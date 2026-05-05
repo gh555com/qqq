@@ -82,5 +82,7 @@
     "cmd.exportZip": "qqq: zip exportieren",
     "cmd.downloadVideosFromUrl": "qqq: Web-Video an Cursor einfügen",
     "cmd.savorMoments": "qqq: Momente für sich selbst genießen",
-    "cmd.clearCache": "qqq: Cache leeren"
+    "cmd.clearCache": "qqq: Cache leeren",
+    "cmd.uploadUserData": "qqq: Daten in die Cloud hochladen",
+    "cmd.pullUserData": "qqq: Daten aus der Cloud wiederherstellen"
 }

@@ -82,5 +82,7 @@
     "cmd.exportZip": "qqq: zipエクスポート",
     "cmd.downloadVideosFromUrl": "qqq: カーソル位置にWeb動画を挿入",
     "cmd.savorMoments": "qqq: 自分へのご褒美",
-    "cmd.clearCache": "qqq: キャッシュクリア"
+    "cmd.clearCache": "qqq: キャッシュクリア",
+    "cmd.uploadUserData": "qqq: データをクラウドにアップロード",
+    "cmd.pullUserData": "qqq: クラウドからデータを復元"
 }

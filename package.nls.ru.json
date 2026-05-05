@@ -82,5 +82,7 @@
     "cmd.exportZip": "qqq: Экспорт zip",
     "cmd.downloadVideosFromUrl": "qqq: Вставить веб-видео в позицию курсора",
     "cmd.savorMoments": "qqq: Наслаждайся моментами",
-    "cmd.clearCache": "qqq: Очистить кэш"
+    "cmd.clearCache": "qqq: Очистить кэш",
+    "cmd.uploadUserData": "qqq: Загрузить данные в облако",
+    "cmd.pullUserData": "qqq: Восстановить данные из облака"
 }

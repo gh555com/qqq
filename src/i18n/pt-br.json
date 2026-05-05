@@ -861,6 +861,26 @@
         "notFound": "Conta não encontrada ou não ativada",
         "rateLimit": "Muitas solicitações, tente novamente mais tarde",
         "syncFailed": "Falha ao sincronizar configuração",
-        "networkError": "Erro de rede, verifique sua conexão"
+        "networkError": "Erro de rede, verifique sua conexão",
+        "uploadConfirmTitle": "Enviar dados para a nuvem",
+        "uploadConfirmMsg": "Eu confirmo:\n1. Sou um usuário licenciado\n2. Minha área de transferência e preferências de arquivos não contêm informações pessoais sensíveis (senhas, etc.) nem conteúdo ilegal",
+        "uploadConfirmBtn": "Confirmar e enviar",
+        "uploadCancel": "Cancelar",
+        "uploading": "Enviando dados para a nuvem...",
+        "uploadSuccess": "Enviado para a nuvem ({0})",
+        "uploadFailed": "Falha ao enviar: {0}",
+        "pullConfirmTitle": "Restaurar dados da nuvem",
+        "pullConfirmMsg": "Isso sobrescreverá suas preferências de roaming local e o histórico da área de transferência. Continuar?",
+        "pullConfirmBtn": "Confirmar restauração",
+        "pulling": "Obtendo dados da nuvem...",
+        "pullSuccess": "Restaurado da nuvem ({0})",
+        "pullFailed": "Falha ao restaurar: {0}",
+        "pullNoData": "Nenhum dado na nuvem",
+        "errQuotaExceeded": "Dados excedem o limite de cota",
+        "authWaiting": "Aguardando login no navegador...",
+        "authSuccess": "Login realizado com sucesso",
+        "authTimeout": "Tempo de login esgotado, tente novamente",
+        "authNoBrowser": "Não foi possível abrir o navegador. Verifique se há um navegador instalado.",
+        "authExpired": "Sessão expirada, faça login novamente"
     }
 }

@@ -876,6 +876,11 @@
         "pullSuccess": "Restored from cloud ({0})",
         "pullFailed": "Restore failed: {0}",
         "pullNoData": "No data on cloud yet",
-        "errQuotaExceeded": "Data exceeds quota limit"
+        "errQuotaExceeded": "Data exceeds quota limit",
+        "authWaiting": "Waiting for browser login...",
+        "authSuccess": "Login successful",
+        "authTimeout": "Login timed out, please try again",
+        "authNoBrowser": "Cannot open browser. Please ensure a browser is installed.",
+        "authExpired": "Login expired, please log in again"
     }
 }

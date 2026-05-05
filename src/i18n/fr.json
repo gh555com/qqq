@@ -861,6 +861,26 @@
         "notFound": "Compte non trouvé ou non activé",
         "rateLimit": "Trop de requêtes, veuillez réessayer plus tard",
         "syncFailed": "Échec de la synchronisation de la configuration",
-        "networkError": "Erreur réseau, vérifiez votre connexion"
+        "networkError": "Erreur réseau, vérifiez votre connexion",
+        "uploadConfirmTitle": "Téléverser les données vers le cloud",
+        "uploadConfirmMsg": "Je confirme :\n1. Je suis un utilisateur licencié\n2. Mon presse-papiers et mes préférences de fichiers ne contiennent aucune information personnelle sensible (mots de passe, etc.) ni aucun contenu illégal",
+        "uploadConfirmBtn": "Confirmer et téléverser",
+        "uploadCancel": "Annuler",
+        "uploading": "Téléversement des données vers le cloud...",
+        "uploadSuccess": "Téléversé vers le cloud ({0})",
+        "uploadFailed": "Échec du téléversement : {0}",
+        "pullConfirmTitle": "Restaurer les données depuis le cloud",
+        "pullConfirmMsg": "Cela écrasera vos préférences d'itinérance et l'historique du presse-papiers. Continuer ?",
+        "pullConfirmBtn": "Confirmer la restauration",
+        "pulling": "Récupération des données depuis le cloud...",
+        "pullSuccess": "Restauré depuis le cloud ({0})",
+        "pullFailed": "Échec de la restauration : {0}",
+        "pullNoData": "Aucune donnée dans le cloud",
+        "errQuotaExceeded": "Les données dépassent la limite de quota",
+        "authWaiting": "En attente de la connexion dans le navigateur...",
+        "authSuccess": "Connexion réussie",
+        "authTimeout": "Connexion expirée, veuillez réessayer",
+        "authNoBrowser": "Impossible d'ouvrir le navigateur. Veuillez vérifier qu'un navigateur est installé.",
+        "authExpired": "Session expirée, veuillez vous reconnecter"
     }
 }

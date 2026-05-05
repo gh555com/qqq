@@ -2665,6 +2665,7 @@ let _suppressConfigEcho = 0; // Prevent "we echo settings back" from causing inf
 let _trialHintShown = false;
 let _configChangeCallback = null;
 let _configUpdateCallbacks = []; // ★ List of callbacks after config update completes (fix race conditions)
+let _aqStateCallback = null; // ★ Callback for A/Q button visibility changes
 // ★ Bootstrap reset completion flag (non-Pro only)
 // Purpose: Prevent race condition where q2 opens before settings.json is cleared
 // - false: non-Pro get() returns DEFAULT_CONFIG directly (safe startup)
@@ -3704,6 +3705,7 @@ async function syncCloudConfig(phone, options = {}) {
 			const msg = q('wq.syncSuccessFmt', phone, overwriteCount);
 			if (!silent) showAutoCloseNotification('success', msg);
 			logMessage(`[wq] Config synced for phone: ${phone}, Pro mode activated, removeWatermark=${data.profile.removeWatermark}, overwritten=${overwriteCount}, keys=[${changedKeys.join(',')}]`, 'INFO');
+			if (_aqStateCallback) _aqStateCallback(true); // ★ Show A/Q buttons
 			return { success: true, message: msg };
 		} else {
 			// 根据错误类型返回对应消息
@@ -3716,12 +3718,16 @@ async function syncCloudConfig(phone, options = {}) {
 
 			const msg = q('wq.syncFailedFmt', phone, reason);
 			showAutoCloseNotification('warning', msg);
+			// ★ Hide A/Q unless local token is still valid
+			if (_aqStateCallback && !_getAuthToken()) _aqStateCallback(false);
 			return { success: false, message: msg };
 		}
 	} catch (e) {
 		logMessage(`[wq] Sync config error: ${e.message}`, 'WARN');
 		const msg = q('wq.syncFailedFmt', phone, q('wq.errNetwork'));
 		showAutoCloseNotification('error', msg);
+		// ★ Hide A/Q unless local token is still valid
+		if (_aqStateCallback && !_getAuthToken()) _aqStateCallback(false);
 		return { success: false, message: msg };
 	}
 }
@@ -3908,6 +3914,221 @@ async function _httpsPost(urlPath, body, timeoutMs = 30000) {
 	});
 }
 
+// ============================================================================
+// ★★★ Auth Token Management (Browser-Poll Flow)
+// Token stored at ~/.qqq/auth.json, survives IDE reinstall.
+// Flow: user clicks upload/pull → open browser login → poll for token → store.
+// No SMS UI in IDE — full login experience happens in the browser (supports
+// 200+ countries, country code picker, rate limit display, etc.)
+// ============================================================================
+
+const AUTH_FILE = 'auth.json';
+const AUTH_POLL_INTERVAL_MS = 2000;
+const AUTH_POLL_TIMEOUT_MS = 180000; // 3 minutes
+
+/** Read stored auth token from ~/.qqq/auth.json */
+function _getAuthToken() {
+	try {
+		const authPath = path.join(os.homedir(), '.qqq', AUTH_FILE);
+		if (fs.existsSync(authPath)) {
+			const data = JSON.parse(fs.readFileSync(authPath, 'utf8'));
+			if (data && data.token) return data;
+		}
+	} catch { }
+	return null;
+}
+
+/** Save auth token to ~/.qqq/auth.json */
+function _saveAuthToken(token, phone) {
+	try {
+		const dir = path.join(os.homedir(), '.qqq');
+		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+		const authPath = path.join(dir, AUTH_FILE);
+		_writeFileAtomicSync(authPath, JSON.stringify({ token, phone, device_name: _buildDeviceName(), ts: Date.now() }, null, 2));
+		return true;
+	} catch (e) {
+		logMessage(`[wq] Failed to save auth token: ${e.message}`, 'WARN');
+		return false;
+	}
+}
+
+/** Clear auth token (on server-side logout or auth_failed) */
+function _clearAuthToken() {
+	try {
+		const authPath = path.join(os.homedir(), '.qqq', AUTH_FILE);
+		if (fs.existsSync(authPath)) fs.unlinkSync(authPath);
+	} catch { }
+}
+
+/**
+ * ★ Build device_name for the "logged in devices" panel on gh555.com
+ * Format: "{IDE}_{OS}_{arch}" e.g. "vscode_Win_x64", "cursor_macOS_arm64"
+ */
+function _buildDeviceName() {
+	const ide = getIDEFamily();
+	const plat = process.platform === 'win32' ? 'Win' : process.platform === 'darwin' ? 'macOS' : 'Linux';
+	const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+	return `${ide}_${plat}_${arch}`;
+}
+
+/** Generate a random session ID for browser auth handshake */
+function _generateSessionId() {
+	const crypto = require('crypto');
+	return crypto.randomBytes(16).toString('hex');
+}
+
+/** HTTPS GET helper for polling */
+async function _httpsGet(urlPath, timeoutMs = 10000) {
+	return new Promise((resolve, reject) => {
+		const url = new URL(`${WQ_API_BASE}${urlPath}`);
+		const options = {
+			hostname: url.hostname,
+			port: 443,
+			path: url.pathname + url.search,
+			method: 'GET',
+			timeout: timeoutMs,
+		};
+		const req = require('https').request(options, (res) => {
+			let chunks = [];
+			res.on('data', chunk => chunks.push(chunk));
+			res.on('end', () => {
+				try {
+					resolve(JSON.parse(Buffer.concat(chunks).toString()));
+				} catch (e) {
+					reject(new Error('Invalid JSON response'));
+				}
+			});
+		});
+		req.on('error', reject);
+		req.on('timeout', () => { req.destroy(); reject(new Error('Request timeout')); });
+		req.end();
+	});
+}
+
+/**
+ * ★ Ensure user is authenticated. If no token, trigger browser login + poll.
+ * Returns { token, phone } on success, null on failure/cancel.
+ *
+ * Browser fallback tiers:
+ *   Tier 1: vscode.env.openExternal() — default system browser
+ *   Tier 2: Embedded Chrome maintained by video enhanced flow (if available)
+ *   Tier 3: No browser available — show error and abort
+ *
+ * Flow:
+ *   1. Check ~/.qqq/auth.json for existing valid token
+ *   2. If not found → generate session_id → open browser login page
+ *   3. Poll GET /auth/poll?session={id} every 2s until token or timeout (3min)
+ *   4. On success → save token locally
+ */
+async function _ensureAuth() {
+	// Check existing token
+	const stored = _getAuthToken();
+	if (stored && stored.token) {
+		return { token: stored.token, phone: stored.phone || '' };
+	}
+
+	// No token — automatically open browser for login (no extra confirmation)
+	const sessionId = _generateSessionId();
+	const deviceName = _buildDeviceName();
+	const loginUrl = `${WQ_API_BASE.replace('/api', '')}/login?from=ide&session=${sessionId}&device_name=${encodeURIComponent(deviceName)}`;
+
+	// ★ Tier 1: Try default system browser (automatic, no user click needed)
+	let browserOpened = false;
+	try {
+		await vscode.env.openExternal(vscode.Uri.parse(loginUrl));
+		browserOpened = true;
+	} catch {
+		logMessage('[wq] openExternal failed, trying embedded Chrome', 'WARN');
+	}
+
+	// ★ Tier 2: Embedded Chrome (maintained by video enhanced flow)
+	if (!browserOpened && extensionContext) {
+		const chromeHome = extensionContext.globalStorageUri?.fsPath;
+		if (chromeHome) {
+			const embeddedPath = _getEmbeddedChromePath(chromeHome);
+			if (embeddedPath && fs.existsSync(embeddedPath)) {
+				try {
+					const { spawn } = require('child_process');
+					const userDataDir = path.join(chromeHome, 'user-data-auth');
+					if (!fs.existsSync(userDataDir)) fs.mkdirSync(userDataDir, { recursive: true });
+					spawn(embeddedPath, [
+						`--user-data-dir=${userDataDir}`,
+						'--no-first-run',
+						'--no-default-browser-check',
+						loginUrl
+					], { detached: true, stdio: 'ignore' }).unref();
+					browserOpened = true;
+					logMessage('[wq] Opened embedded Chrome for auth', 'INFO');
+				} catch (e) {
+					logMessage(`[wq] Embedded Chrome spawn failed: ${e.message}`, 'WARN');
+				}
+			}
+		}
+	}
+
+	// ★ Tier 3: No browser at all
+	if (!browserOpened) {
+		showAutoCloseNotification('error', q('wq.authNoBrowser'));
+		return null;
+	}
+
+	// Poll for token with progress indicator (user just waits, no action needed)
+	const result = await vscode.window.withProgress(
+		{ location: vscode.ProgressLocation.Notification, title: q('wq.authWaiting'), cancellable: true },
+		async (progress, cancelToken) => {
+			const startTime = Date.now();
+			while (Date.now() - startTime < AUTH_POLL_TIMEOUT_MS) {
+				if (cancelToken.isCancellationRequested) return null;
+				await new Promise(r => setTimeout(r, AUTH_POLL_INTERVAL_MS));
+				if (cancelToken.isCancellationRequested) return null;
+				try {
+					const resp = await _httpsGet(`/gaea/qqq/auth/poll?session=${sessionId}`);
+					if (resp.ok && resp.token) {
+						return { token: resp.token, phone: resp.phone || '' };
+					}
+				} catch {
+					// Network blip — keep trying
+				}
+			}
+			return null; // timeout
+		}
+	);
+
+	if (result && result.token) {
+		_saveAuthToken(result.token, result.phone);
+		showAutoCloseNotification('success', q('wq.authSuccess'));
+		return result;
+	} else {
+		showAutoCloseNotification('warning', q('wq.authTimeout'));
+		return null;
+	}
+}
+
+/**
+ * ★ Get embedded Chrome exe path (same logic as qvideo._getEmbeddedChromePath)
+ * Reused from video enhanced flow's browser management.
+ */
+function _getEmbeddedChromePath(chromeHome) {
+	const platform = process.platform;
+	const arch = process.arch;
+	const osRelease = parseFloat(require('os').release());
+
+	let folderName;
+	if (platform === 'win32' && osRelease < 10) {
+		folderName = 'chrome-win';
+	} else if (platform === 'win32') {
+		folderName = (arch === 'x64' || arch === 'arm64') ? 'chrome-win64' : 'chrome-win32';
+	} else if (platform === 'darwin') {
+		folderName = (arch === 'arm64') ? 'chrome-mac-arm64' : 'chrome-mac-x64';
+	} else {
+		folderName = 'chrome-linux64';
+	}
+
+	const exeName = platform === 'win32' ? 'chrome.exe'
+		: (platform === 'darwin' ? 'Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing' : 'chrome');
+	return path.join(chromeHome, folderName, exeName);
+}
+
 /**
  * ★★★ Upload user data to cloud (Pull-Merge-Push: mathematically perfect, zero data loss)
  *
@@ -3922,11 +4143,10 @@ async function _httpsPost(urlPath, body, timeoutMs = 30000) {
  * No data is ever lost from either side.
  */
 async function uploadUserData() {
-	const phone = getUserPhone();
-	if (!phone) {
-		showAutoCloseNotification('warning', q('wq.noPhone'));
-		return { success: false };
-	}
+	// ★ Auth gate: ensure user has valid token (triggers SMS verify if needed)
+	const auth = await _ensureAuth();
+	if (!auth) return { success: false };
+
 	const deviceId = getDeviceId();
 	if (!deviceId) {
 		showAutoCloseNotification('warning', q('wq.noDevice'));
@@ -3952,7 +4172,7 @@ async function uploadUserData() {
 		// ---- Step 1: Pull cloud state ----
 		let cloudBlobs = {};
 		try {
-			const pullResp = await _httpsPost('/gaea/qqq/user-data/pull', { phone, device_id: deviceId, keys: USER_DATA_BLOB_KEYS });
+			const pullResp = await _httpsPost('/gaea/qqq/user-data/pull', { phone: auth.phone, device_id: deviceId, device_name: _buildDeviceName(), token: auth.token, keys: USER_DATA_BLOB_KEYS });
 			if (pullResp.ok && pullResp.blobs) {
 				cloudBlobs = pullResp.blobs;
 			}
@@ -4013,7 +4233,7 @@ async function uploadUserData() {
 		}
 
 		// ---- Step 4: Push merged result ----
-		const data = await _httpsPost('/gaea/qqq/user-data', { phone, device_id: deviceId, blobs });
+		const data = await _httpsPost('/gaea/qqq/user-data', { phone: auth.phone, device_id: deviceId, device_name: _buildDeviceName(), token: auth.token, blobs });
 
 		if (data.ok) {
 			const timeStr = new Date().toLocaleString();
@@ -4041,6 +4261,7 @@ async function uploadUserData() {
 			else if (data.error === 'rate_limit') reason = q('wq.errRateLimit');
 			else if (data.error === 'quota_exceeded') reason = q('wq.errQuotaExceeded');
 			else if (data.error === 'phone_not_registered') reason = q('wq.errPhoneNotRegistered');
+			else if (data.error === 'auth_failed') { _clearAuthToken(); reason = q('wq.authExpired'); }
 			showAutoCloseNotification('warning', q('wq.uploadFailed', reason));
 			return { success: false };
 		}
@@ -4056,11 +4277,10 @@ async function uploadUserData() {
  * Uses the same set-union merge logic to ensure no local data is lost.
  */
 async function pullUserData() {
-	const phone = getUserPhone();
-	if (!phone) {
-		showAutoCloseNotification('warning', q('wq.noPhone'));
-		return { success: false };
-	}
+	// ★ Auth gate: ensure user has valid token (triggers SMS verify if needed)
+	const auth = await _ensureAuth();
+	if (!auth) return { success: false };
+
 	const deviceId = getDeviceId();
 	if (!deviceId) {
 		showAutoCloseNotification('warning', q('wq.noDevice'));
@@ -4080,7 +4300,7 @@ async function pullUserData() {
 	showAutoCloseNotification('info', q('wq.pulling'));
 
 	try {
-		const data = await _httpsPost('/gaea/qqq/user-data/pull', { phone, device_id: deviceId, keys: USER_DATA_BLOB_KEYS });
+		const data = await _httpsPost('/gaea/qqq/user-data/pull', { phone: auth.phone, device_id: deviceId, device_name: _buildDeviceName(), token: auth.token, keys: USER_DATA_BLOB_KEYS });
 
 		if (!data.ok) {
 			let reason = data.error || 'unknown';
@@ -4088,6 +4308,7 @@ async function pullUserData() {
 			else if (data.error === 'rate_limit') reason = q('wq.errRateLimit');
 			else if (data.error === 'quota_exceeded') reason = q('wq.errQuotaExceeded');
 			else if (data.error === 'phone_not_registered') reason = q('wq.errPhoneNotRegistered');
+			else if (data.error === 'auth_failed') { _clearAuthToken(); reason = q('wq.authExpired'); }
 			showAutoCloseNotification('warning', q('wq.pullFailed', reason));
 			return { success: false };
 		}
@@ -6161,6 +6382,8 @@ module.exports = {
 	syncCloudConfig,
 	uploadUserData,
 	pullUserData,
+	getAuthTokenSync: _getAuthToken,
+	onAqStateChange(cb) { _aqStateCallback = cb; },
 
 	// Status bar related
 	initStatusBar,
