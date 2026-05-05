@@ -2086,7 +2086,7 @@ class YtDlpDownloader {
         const referer = options.referer || url;
 
         const runDownload = (extraArgs = []) => {
-            return new Promise((resolve) => {
+            return new Promise(async (resolve) => {
                 const fmt =
                     options.format ||
                     "bestvideo[vcodec^=avc1][height<=1080]+bestaudio[acodec^=mp4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best";
