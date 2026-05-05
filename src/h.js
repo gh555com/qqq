@@ -293,6 +293,7 @@ function _ensureSalt(dirPath) {
 // xattr key constants
 const XATTR_KEY_DARWIN = "com.qqq.owner";
 const XATTR_KEY_LINUX = "user.qqq.owner";
+let _saltLinuxBroken = false; // ★ Once setfattr ENOENT, stop retrying for this session
 
 /**
  * Salt the qqq folder to mark it as created by us
@@ -303,6 +304,8 @@ const XATTR_KEY_LINUX = "user.qqq.owner";
  */
 function _saltQqqFolder(dirPath) {
     if (path.basename(dirPath) !== QQQ_FOLDER_NAME) return;
+    // ★ Linux: if setfattr already confirmed broken this session, skip silently
+    if (process.platform === "linux" && _saltLinuxBroken) return;
     try {
         if (process.platform === "win32") {
             fs.writeFileSync(dirPath + ":qqq", QQQ_ADS_SALT, "utf8");
@@ -311,14 +314,22 @@ function _saltQqqFolder(dirPath) {
             cp.execFileSync("xattr", ["-w", XATTR_KEY_DARWIN, QQQ_ADS_SALT, dirPath], { timeout: 1000 });
             log(`[Salt] Written xattr ${XATTR_KEY_DARWIN} to ${dirPath}`, "DEBUG");
         } else {
-            // Linux: setfattr may not be installed; silently fail
+            // Linux: setfattr may not be installed
             cp.execFileSync("setfattr", ["-n", XATTR_KEY_LINUX, "-v", QQQ_ADS_SALT, dirPath], { timeout: 1000 });
             log(`[Salt] Written xattr ${XATTR_KEY_LINUX} to ${dirPath}`, "DEBUG");
         }
         // ★ Cache it after successful write
         _saltedQqqCache.add(dirPath);
     } catch (e) {
-        log(`[Salt] Failed to write salt to ${dirPath}: ${e.message}`, "WARN");
+        if (process.platform === "linux" && e.code === "ENOENT") {
+            // setfattr not installed — log once, stop retrying this session
+            if (!_saltLinuxBroken) {
+                log(`[Salt] setfattr not available, salt disabled for this session`, "WARN");
+                _saltLinuxBroken = true;
+            }
+        } else {
+            log(`[Salt] Failed to write salt to ${dirPath}: ${e.message}`, "WARN");
+        }
     }
 }
 

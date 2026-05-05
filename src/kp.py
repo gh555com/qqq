@@ -2999,6 +2999,11 @@ def _broker_dispatch(cmd: dict, cancel_version: int = None) -> dict:
         out["status"] = "exiting"
         return out
 
+    if action == "bye":
+        # Graceful disconnect hint from client — acknowledge and let lease handle cleanup
+        out["status"] = "goodbye"
+        return out
+
     res = _dispatch_action(cmd, cancel_version, allow_process_exit=False)
     if action == "exit":
         _SHUTDOWN_FLAG = True
@@ -3102,6 +3107,8 @@ def _unix_accept_loop(listen_sock: socket.socket):
         except socket.timeout:
             continue
         except Exception as e:
+            if _SHUTDOWN_FLAG:
+                break  # Expected during shutdown — socket closed
             _log(f"[TCP/Unix] Accept error: {e}")
             break
         try:
