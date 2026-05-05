@@ -861,6 +861,26 @@
         "notFound": "Cuenta no encontrada o no activada",
         "rateLimit": "Demasiadas solicitudes, inténtelo más tarde",
         "syncFailed": "Error al sincronizar la configuración",
-        "networkError": "Error de red, verifique su conexión"
+        "networkError": "Error de red, verifique su conexión",
+        "uploadConfirmTitle": "Subir datos a la nube",
+        "uploadConfirmMsg": "Confirmo:\n1. Soy un usuario con licencia\n2. Mi portapapeles y preferencias de archivos no contienen información personal sensible (contraseñas, etc.) ni contenido ilegal",
+        "uploadConfirmBtn": "Confirmar y subir",
+        "uploadCancel": "Cancelar",
+        "uploading": "Subiendo datos a la nube...",
+        "uploadSuccess": "Subido a la nube ({0})",
+        "uploadFailed": "Error al subir: {0}",
+        "pullConfirmTitle": "Restaurar datos desde la nube",
+        "pullConfirmMsg": "Esto sobrescribirá sus preferencias de roaming local y el historial del portapapeles. ¿Continuar?",
+        "pullConfirmBtn": "Confirmar restauración",
+        "pulling": "Obteniendo datos de la nube...",
+        "pullSuccess": "Restaurado desde la nube ({0})",
+        "pullFailed": "Error al restaurar: {0}",
+        "pullNoData": "No hay datos en la nube",
+        "errQuotaExceeded": "Los datos exceden el límite de cuota",
+        "authWaiting": "Esperando inicio de sesión en el navegador...",
+        "authSuccess": "Inicio de sesión exitoso",
+        "authTimeout": "Tiempo de inicio de sesión agotado, intente de nuevo",
+        "authNoBrowser": "No se puede abrir el navegador. Asegúrese de que haya un navegador instalado.",
+        "authExpired": "Sesión expirada, inicie sesión nuevamente"
     }
 }

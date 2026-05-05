@@ -1588,6 +1588,10 @@ async function _delayedActivate(context) {
 		const q4Api = q4.activate(context);
 		global.clipboardHistoryManager = q4Api; // Keep global reference for compatibility
 		activeSidebarProvider = q4Api.sidebarProvider; // ★ Correctly initialize activeSidebarProvider
+		// ★ Wire A/Q button visibility to cloud config sync results
+		global.onAqStateChange((visible) => {
+			if (activeSidebarProvider) activeSidebarProvider.setAqVisible(visible);
+		});
 	} catch (e) {
 		global.logMessage(q('qqq.log.q4LoadError', e.message), "ERROR");
 	}

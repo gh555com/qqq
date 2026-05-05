@@ -82,5 +82,7 @@
     "cmd.exportZip": "qqq: تصدير zip",
     "cmd.downloadVideosFromUrl": "qqq: إدراج فيديو ويب عند المؤشر",
     "cmd.savorMoments": "qqq: استمتع بلحظاتك",
-    "cmd.clearCache": "qqq: مسح ذاكرة التخزين المؤقت"
+    "cmd.clearCache": "qqq: مسح ذاكرة التخزين المؤقت",
+    "cmd.uploadUserData": "qqq: رفع البيانات إلى السحابة",
+    "cmd.pullUserData": "qqq: استعادة البيانات من السحابة"
 }

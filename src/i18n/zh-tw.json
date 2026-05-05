@@ -861,6 +861,26 @@
         "notFound": "帳號未找到或未啟用",
         "rateLimit": "請求太頻繁，請稍後再試",
         "syncFailed": "配置同步失敗",
-        "networkError": "網路錯誤，請檢查網路連接"
+        "networkError": "網路錯誤，請檢查網路連接",
+        "uploadConfirmTitle": "上傳資料到雲端",
+        "uploadConfirmMsg": "我確認：\n1、我是正版用戶；\n2、我的剪貼簿、檔案記錄偏好中不包括任何個人敏感資訊（如密碼），且不包括任何違法內容。",
+        "uploadConfirmBtn": "我確認並上傳",
+        "uploadCancel": "取消",
+        "uploading": "正在上傳資料到雲端...",
+        "uploadSuccess": "已上傳到雲端 ({0})",
+        "uploadFailed": "上傳失敗：{0}",
+        "pullConfirmTitle": "從雲端恢復資料",
+        "pullConfirmMsg": "這將覆蓋本地的漫遊偏好和剪貼簿歷史資料，是否繼續？",
+        "pullConfirmBtn": "確認恢復",
+        "pulling": "正在從雲端拉取資料...",
+        "pullSuccess": "已從雲端恢復資料 ({0})",
+        "pullFailed": "恢復失敗：{0}",
+        "pullNoData": "雲端暫無資料",
+        "errQuotaExceeded": "資料超出配額限制",
+        "authWaiting": "等待瀏覽器登入完成...",
+        "authSuccess": "登入成功",
+        "authTimeout": "登入逾時，請重試",
+        "authNoBrowser": "無法開啟瀏覽器，請確保系統已安裝瀏覽器",
+        "authExpired": "登入已過期，請重新登入"
     }
 }

@@ -194,7 +194,7 @@ class _MiniaudioCompat:
 
 
 class _RadioStreamSource(miniaudio.StreamableSource):
-    """流式音频源，作为 miniaudio stream_any 的输入。
+    """流式音频源，作为 miniaudio stream_any 的传入。
     后台线程 HTTP 下载 + 内部缓冲区 + Condition 即时唤醒。"""
     BUFFER_SIZE = 131072  # 128KB 内部缓冲 = 20+ 秒 @ 48kbps
     BLOCK_SIZE = 16384    # 16KB 每次网络读取，加速初始填充
@@ -323,7 +323,7 @@ class NonBlockingAudioEngine:
             print(msg)
 
     def _log_critical(self, msg: str):
-        """设备恢复等关键场景，无论 silent 与否都输出到 broker.log + stdout。"""
+        """设备恢复等关键场景，无论 silent 与否都打印到 broker.log + stdout。"""
         full = f"[Audio] {msg}"
         if self._on_log:
             try:
@@ -1899,10 +1899,10 @@ class NonBlockingAudioEngine:
         if not already_primed:
             next(source_stream)  # prime the source decoder
         required_frames = yield b''  # prime our wrapper for device
-        # ★ 新连接预热：前 800ms 输出静音，让解码器完成 MP3 帧同步 + 稳定化
+        # ★ 新连接预热：前 800ms 打印静音，让解码器完成 MP3 帧同步 + 稳定化
         # 避免 HTTP 重连时落在帧中间导致的变音/音裂（~1/3 概率）
         # 屏保恢复（already_primed）不需要预热，解码器状态是连续的
-        # ★ 150ms 实测不够 — MP3 解码器帧同步后还需要几帧来稳定输出
+        # ★ 150ms 实测不够 — MP3 解码器帧同步后还需要几帧来稳定打印
         FRAME_BYTES = self.REQUESTED_CHANNELS * 2  # 16-bit stereo = 4
         warmup_frames = 0 if already_primed else int(self.REQUESTED_RATE * 0.8)  # 800ms
         # ★ 额外保护：前 N 次 send() 调用完全丢弃（确保解码器内部状态稳定）
@@ -1923,7 +1923,7 @@ class NonBlockingAudioEngine:
                     discard_calls -= 1
                     required_frames = yield b'\x00' * len(data)
                 elif warmup_frames > 0:
-                    # ★ 静音预热：解码器已同步但输出可能不稳定
+                    # ★ 静音预热：解码器已同步但打印可能不稳定
                     warmup_frames -= len(data) // FRAME_BYTES
                     required_frames = yield b'\x00' * len(data)
                 else:

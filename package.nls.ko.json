@@ -82,5 +82,7 @@
     "cmd.exportZip": "qqq: zip 내보내기",
     "cmd.downloadVideosFromUrl": "qqq: 커서 위치에 웹 동영상 삽입",
     "cmd.savorMoments": "qqq: 나를 위한 시간",
-    "cmd.clearCache": "qqq: 캐시 지우기"
+    "cmd.clearCache": "qqq: 캐시 지우기",
+    "cmd.uploadUserData": "qqq: 데이터를 클라우드에 업로드",
+    "cmd.pullUserData": "qqq: 클라우드에서 데이터 복원"
 }

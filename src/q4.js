@@ -1608,6 +1608,21 @@ class ClipboardHistorySidebarProvider {
                     vscode.env.openExternal(vscode.Uri.parse(this._global.buildDynamicGh555Url('a')));
                     break;
                 }
+                case 'aqUpload': {
+                    // ★ A button: upload user data to cloud
+                    global.uploadUserData();
+                    break;
+                }
+                case 'aqDownload': {
+                    // ★ Q button: download user data from cloud
+                    global.pullUserData();
+                    break;
+                }
+                case 'getAqState': {
+                    // ★ Webview requests initial AQ button state
+                    this._sendAqState();
+                    break;
+                }
             }
         });
 
@@ -1815,6 +1830,34 @@ class ClipboardHistorySidebarProvider {
         } catch (e) {
             console.warn('[Q4]', q('log.ipcSerializeError'), e.message);
         }
+    }
+
+    // ★ A/Q button state management
+    _sendAqState() {
+        const phone = vscode.workspace.getConfiguration(global.cfgNs()).get('phone');
+        const authData = global.getAuthTokenSync();
+        const hasToken = !!(authData && authData.token);
+        // AQ visible if: explicitly set by syncCloudConfig result, or has valid token on startup
+        const visible = this._aqVisible !== undefined ? this._aqVisible : hasToken;
+        // Phone tail: last 4 digits of phone number (from auth data or config)
+        let phoneTail = '';
+        const phoneStr = (authData && authData.phone) || phone || '';
+        if (phoneStr && typeof phoneStr === 'string') {
+            const digits = phoneStr.replace(/[^\d]/g, '');
+            if (digits.length >= 4) phoneTail = digits.slice(-4);
+        }
+        this._postMessage({
+            command: 'updateAqState',
+            visible: visible,
+            gold: hasToken,
+            phoneTail: phoneTail
+        });
+    }
+
+    // ★ Called by external code when cloud config fetch succeeds/fails
+    setAqVisible(visible) {
+        this._aqVisible = visible;
+        this._sendAqState();
     }
 
     /**
@@ -2118,6 +2161,18 @@ class ClipboardHistorySidebarProvider {
         .icon-pen { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTMgMTcuMjVWMjFoMy43NWwxMS4wNi0xMS4wNi0zLjc1LTMuNzVMMyAxNy4yNXpNMjAuNzEgNy4wNGMuMzktLjM5LjM5LTEuMDIgMC0xLjQxbC0yLjM0LTIuMzRjLS4zOS0uMzktMS4wMi0uMzktMS40MSAw bC0xLjgzIDEuODMgMy43NSAzLjc1IDEuODMtMS44M3oiLz48L3N2Zz4=') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-ufo { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTEyIDJDMi40OCAyIDEyIDIuNDggMTIgOCAxMiAxMy41MiA3LjUyIDIyIDEyIDIyYzQuNDggMCA5LjUyLTguNDggMTAtMTQgMC01LjUyLTkuNTItMTAtMTAtMTB6bTAgMThjLTMuMzEgMC02LTIuNjktNi02IDAtMy4zMSAyLjY5LTYgNi02czYgMi42OSA2IDYtMi42OSA2LTYgNnoiLz48cGF0aCBkPSJNMjEgMTNoLTRjLS41NSAwLTEgLjQ1LTEgMXMuNDUgMSAxIDFoNGMuNTUgMCAxLS40NSAxLTFzLS40NS0xLTEtMXpNNyAxM0gzYy0uNTUgMC0xIC40NS0xIDFzLjQ1IDEgMSAxaDRjLjU1IDAgMS0uNDUgMS0xcy0uNDUtMS0xLTF6TTEyIDhjLTMuMzEgMC02IDIuNjktNiA2IDAgMy4zMSAyLjY5IDYgNiA2czYtMi42OSA2LTYtMi42LTMuMzEgMC02IDIuNjktNiA2IDAgMy4zMSAyLjY5IDYgNiA2czYtMi42OSA2LTYtMi42OS02LTYtNnoiIG9wYWNpdHk9Ii4zIi8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-all-settings { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTE5LjE0IDEyLjk0Yy4wNC0uMy4wNi0uNjEuMDYtLjk0IDAtLjMyLS4wMi0uNjQtLjA3LS45NGwyLjAzLTEuNThjLjE4LS4xNC4yMy0uNDEuMTItLjYxbC0xLjkyLTMuMzJjLS4xMi0uMjItLjM3LS4yOS0uNTktLjIybC0yLjM5Ljk2Yy0uNS0uMzgtMS4wMy0uNy0xLjYyLS45NGwtLjM2LTIuNTRjLS4wNC0uMjQtLjI0LS40MS0uNDgtLjQxaC0zLjg0Yy0uMjQgMC0uNDMuMTctLjQ3LjQxbC0uMzYgMi41NGMtLjU5LjI0LTEuMTMuNTctMS42Mi45NGwtMi4zOS0uOTZjLS4yMi0uMDgtLjQ3IDAtLjU5LjIybC0xLjkyIDMuMzJjLS4xMi4yLS4wNy40Ny4xMi42MWwyLjAzIDEuNThjLS4wNS4zLS4wOS42My0uMDkuOTRzLjAyLjY0LjA3Ljk0bC0yLjAzIDEuNThjLS4xOC4xNC0uMjMuNDEtLjEyLjYxbDEuOTIgMy4zMmMuMTIuMjIuMzcuMjkuNTkuMjJsMi4zOS0uOTZjLjUuMzggMS4wMy43IDEuNjIuOTRsLjM2IDIuNTRjLjA1LjI0LjI0LjQxLjQ4LjQxaDMuODRjLjI0IDAgLjQ0LS4xNy40Ny0uNDFsLjM2LTIuNTRjLjU5LS4yNCAxLjEzLS41NiAxLjYyLS45NGwyLjM5Ljk2Yy4yMi4wOC40NyAwIC41OS0uMjJsMS45Mi0zLjMyYy4xMi0uMjIuMDctLjQ3LS4xMi0uNjFsLTIuMDEtMS41OHpNMTIgMTUuNmMtMS45OCAwLTMuNi0xLjYyLTMuNi0zLjZzMS42Mi0zLjYgMy42LTMuNiAzLjYgMS42MiAzLjYgMy42LTEuNjIgMy42LTMuNiAzLjZ6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
+
+        /* ★ A/Q cloud sync buttons */
+        .aq-btn-group { display: flex; gap: 4px; }
+        .aq-btn { border-color: transparent !important; background: transparent !important; }
+        .aq-btn:hover { background: var(--card-bg) !important; border-color: var(--border-color) !important; }
+        .icon-aq-upload, .icon-aq-download { width: 14px; height: 14px; display: inline-block; vertical-align: middle; }
+        .aq-phone { font-size: 11px; color: #545454; font-family: Tahoma, sans-serif; vertical-align: middle; margin-right: 2px; }
+        [data-theme="dark"] .aq-phone { color: #999; }
+        /* ★ Gold state: token verified */
+        .aq-btn.aq-gold { color: #8b6914; }
+        .aq-phone.aq-gold { color: #8b6914; }
+        .aq-gold-gear .icon-all-settings { filter: sepia(1) saturate(3) hue-rotate(15deg) brightness(0.55); }
 
         /* ★ Dark mode: invert SVG icons for visibility */
         [data-theme="dark"] .icon-loop,
@@ -2444,8 +2499,12 @@ class ClipboardHistorySidebarProvider {
                         &nbsp;export Zip <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="exportZip-stats">${exportZipStats}</span>
                     </div>
                 </div>
-                <div class="cmd-btn" data-cmd="qqq.allSettings">
-                    <div class="text-content"><span class="spacer-50"></span> <span class="icon-all-settings"></span> <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="allSettings-stats">${allSettingsStats}</span>
+                <div class="cmd-btn" data-cmd="qqq.allSettings" id="settingsCard">
+                    <div class="btn-group aq-btn-group" id="aqBtnGroup" style="display:none;">
+                        <button class="action-mini-btn aq-btn" id="btnAqUpload" title="Upload to Cloud"><span class="icon-aq-upload"></span></button>
+                        <button class="action-mini-btn aq-btn" id="btnAqDownload" title="Download from Cloud"><span class="icon-aq-download"></span></button>
+                    </div>
+                    <div class="text-content"><span id="aq-phone" class="aq-phone" style="display:none;"></span> <span class="icon-all-settings"></span> <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="allSettings-stats">${allSettingsStats}</span>
                     </div>
                 </div>
             </div>
@@ -2528,6 +2587,11 @@ class ClipboardHistorySidebarProvider {
                 // ★ NEW: dropdown elements
                 videoHistoryDropdown: document.getElementById('videoHistoryDropdown'),
                 searchHistoryDropdown: document.getElementById('searchHistoryDropdown'),
+                // ★ NEW: A/Q cloud sync buttons
+                aqBtnGroup: document.getElementById('aqBtnGroup'),
+                btnAqUpload: document.getElementById('btnAqUpload'),
+                btnAqDownload: document.getElementById('btnAqDownload'),
+                aqPhone: document.getElementById('aq-phone'),
             };
 
             var selectedId = '';
@@ -2803,7 +2867,7 @@ class ClipboardHistorySidebarProvider {
             var gearLongPressTriggered = false;
             document.addEventListener('mousedown', function(e) {
                 var cmdBtn = e.target.closest('.cmd-btn');
-                if (cmdBtn && cmdBtn.dataset.cmd === 'qqq.allSettings') {
+                if (cmdBtn && cmdBtn.dataset.cmd === 'qqq.allSettings' && !e.target.closest('.aq-btn')) {
                     gearLongPressTriggered = false;
                     gearLongPressTimer = setTimeout(function() {
                         gearLongPressTriggered = true;
@@ -2904,6 +2968,48 @@ class ClipboardHistorySidebarProvider {
             el.btnCycleCleanFreak.onclick = function(e) { e.stopPropagation(); post('cycleCleanFreakMode', {}); };
             // Request initial cleanFreakMode
             post('getCleanFreakMode', {});
+
+            // ★ A/Q cloud sync buttons: SVG icons (arrow into cloud / arrow out of cloud)
+            var aqUploadSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" width="14" height="14"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" fill="currentColor" opacity=".85"/><path d="M12 18V9M8 12l4-4 4 4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            var aqDownloadSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" width="14" height="14"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" fill="currentColor" opacity=".85"/><path d="M12 9v9M8 15l4 4 4-4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            if (el.btnAqUpload) el.btnAqUpload.querySelector('.icon-aq-upload').innerHTML = aqUploadSvg;
+            if (el.btnAqDownload) el.btnAqDownload.querySelector('.icon-aq-download').innerHTML = aqDownloadSvg;
+
+            // ★ A/Q button click handlers
+            if (el.btnAqUpload) el.btnAqUpload.onclick = function(e) { e.stopPropagation(); post('aqUpload', {}); };
+            if (el.btnAqDownload) el.btnAqDownload.onclick = function(e) { e.stopPropagation(); post('aqDownload', {}); };
+
+            // ★ A/Q visibility state management
+            function updateAqState(state) {
+                if (!el.aqBtnGroup) return;
+                var settingsCard = document.getElementById('settingsCard');
+                if (state.visible) {
+                    el.aqBtnGroup.style.display = 'flex';
+                    if (el.aqPhone && state.phoneTail) {
+                        el.aqPhone.textContent = state.phoneTail;
+                        el.aqPhone.style.display = 'inline';
+                    }
+                } else {
+                    el.aqBtnGroup.style.display = 'none';
+                    if (el.aqPhone) el.aqPhone.style.display = 'none';
+                }
+                // Gold state when token verified (A/Q buttons + phone + gear icon)
+                var btns = el.aqBtnGroup.querySelectorAll('.aq-btn');
+                for (var i = 0; i < btns.length; i++) {
+                    if (state.gold) btns[i].classList.add('aq-gold');
+                    else btns[i].classList.remove('aq-gold');
+                }
+                if (el.aqPhone) {
+                    if (state.gold) el.aqPhone.classList.add('aq-gold');
+                    else el.aqPhone.classList.remove('aq-gold');
+                }
+                if (settingsCard) {
+                    if (state.gold && state.visible) settingsCard.classList.add('aq-gold-gear');
+                    else settingsCard.classList.remove('aq-gold-gear');
+                }
+            }
+            // Request initial AQ state
+            post('getAqState', {});
 
             // ★ Single source of truth: embedded from global.js
             var isValidUrl = ${this._global.isValidUrl.toString()};
@@ -3034,6 +3140,12 @@ class ClipboardHistorySidebarProvider {
                 // ★ Handle cleanFreakMode update
                 if (m.command === 'cleanFreakMode') {
                     updateCleanFreakIcon(m.mode);
+                    return;
+                }
+
+                // ★ Handle A/Q cloud sync button state
+                if (m.command === 'updateAqState') {
+                    updateAqState(m);
                     return;
                 }
 

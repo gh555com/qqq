@@ -861,6 +861,26 @@
         "notFound": "Konto nicht gefunden oder nicht aktiviert",
         "rateLimit": "Zu viele Anfragen, bitte später versuchen",
         "syncFailed": "Konfigurationssynchronisierung fehlgeschlagen",
-        "networkError": "Netzwerkfehler, bitte Verbindung prüfen"
+        "networkError": "Netzwerkfehler, bitte Verbindung prüfen",
+        "uploadConfirmTitle": "Daten in die Cloud hochladen",
+        "uploadConfirmMsg": "Ich bestätige:\n1. Ich bin ein lizenzierter Benutzer\n2. Meine Zwischenablage und Dateieinstellungen enthalten keine persönlichen sensiblen Daten (Passwörter usw.) oder illegale Inhalte",
+        "uploadConfirmBtn": "Bestätigen und hochladen",
+        "uploadCancel": "Abbrechen",
+        "uploading": "Daten werden in die Cloud hochgeladen...",
+        "uploadSuccess": "In die Cloud hochgeladen ({0})",
+        "uploadFailed": "Hochladen fehlgeschlagen: {0}",
+        "pullConfirmTitle": "Daten aus der Cloud wiederherstellen",
+        "pullConfirmMsg": "Dies überschreibt Ihre lokalen Roaming-Einstellungen und den Zwischenablage-Verlauf. Fortfahren?",
+        "pullConfirmBtn": "Wiederherstellung bestätigen",
+        "pulling": "Daten aus der Cloud abrufen...",
+        "pullSuccess": "Aus der Cloud wiederhergestellt ({0})",
+        "pullFailed": "Wiederherstellung fehlgeschlagen: {0}",
+        "pullNoData": "Keine Daten in der Cloud",
+        "errQuotaExceeded": "Daten überschreiten das Kontingentlimit",
+        "authWaiting": "Warte auf Browser-Anmeldung...",
+        "authSuccess": "Anmeldung erfolgreich",
+        "authTimeout": "Anmeldung abgelaufen, bitte erneut versuchen",
+        "authNoBrowser": "Browser kann nicht geöffnet werden. Bitte stellen Sie sicher, dass ein Browser installiert ist.",
+        "authExpired": "Sitzung abgelaufen, bitte erneut anmelden"
     }
 }

@@ -861,6 +861,26 @@
         "notFound": "アカウントが見つからないか有効化されていません",
         "rateLimit": "リクエストが多すぎます。後でお試しください",
         "syncFailed": "設定の同期に失敗しました",
-        "networkError": "ネットワークエラー。接続を確認してください"
+        "networkError": "ネットワークエラー。接続を確認してください",
+        "uploadConfirmTitle": "データをクラウドにアップロード",
+        "uploadConfirmMsg": "確認します：\n1. 正規ユーザーであること\n2. クリップボードやファイル履歴に個人情報（パスワード等）や違法なコンテンツが含まれていないこと",
+        "uploadConfirmBtn": "確認してアップロード",
+        "uploadCancel": "キャンセル",
+        "uploading": "データをクラウドにアップロード中...",
+        "uploadSuccess": "クラウドにアップロードしました ({0})",
+        "uploadFailed": "アップロード失敗：{0}",
+        "pullConfirmTitle": "クラウドからデータを復元",
+        "pullConfirmMsg": "ローカルのローミング設定とクリップボード履歴が上書きされます。続行しますか？",
+        "pullConfirmBtn": "復元を確認",
+        "pulling": "クラウドからデータを取得中...",
+        "pullSuccess": "クラウドから復元しました ({0})",
+        "pullFailed": "復元失敗：{0}",
+        "pullNoData": "クラウドにデータがありません",
+        "errQuotaExceeded": "データが容量制限を超えています",
+        "authWaiting": "ブラウザでのログインを待機中...",
+        "authSuccess": "ログイン成功",
+        "authTimeout": "ログインがタイムアウトしました。もう一度お試しください",
+        "authNoBrowser": "ブラウザを開けません。ブラウザがインストールされていることを確認してください",
+        "authExpired": "ログインが期限切れです。再度ログインしてください"
     }
 }

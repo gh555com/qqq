@@ -82,5 +82,7 @@
     "cmd.exportZip": "qqq: 匯出 zip",
     "cmd.downloadVideosFromUrl": "qqq: 在目前游標位置插入網路影片",
     "cmd.savorMoments": "qqq: 償還給自己",
-    "cmd.clearCache": "qqq: 清除快取"
+    "cmd.clearCache": "qqq: 清除快取",
+    "cmd.uploadUserData": "qqq: 上傳資料到雲端",
+    "cmd.pullUserData": "qqq: 從雲端恢復資料"
 }
