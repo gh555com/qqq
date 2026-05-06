@@ -36,6 +36,7 @@ desktop.ini
 *.temp
 *.bak
 *~
+vsce_output.txt
 
 # 测试文件
 test-config-fix.js
