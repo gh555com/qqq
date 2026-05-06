@@ -8,6 +8,7 @@
 .qoder/**
 .git/**
 .trae/**
+identities/**
 
 # ★ 隐藏的 nls 文件（不应该存在）
 .package.nls.*.json
@@ -48,13 +49,11 @@ node_modules/**
 esbuild.config.js
 
 # ★ dist 构建产物/缓存/冗余文件
-dist/metafile.json
-dist/__pycache__/**
-dist/brokerBridge.js
-dist/miniaudio_nonblocking_v15.py
-# ★ 运行时下载的大文件（用户安装后自动下载）
-dist/yt-dlp*
-dist/python_engine*
+dist/*
+dist/**/*
+!dist/qqq.js
+!dist/kp.py
+!dist/miniaudio_v16.py
 
 # 平台二进制处理
 # 1. 排除 assets 根目录下的重复 DLL (运行时由 runtimes/x64 提供)
