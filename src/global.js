@@ -3956,8 +3956,8 @@ async function _httpsPost(urlPath, body, timeoutMs = 30000) {
 // ============================================================================
 
 const AUTH_FILE = 'auth.json';
-const AUTH_POLL_INTERVAL_MS = 2000;
-const AUTH_POLL_TIMEOUT_MS = 180000; // 3 minutes
+const AUTH_POLL_INTERVAL_MS = 3000;
+const AUTH_POLL_TIMEOUT_MS = 300000; // 5 minutes (aligned with Redis TTL)
 
 /** Read stored auth token from ~/.qqq/auth.json */
 function _getAuthToken() {
@@ -4022,13 +4022,40 @@ async function _httpsGet(urlPath, timeoutMs = 10000) {
 			timeout: timeoutMs,
 		};
 		const req = require('https').request(options, (res) => {
+			// ★ Follow 301/302 redirects (one level)
+			if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
+				const redirectUrl = new URL(res.headers.location);
+				const req2 = require('https').request({
+					hostname: redirectUrl.hostname,
+					port: 443,
+					path: redirectUrl.pathname + redirectUrl.search,
+					method: 'GET',
+					timeout: timeoutMs,
+				}, (res2) => {
+					let chunks2 = [];
+					res2.on('data', c => chunks2.push(c));
+					res2.on('end', () => {
+						try { resolve(JSON.parse(Buffer.concat(chunks2).toString())); }
+						catch { reject(new Error(`Invalid JSON after redirect (${res.statusCode} → ${res2.statusCode})`)); }
+					});
+				});
+				req2.on('error', reject);
+				req2.on('timeout', () => { req2.destroy(); reject(new Error('Redirect request timeout')); });
+				req2.end();
+				return;
+			}
 			let chunks = [];
 			res.on('data', chunk => chunks.push(chunk));
 			res.on('end', () => {
+				const body = Buffer.concat(chunks).toString();
+				if (res.statusCode >= 400) {
+					reject(new Error(`HTTP ${res.statusCode}: ${body.slice(0, 200)}`));
+					return;
+				}
 				try {
-					resolve(JSON.parse(Buffer.concat(chunks).toString()));
+					resolve(JSON.parse(body));
 				} catch (e) {
-					reject(new Error('Invalid JSON response'));
+					reject(new Error(`Invalid JSON (HTTP ${res.statusCode}): ${body.slice(0, 100)}`));
 				}
 			});
 		});
@@ -4116,23 +4143,33 @@ async function _doAuthFlow() {
 	}
 
 	// Poll for token with progress indicator (user just waits, no action needed)
+	logMessage(`[wq-auth] Poll started, session=${sessionId}, device=${deviceName}`, 'INFO');
+	let pollCount = 0;
 	const result = await vscode.window.withProgress(
 		{ location: vscode.ProgressLocation.Notification, title: q('wq.authWaiting'), cancellable: true },
 		async (progress, cancelToken) => {
 			const startTime = Date.now();
 			while (Date.now() - startTime < AUTH_POLL_TIMEOUT_MS) {
-				if (cancelToken.isCancellationRequested) return null;
+				if (cancelToken.isCancellationRequested) { logMessage(`[wq-auth] User cancelled after ${pollCount} polls`, 'INFO'); return null; }
 				await new Promise(r => setTimeout(r, AUTH_POLL_INTERVAL_MS));
-				if (cancelToken.isCancellationRequested) return null;
+				if (cancelToken.isCancellationRequested) { logMessage(`[wq-auth] User cancelled after ${pollCount} polls`, 'INFO'); return null; }
+				pollCount++;
 				try {
 					const resp = await _httpsGet(`/gaea/qqq/auth/poll?session=${sessionId}&device_name=${encodeURIComponent(deviceName)}`);
+					if (pollCount <= 3 || (pollCount % 10 === 0)) {
+						logMessage(`[wq-auth] Poll #${pollCount} resp: ${JSON.stringify(resp)}`, 'INFO');
+					}
 					if (resp.ok && resp.token) {
+						logMessage(`[wq-auth] Token received after ${pollCount} polls`, 'INFO');
 						return { token: resp.token, phone: resp.phone || '' };
 					}
-				} catch {
-					// Network blip — keep trying
+				} catch (e) {
+					if (pollCount <= 3) {
+						logMessage(`[wq-auth] Poll #${pollCount} error: ${e.message}`, 'WARN');
+					}
 				}
 			}
+			logMessage(`[wq-auth] Poll timeout after ${pollCount} attempts`, 'WARN');
 			return null; // timeout
 		}
 	);

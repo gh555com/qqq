@@ -2164,10 +2164,12 @@ class ClipboardHistorySidebarProvider {
 
         /* ★ A/Q cloud sync buttons */
         #settingsCard:hover { transform: none; }
-        .aq-btn-wrap { display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle; pointer-events: auto; }
+        #settingsCard .text-content { position: relative; display: flex; align-items: center; }
+        #settingsCard .icon-all-settings { position: absolute; left: 50%; transform: translateX(-50%); }
+        .aq-phone { font-size: 13px; color: #545454; font-family: Verdana, sans-serif; font-weight: bold; position: absolute; left: calc(50% - 30px); transform: translateX(-100%); visibility: hidden; }
+        .aq-btn-wrap { display: none; position: absolute; left: calc(50% + 16px); gap: 4px; align-items: center; pointer-events: auto; }
         .aq-btn { pointer-events: auto; }
         .icon-aq-upload, .icon-aq-download { width: 16px; height: 16px; display: inline-block; vertical-align: middle; }
-        .aq-phone { font-size: 13px; color: #545454; font-family: Verdana, sans-serif; vertical-align: middle; }
         [data-theme="dark"] .aq-phone { color: #999; }
         /* ★ Gold state: token verified */
         .aq-btn.aq-gold { color: #8b6914; }
@@ -2500,7 +2502,7 @@ class ClipboardHistorySidebarProvider {
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.allSettings" id="settingsCard">
-                    <div class="text-content"><span id="aq-phone" class="aq-phone" style="display:none;"></span><span class="spacer-25"></span><span class="icon-all-settings"></span><span class="aq-btn-wrap" id="aqBtnGroup" style="display:none;"><button class="action-mini-btn aq-btn" id="btnAqUpload" title="Upload to Cloud"><span class="icon-aq-upload"></span></button><button class="action-mini-btn aq-btn" id="btnAqDownload" title="Download from Cloud"><span class="icon-aq-download"></span></button></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="allSettings-stats">${allSettingsStats}</span>
+                    <div class="text-content"><span id="aq-phone" class="aq-phone"></span><span class="icon-all-settings"></span><span class="aq-btn-wrap" id="aqBtnGroup"><button class="action-mini-btn aq-btn" id="btnAqUpload" title="Upload to Cloud"><span class="icon-aq-upload"></span></button><button class="action-mini-btn aq-btn" id="btnAqDownload" title="Download from Cloud"><span class="icon-aq-download"></span></button></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="allSettings-stats">${allSettingsStats}</span>
                     </div>
                 </div>
             </div>
@@ -2980,14 +2982,14 @@ class ClipboardHistorySidebarProvider {
                 if (!el.aqBtnGroup) return;
                 var settingsCard = document.getElementById('settingsCard');
                 if (state.visible) {
-                    el.aqBtnGroup.style.display = 'inline-flex';
+                    el.aqBtnGroup.style.display = 'flex';
                     if (el.aqPhone && state.phoneTail) {
                         el.aqPhone.textContent = state.phoneTail;
-                        el.aqPhone.style.display = 'inline';
+                        el.aqPhone.style.visibility = 'visible';
                     }
                 } else {
                     el.aqBtnGroup.style.display = 'none';
-                    if (el.aqPhone) el.aqPhone.style.display = 'none';
+                    if (el.aqPhone) { el.aqPhone.style.visibility = 'hidden'; el.aqPhone.textContent = ''; }
                 }
                 // Gold state when token verified (A/Q buttons + phone + gear icon)
                 var btns = el.aqBtnGroup.querySelectorAll('.aq-btn');
