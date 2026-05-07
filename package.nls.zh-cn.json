@@ -1,6 +1,5 @@
 {
     "config.title.core": "☀️ 核心",
-    "config.phone.desc": "☀️ 您滴账号（带国家码滴手机号码，不用带加号）[获取账号](command:qqq.openLogin)　[购买正版](command:qqq.openBuy)　[▶保存偏好](command:qqq.openProfile) \n \n  拉取云端配置滴方式（时机）：1、在此处修改完账号会自动拉取一次。2、长按齿轮按钮。3、窗口重启时。  ",
     "config.title.rover": "🛸 漫游器",
     "config.title.observe": "👁️ 观察",
     "config.title.html": "🍌 html与富文本",
@@ -84,5 +83,6 @@
     "cmd.savorMoments": "qqq: 偿还给自己",
     "cmd.clearCache": "qqq: 清除缓存",
     "cmd.uploadUserData": "qqq: 上传数据到云端",
-    "cmd.pullUserData": "qqq: 从云端恢复数据"
+    "cmd.pullUserData": "qqq: 从云端恢复数据",
+    "cmd.logout": "qqq: 退出登录"
 }

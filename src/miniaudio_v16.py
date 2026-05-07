@@ -1773,6 +1773,7 @@ class NonBlockingAudioEngine:
         device = None
         device_dead = False
         reconnect_delay = 3.0
+        _consecutive_device_failures = 0  # ★ Track consecutive device-dead reconnects
 
         try:
             while not token.stopped:
@@ -1793,7 +1794,9 @@ class NonBlockingAudioEngine:
                     gen = self._radio_stream_gen(source_stream, token, detach=gen_detach)
                     next(gen)  # prime
 
-                    reconnect_delay = 3.0
+                    # ★ Only reset reconnect_delay if last failure was NOT device-dead
+                    if _consecutive_device_failures == 0:
+                        reconnect_delay = 3.0
 
                     if device and device_dead:
                         self._kill_device_async(device)
@@ -1810,6 +1813,9 @@ class NonBlockingAudioEngine:
                     # 监控循环：检测设备静音/断流
                     while not token.stopped:
                         time.sleep(0.5)
+                        # ★ Device actively pulling data → it's healthy, reset failure counter
+                        if _consecutive_device_failures > 0 and token.device_silent_seconds() < 1.0:
+                            _consecutive_device_failures = 0
                         if device and token.device_silent_seconds() > 5.0:
                             if self._on_device_lost:
                                 try: self._on_device_lost()
@@ -1864,9 +1870,14 @@ class NonBlockingAudioEngine:
                                 backoff = min(backoff * 2, 30.0)
 
                             if recovered:
+                                _consecutive_device_failures = 0  # ★ Device works! Reset failure counter
                                 continue  # ★ 回到监控循环，继续播放
                             else:
-                                self._log_critical("【!!】 Radio: in-place recovery failed → full-reconnect")
+                                _consecutive_device_failures += 1
+                                if _consecutive_device_failures >= 3:
+                                    self._log_critical(f"【!!】 Radio: in-place recovery failed (×{_consecutive_device_failures}), device unavailable — waiting 30s")
+                                else:
+                                    self._log_critical("【!!】 Radio: in-place recovery failed → full-reconnect")
                                 device_dead = True
                                 break
 
@@ -1878,7 +1889,9 @@ class NonBlockingAudioEngine:
                         except Exception: pass
 
                 if not token.stopped:
-                    time.sleep(reconnect_delay)
+                    # ★ If device keeps failing, use longer delay (device not ready yet)
+                    actual_delay = max(reconnect_delay, min(_consecutive_device_failures * 10, 60.0)) if device_dead else reconnect_delay
+                    time.sleep(actual_delay)
                     reconnect_delay = min(reconnect_delay * 1.5, 30.0)
 
         finally:

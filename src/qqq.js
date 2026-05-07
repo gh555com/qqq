@@ -25,7 +25,6 @@ const {
 	metaSaveQueue,
 	// ★ WqReporter 统计上报
 	startWqReporter,
-	onPhoneConfigChanged,
 	syncCloudConfig,
 } = global;
 
@@ -1637,11 +1636,8 @@ async function _delayedActivate(context) {
 	// ★ 窗口重启时静默同步云端配置（延迟 3 秒，成功不弹窗，失败才弹窗）
 	setTimeout(async () => {
 		try {
-			const phone = vscode.workspace.getConfiguration(global.cfgNs()).get('phone');
-			if (phone && phone.trim()) {
-				// silent=true: 成功不弹窗，失败才弹窗
-				await syncCloudConfig(phone.trim(), { silent: true });
-			}
+			// ★ Phone from auth.json (single source of truth), silent=true skips login if not authed
+			await syncCloudConfig('', { silent: true });
 		} catch (e) {
 			global.logMessage(`[wq] Startup sync error: ${e.message}`, 'WARN');
 		}
@@ -1665,8 +1661,8 @@ function _registerCommands(context) {
 
 	context.subscriptions.push(
 		safeRegisterCommand("qqq.showStatusPanel", global.withReady(() => {
-			// Open status bar link: prefer server-provided url_z, fallback to default
-			vscode.env.openExternal(vscode.Uri.parse(global.buildDynamicGh555Url('z')));
+			// 状态栏点击 → 打开扩展设置界面（等同于 q4 齿轮按钮短按）
+			vscode.commands.executeCommand("workbench.action.openSettings", `@ext:${extensionContext.extension.id}`);
 		})),
 		safeRegisterCommand("qqq.pure", global.withReady(q3.pureCommand)),
 		safeRegisterCommand("qqq.allSettings", global.withReady(() => {
@@ -1819,6 +1815,7 @@ function _registerCommands(context) {
 		safeRegisterCommand('qqq.openProfile', () => {
 			vscode.env.openExternal(vscode.Uri.parse(global.buildGh555Url('/gaea/d/qqq', 'profile')));
 		}),
+		safeRegisterCommand('qqq.logout', () => global.logoutAuth()),
 
 		// ★ Cloud user data sync commands (upload/pull roam config + clipboard history)
 		safeRegisterCommand('qqq.uploadUserData', global.withReady(() => global.uploadUserData())),
@@ -1831,11 +1828,8 @@ function _registerCommands(context) {
 			// ★ Only handle qqq. configuration changes
 			if (!event.affectsConfiguration(global.cfgNs())) return;
 
-			// ★ 手机号变化时静默验证并拉取配置
-			if (event.affectsConfiguration(`${global.cfgNs()}.phone`)) {
-				const phone = vscode.workspace.getConfiguration(global.cfgNs()).get('phone');
-				onPhoneConfigChanged(phone);
-			}
+			// ★ 手机号配置已废弃，身份统一由 auth.json 管理
+			// (phone config listener removed — auth.json file watcher handles cross-window sync)
 
 			global.ConfigManager.handleVscodeConfigChanged(event).then((changedKeys) => {
 				// ★ Sound: only play in focused window to avoid multi-window spam

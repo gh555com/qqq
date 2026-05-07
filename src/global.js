@@ -2698,7 +2698,7 @@ let _suppressConfigEcho = 0; // Prevent "we echo settings back" from causing inf
 let _trialHintShown = false;
 let _configChangeCallback = null;
 let _configUpdateCallbacks = []; // ★ List of callbacks after config update completes (fix race conditions)
-let _aqStateCallback = null; // ★ Callback for A/Q button visibility changes
+let _aqStateCallback = null; // ★ Callback for gold state changes (true=Pro, false=non-Pro/logged-out)
 // ★ Bootstrap reset completion flag (non-Pro only)
 // Purpose: Prevent race condition where q2 opens before settings.json is cleared
 // - false: non-Pro get() returns DEFAULT_CONFIG directly (safe startup)
@@ -3063,6 +3063,7 @@ function finishUserTracking() {
 		_wqReporter.stop();
 		_wqReporter = null;
 	}
+	_stopAuthWatcher(); // ★ Stop watching auth.json
 }
 
 // ============================================================================
@@ -3095,12 +3096,12 @@ function getDeviceId() {
  * 获取 doer_id：从设置中读取手机号
  */
 function getUserPhone() {
+	// ★ Single source: read phone from auth.json (not settings)
 	try {
-		const phone = vscode.workspace.getConfiguration(cfgNs()).get('phone');
-		if (phone && typeof phone === 'string') {
-			const trimmed = phone.trim();
+		const authData = _getAuthToken();
+		if (authData && authData.phone) {
+			const trimmed = authData.phone.trim();
 			if (/^[+\d]{3,20}$/.test(trimmed)) return trimmed;
-			if (trimmed) logMessage(`[wq] Invalid phone format, skipping doer_id`, 'WARN');
 		}
 	} catch { }
 	return undefined;
@@ -3545,6 +3546,10 @@ class WqReporter {
 					// 服务端未返回调度时间，兜底 12 小时
 					this._scheduleNextPing(43200);
 				}
+				// ★ ping 响应中的精准定向弹窗（服务端根据 device_id/doer_id 下发）
+				if (data.popup && typeof data.popup === 'object' && data.popup.id) {
+					getPopupManager().evaluate(data.popup);
+				}
 				// ★ 触发 ping 成功回调（电台嘗探等）
 				_firePingSuccess();
 			} else {
@@ -3568,6 +3573,7 @@ function startWqReporter() {
 	if (_wqReporter) return;
 	_wqReporter = new WqReporter();
 	_wqReporter.start();
+	_startAuthWatcher(); // ★ Watch auth.json for cross-window/cross-IDE changes
 }
 
 /**
@@ -3614,9 +3620,309 @@ function safeParseJson(text, tag = 'api') {
 }
 
 // ============================================================================
-// ★ Phone 配置变化监听：失焦时静默验证并拉取配置
+// ★ PopupManager：服务端驱动的强制弹窗系统
+// 投放通道：/goods/qqq/stats（广播）+ /wq/ping 响应（精准定向）
+// 客户端负责：条件过滤 + 多窗口去重 + 启动冷静期 + 防骚扰 + 展示
+// 协议版本：v=1，未来不兼容升级时通过 v 字段判断
 // ============================================================================
-let _phoneVerifyDebounce = null;
+
+// ★ 弹窗协议当前版本
+const POPUP_PROTOCOL_VERSION = 1;
+
+// ★ 启动冷静期（毫秒）：启动后 60s 内不弹窗，让用户先进入工作状态
+const POPUP_STARTUP_GRACE_MS = 60000;
+
+// ★ 多窗口去重间隔（毫秒）：同一 popup id 在所有窗口中 30s 内只弹一次
+const POPUP_MULTI_WINDOW_DEDUP_MS = 30000;
+
+/**
+ * 比较两个语义化版本号
+ * @returns {number} -1 if a < b, 0 if a == b, 1 if a > b
+ */
+function _compareVersions(a, b) {
+	const pa = (a || '0.0.0').split('.').map(Number);
+	const pb = (b || '0.0.0').split('.').map(Number);
+	for (let i = 0; i < 3; i++) {
+		const na = pa[i] || 0, nb = pb[i] || 0;
+		if (na < nb) return -1;
+		if (na > nb) return 1;
+	}
+	return 0;
+}
+
+class PopupManager {
+	constructor() {
+		this._showing = false; // 防止并发弹窗
+		this._startupTime = Date.now(); // 记录启动时间，用于冷静期
+	}
+
+	/**
+	 * 评估并展示服务端下发的弹窗
+	 * 双通道入口：stats 轮询 + ping 响应均调用此方法
+	 * @param {object|null} popupData - 服务端下发的 popup 对象
+	 */
+	evaluate(popupData) {
+		if (!popupData || !popupData.id) return;
+		if (this._showing) return;
+
+		// ★ 协议版本检查：忽略未来不兼容的弹窗
+		if (popupData.v && popupData.v > POPUP_PROTOCOL_VERSION) {
+			logMessage(`[popup] Skipped: protocol v${popupData.v} > supported v${POPUP_PROTOCOL_VERSION}`, 'INFO');
+			return;
+		}
+
+		// ★ 启动冷静期：启动后 60s 内不弹窗
+		if (Date.now() - this._startupTime < POPUP_STARTUP_GRACE_MS) {
+			logMessage(`[popup] Skipped "${popupData.id}": within startup grace period`, 'INFO');
+			return;
+		}
+
+		// ★ 多窗口去重：通过 globalState 共享时间戳，30s 内只让一个窗口弹
+		if (this._isDeduplicated(popupData.id)) return;
+
+		if (this._isExpired(popupData)) return;
+		if (!this._matchConditions(popupData.conditions)) return;
+		if (this._isInCooldown(popupData)) return;
+		if (this._exceedsMaxShow(popupData)) return;
+
+		// ★ 抢占多窗口锁
+		this._claimDedup(popupData.id);
+		this._show(popupData);
+	}
+
+	/**
+	 * 多窗口去重检查（复用 ping 的 globalState 共享模式）
+	 */
+	_isDeduplicated(popupId) {
+		if (!extensionContext) return false;
+		const key = `qqq_popup_dedup_${popupId}`;
+		const lastShownTs = extensionContext.globalState.get(key, 0) || 0;
+		return (Date.now() - lastShownTs) < POPUP_MULTI_WINDOW_DEDUP_MS;
+	}
+
+	/**
+	 * 抢占多窗口去重锁
+	 */
+	_claimDedup(popupId) {
+		if (!extensionContext) return;
+		const key = `qqq_popup_dedup_${popupId}`;
+		extensionContext.globalState.update(key, Date.now());
+	}
+
+	/**
+	 * 检查弹窗是否已过期
+	 */
+	_isExpired(popup) {
+		if (!popup.expires_at) return false;
+		return Math.floor(Date.now() / 1000) > popup.expires_at;
+	}
+
+	/**
+	 * 检查客户端是否满足展示条件
+	 */
+	_matchConditions(conditions) {
+		if (!conditions) return true;
+
+		// 平台过滤
+		if (conditions.platforms && Array.isArray(conditions.platforms)) {
+			if (!conditions.platforms.includes(process.platform)) return false;
+		}
+
+		// 版本范围过滤
+		const clientVer = getClientVersion();
+		if (clientVer !== 'unknown') {
+			if (conditions.min_ver && _compareVersions(clientVer, conditions.min_ver) < 0) return false;
+			if (conditions.max_ver && _compareVersions(clientVer, conditions.max_ver) > 0) return false;
+		}
+
+		// 最少陪伴小时数
+		if (conditions.min_hours && conditions.min_hours > 0) {
+			const totalSec = extensionContext ? (extensionContext.globalState.get(KEY_TOTAL_SECONDS, 0) || 0) : 0;
+			const totalHours = totalSec / 3600;
+			if (totalHours < conditions.min_hours) return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * 检查是否在冷却期内
+	 */
+	_isInCooldown(popup) {
+		if (!extensionContext) return true;
+		const dismissed = extensionContext.globalState.get(`qqq_popup_dismissed_${popup.id}`);
+		if (!dismissed) return false;
+
+		const cooldownH = popup.dismiss_action?.cooldown_h || 72;
+		const cooldownMs = cooldownH * 3600 * 1000;
+		const elapsed = Date.now() - (dismissed.ts || 0);
+		return elapsed < cooldownMs;
+	}
+
+	/**
+	 * 检查是否超出最大展示次数
+	 */
+	_exceedsMaxShow(popup) {
+		if (!extensionContext) return true;
+		const maxCount = popup.conditions?.max_show_count;
+		if (!maxCount || maxCount <= 0) return false;
+
+		const shown = extensionContext.globalState.get(`qqq_popup_shown_${popup.id}`);
+		return shown && shown.count >= maxCount;
+	}
+
+	/**
+	 * 展示弹窗
+	 */
+	async _show(popup) {
+		this._showing = true;
+		try {
+			// 记录展示次数
+			this._recordShown(popup.id);
+			logMessage(`[popup] Showing "${popup.id}" (priority=${popup.priority || 'normal'}, type=${popup.type || 'notice'})`, 'INFO');
+
+			const priority = popup.priority || 'normal';
+
+			if (priority === 'force') {
+				await this._showModal(popup);
+			} else if (priority === 'low') {
+				this._showLow(popup);
+			} else {
+				await this._showNormal(popup);
+			}
+		} catch (e) {
+			logMessage(`[popup] Show error: ${e.message}`, 'WARN');
+		} finally {
+			this._showing = false;
+		}
+	}
+
+	/**
+	 * force 级别：模态阻断弹窗
+	 */
+	async _showModal(popup) {
+		const buttons = (popup.buttons || []).slice(0, 3);
+		const labels = buttons.map(b => b.label);
+
+		const message = popup.body
+			? `${popup.title || 'qqq'}\n\n${popup.body}`
+			: (popup.title || 'qqq');
+
+		const choice = await vscode.window.showWarningMessage(
+			message,
+			{ modal: true },
+			...labels
+		);
+
+		if (choice) {
+			const btn = buttons.find(b => b.label === choice);
+			if (btn) this._executeAction(btn, popup);
+		} else {
+			// 用户关闭模态 → 记录 dismiss
+			this._recordDismissed(popup.id);
+		}
+	}
+
+	/**
+	 * normal 级别：VS Code 通知（带按钮）
+	 */
+	async _showNormal(popup) {
+		const buttons = (popup.buttons || []).slice(0, 3);
+		const labels = buttons.map(b => b.label);
+
+		const message = `qqq: ${popup.title || ''}`;
+
+		const choice = await vscode.window.showInformationMessage(
+			message,
+			...labels
+		);
+
+		if (choice) {
+			const btn = buttons.find(b => b.label === choice);
+			if (btn) this._executeAction(btn, popup);
+		} else {
+			this._recordDismissed(popup.id);
+		}
+	}
+
+	/**
+	 * low 级别：静默通知（auto-close）
+	 */
+	_showLow(popup) {
+		showAutoCloseNotification('info', popup.title || 'qqq');
+		// low 级别不记录 dismiss（用户无法主动关闭它）
+	}
+
+	/**
+	 * 执行按钮动作
+	 */
+	_executeAction(btn, popup) {
+		const action = btn.action || 'dismiss';
+
+		switch (action) {
+			case 'open_url':
+				if (btn.url) {
+					vscode.env.openExternal(vscode.Uri.parse(btn.url));
+				}
+				break;
+			case 'open_settings':
+				if (extensionContext) {
+					vscode.commands.executeCommand('workbench.action.openSettings', `@ext:${extensionContext.extension.id}`);
+				}
+				break;
+			case 'command':
+				if (btn.cmd) {
+					vscode.commands.executeCommand(btn.cmd);
+				}
+				break;
+			case 'update':
+				vscode.commands.executeCommand('workbench.extensions.action.checkForUpdates');
+				break;
+			case 'dismiss':
+				// 仅关闭
+				break;
+		}
+
+		// 按钮级别 cooldown 覆盖默认
+		if (btn.cooldown_h && btn.cooldown_h > 0) {
+			this._recordDismissed(popup.id);
+		} else if (action === 'dismiss') {
+			this._recordDismissed(popup.id);
+		}
+	}
+
+	/**
+	 * 记录展示
+	 */
+	_recordShown(id) {
+		if (!extensionContext) return;
+		const key = `qqq_popup_shown_${id}`;
+		const prev = extensionContext.globalState.get(key) || { ts: 0, count: 0 };
+		extensionContext.globalState.update(key, { ts: Date.now(), count: prev.count + 1 });
+	}
+
+	/**
+	 * 记录关闭
+	 */
+	_recordDismissed(id) {
+		if (!extensionContext) return;
+		const key = `qqq_popup_dismissed_${id}`;
+		const prev = extensionContext.globalState.get(key) || { ts: 0, count: 0 };
+		extensionContext.globalState.update(key, { ts: Date.now(), count: prev.count + 1 });
+	}
+}
+
+let _popupManager = null;
+
+function getPopupManager() {
+	if (!_popupManager) _popupManager = new PopupManager();
+	return _popupManager;
+}
+
+// ============================================================================
+// ★ Cloud Config Sync: 拉取云端配置（Pro 模式、水印、配置项）
+// Phone from auth.json (single source of truth)
+// ============================================================================
 
 /**
  * 拉取云端配置并应用到本地
@@ -3629,11 +3935,21 @@ let _phoneVerifyDebounce = null;
 async function syncCloudConfig(phone, options = {}) {
 	const { silent = false, showFetching = false } = options;
 
-	// 未填写账号 - 立即返回，只弹一号弹窗
+	// ★ Phone comes from auth.json (single source of truth)
+	// If caller passes phone, use it; otherwise read from auth token
 	if (!phone || !phone.trim()) {
-		const msg = q('wq.noPhone');
-		if (!silent || showFetching) showAutoCloseNotification('warning', msg);
-		return { success: false, message: msg };
+		const authData = _getAuthToken();
+		if (authData && authData.phone) {
+			phone = authData.phone;
+		} else {
+			// No auth token — trigger browser login automatically
+			if (silent) return { success: false, message: 'no_auth' };
+			const authResult = await _ensureAuth();
+			if (!authResult || !authResult.phone) {
+				return { success: false, message: 'auth_cancelled' };
+			}
+			phone = authResult.phone;
+		}
 	}
 
 	phone = phone.trim();
@@ -3751,36 +4067,28 @@ async function syncCloudConfig(phone, options = {}) {
 
 			const msg = q('wq.syncFailedFmt', phone, reason);
 			showAutoCloseNotification('warning', msg);
-			// ★ Hide A/Q unless local token is still valid
-			if (_aqStateCallback && !_getAuthToken()) _aqStateCallback(false);
+			// ★ Not Pro: set gold=false (phone still shows via hasToken)
+			if (_aqStateCallback) _aqStateCallback(false);
 			return { success: false, message: msg };
 		}
 	} catch (e) {
 		logMessage(`[wq] Sync config error: ${e.message}`, 'WARN');
 		const msg = q('wq.syncFailedFmt', phone, q('wq.errNetwork'));
 		showAutoCloseNotification('error', msg);
-		// ★ Hide A/Q unless local token is still valid
-		if (_aqStateCallback && !_getAuthToken()) _aqStateCallback(false);
+		// ★ Network error: set gold=false (phone still shows via hasToken)
+		if (_aqStateCallback) _aqStateCallback(false);
 		return { success: false, message: msg };
 	}
 }
 
 // ★ 旧函数保留兼容，内部调用 syncCloudConfig
 async function verifyPhoneAndSyncConfig(phone) {
-	await syncCloudConfig(phone, { silent: false });
+	await syncCloudConfig(phone || '', { silent: false });
 }
 
-function onPhoneConfigChanged(phone) {
-	// 防抖：等 500ms 确保用户键入完
-	if (_phoneVerifyDebounce) {
-		clearTimeout(_phoneVerifyDebounce);
-	}
-	_phoneVerifyDebounce = setTimeout(() => {
-		_phoneVerifyDebounce = null;
-		if (phone && phone.trim()) {
-			syncCloudConfig(phone.trim(), { silent: false });
-		}
-	}, 500);
+function onPhoneConfigChanged(_phone) {
+	// ★ Deprecated: phone config removed, auth.json is the single source
+	// Kept as no-op for backward compatibility
 }
 
 // ============================================================================
@@ -3978,6 +4286,7 @@ function _saveAuthToken(token, phone) {
 		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 		const authPath = path.join(dir, AUTH_FILE);
 		_writeFileAtomicSync(authPath, JSON.stringify({ token, phone, device_name: _buildDeviceName(), ts: Date.now() }, null, 2));
+		_lastAuthPhone = phone; // ★ Update snapshot so our own write doesn't trigger watcher callback
 		return true;
 	} catch (e) {
 		logMessage(`[wq] Failed to save auth token: ${e.message}`, 'WARN');
@@ -3991,6 +4300,77 @@ function _clearAuthToken() {
 		const authPath = path.join(os.homedir(), '.qqq', AUTH_FILE);
 		if (fs.existsSync(authPath)) fs.unlinkSync(authPath);
 	} catch { }
+}
+
+/** ★ User-facing logout: clear token + update UI + notify */
+async function logoutAuth() {
+	const authData = _getAuthToken();
+	if (!authData || !authData.token) {
+		showAutoCloseNotification('info', q('wq.notLoggedIn'));
+		return;
+	}
+	const phoneTail = authData.phone ? authData.phone.slice(-4) : '';
+	_clearAuthToken();
+	_lastAuthPhone = null;
+	// ★ Update UI immediately (fs.watch will also fire, but this is faster)
+	if (_aqStateCallback) _aqStateCallback(false);
+	logMessage(`[wq-auth] User logged out (phone tail: ${phoneTail})`, 'INFO');
+	showAutoCloseNotification('info', q('wq.loggedOut', phoneTail));
+}
+
+// ============================================================================
+// ★ Auth File Watcher: detect cross-window / cross-IDE auth changes
+// When another window (same or different IDE) logs in / logs out,
+// the watcher picks up the change and refreshes local AQ state.
+// ============================================================================
+let _authWatcher = null;
+let _lastAuthPhone = null; // track last known phone to detect real changes
+
+function _startAuthWatcher() {
+	if (_authWatcher) return;
+	const authPath = path.join(os.homedir(), '.qqq', AUTH_FILE);
+	const dir = path.dirname(authPath);
+	if (!fs.existsSync(dir)) { try { fs.mkdirSync(dir, { recursive: true }); } catch { return; } }
+
+	// Snapshot current state
+	const cur = _getAuthToken();
+	_lastAuthPhone = cur ? cur.phone : null;
+
+	try {
+		// Watch the directory (more reliable than watching a file that may be deleted/recreated)
+		_authWatcher = fs.watch(dir, { persistent: false }, (eventType, filename) => {
+			// ★ Cross-platform: on some Linux systems filename can be null,
+			// in that case we can't filter, so always check the auth file.
+			if (filename && filename !== AUTH_FILE) return;
+			// Debounce: atomic writes trigger multiple events
+			if (_authWatcher._debounce) clearTimeout(_authWatcher._debounce);
+			_authWatcher._debounce = setTimeout(() => {
+				const now = _getAuthToken();
+				const newPhone = now ? now.phone : null;
+				if (newPhone === _lastAuthPhone) return; // no real change
+				_lastAuthPhone = newPhone;
+				logMessage(`[wq-auth] Auth file changed externally, phone=${newPhone ? newPhone.slice(-4) : 'none'}`, 'INFO');
+				if (newPhone) {
+					// ★ New login detected: trigger silent syncCloudConfig to determine Pro status
+					syncCloudConfig('', { silent: true });
+				} else {
+					// ★ Logged out: clear gold + refresh UI
+					if (_aqStateCallback) _aqStateCallback(false);
+				}
+			}, 300);
+		});
+		_authWatcher._debounce = null;
+	} catch (e) {
+		logMessage(`[wq-auth] Failed to watch auth file: ${e.message}`, 'WARN');
+	}
+}
+
+function _stopAuthWatcher() {
+	if (_authWatcher) {
+		if (_authWatcher._debounce) clearTimeout(_authWatcher._debounce);
+		_authWatcher.close();
+		_authWatcher = null;
+	}
 }
 
 /**
@@ -6302,12 +6682,13 @@ async function getQqqStats() {
 				radio_live: !!data.radio_live,
 				radio_m3u8: typeof data.radio_m3u8 === 'string' && data.radio_m3u8 ? data.radio_m3u8 : null,
 				radio_stream: typeof data.radio_stream === 'string' && data.radio_stream ? data.radio_stream : null,
-				active_playing: typeof data.active_playing === 'number' ? data.active_playing : null
+				active_playing: typeof data.active_playing === 'number' ? data.active_playing : null,
+				popup: (data.popup && typeof data.popup === 'object' && data.popup.id) ? data.popup : null
 			};
 		}
 		// 兼容旧逻辑：如果只有 active_12h 也接受
 		if (data && typeof data.active_12h === 'number') {
-			return { active_12h: data.active_12h, total_installations: null, total_companion_seconds: null, updated_at: null, url_a: null, url_z: null, ping_interval_s: null, radio_live: false, radio_m3u8: null, radio_stream: null, active_playing: null };
+			return { active_12h: data.active_12h, total_installations: null, total_companion_seconds: null, updated_at: null, url_a: null, url_z: null, ping_interval_s: null, radio_live: false, radio_m3u8: null, radio_stream: null, active_playing: null, popup: null };
 		}
 		return null;
 	} catch (e) {
@@ -6462,6 +6843,7 @@ module.exports = {
 	syncCloudConfig,
 	uploadUserData,
 	pullUserData,
+	logoutAuth,
 	getAuthTokenSync: _getAuthToken,
 	onAqStateChange(cb) { _aqStateCallback = cb; },
 
@@ -6566,6 +6948,9 @@ module.exports = {
 	// ★ MergeSaveScheduler (single source of truth for periodic merge-save)
 	MergeSaveScheduler,
 	MERGE_SAVE_INTERVAL_MS,
+
+	// ★ PopupManager（服务端驱动强制弹窗）
+	getPopupManager,
 };
 
 

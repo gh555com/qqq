@@ -1,6 +1,5 @@
 {
     "config.title.core": "☀️ Kern",
-    "config.phone.desc": "☀️ Ihr Konto (Telefonnummer mit Ländercode, kein Pluszeichen erforderlich) [Konto abrufen](command:qqq.openLogin)　[Lizenz kaufen](command:qqq.openBuy)　[▶Einstellungen speichern](command:qqq.openProfile) \n \n  Methoden zum Abrufen der Cloud-Konfiguration: 1. Automatisch nach Kontoänderung hier. 2. Zahnrad-Taste lange drücken. 3. Bei Fenster-Neustart.  ",
     "config.title.rover": "🛸 Roaming",
     "config.title.observe": "👁️ Beobachter",
     "config.title.html": "🍌 HTML & Rich Text",
@@ -84,5 +83,6 @@
     "cmd.savorMoments": "qqq: Momente für sich selbst genießen",
     "cmd.clearCache": "qqq: Cache leeren",
     "cmd.uploadUserData": "qqq: Daten in die Cloud hochladen",
-    "cmd.pullUserData": "qqq: Daten aus der Cloud wiederherstellen"
+    "cmd.pullUserData": "qqq: Daten aus der Cloud wiederherstellen",
+    "cmd.logout": "qqq: Abmelden"
 }

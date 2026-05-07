@@ -1498,18 +1498,16 @@ class ClipboardHistorySidebarProvider {
                     }
                     break;
                 case 'syncCloudConfig': {
-                    // ★ 齿轮按钮长按拉取云端配置
-                    const phone = vscode.workspace.getConfiguration(global.cfgNs()).get('phone');
-                    global.syncCloudConfig(phone, { silent: false });
+                    // ★ 齿轮按钮长按拉取云端配置（phone from auth.json）
+                    global.syncCloudConfig('', { silent: false });
                     break;
                 }
                 case 'syncCloudConfigSilentWithSfx': {
-                    // ★ 长按齿轮 1 秒：播放音效 + 拉取云端配置（先弹"拉取中..."，拉取完再弹结果）
+                    // ★ 长按齿轮 1 秒：播放音效 + 拉取云端配置（先弹“拉取中...”，拉取完再弹结果）
                     if (global.pythonBridge?.isAvailable()) {
                         global.pythonBridge.call('play_sfx', { category: 'yz', name: 'pas2.mp3' }, 1000).catch(() => { });
                     }
-                    const phone2 = vscode.workspace.getConfiguration(global.cfgNs()).get('phone');
-                    global.syncCloudConfig(phone2, { silent: false, showFetching: true });
+                    global.syncCloudConfig('', { silent: false, showFetching: true });
                     break;
                 }
                 case 'showGearClickHint': {
@@ -1834,14 +1832,15 @@ class ClipboardHistorySidebarProvider {
 
     // ★ A/Q button state management
     _sendAqState() {
-        const phone = vscode.workspace.getConfiguration(global.cfgNs()).get('phone');
         const authData = global.getAuthTokenSync();
         const hasToken = !!(authData && authData.token);
-        // AQ visible if: explicitly set by syncCloudConfig result, or has valid token on startup
-        const visible = this._aqVisible !== undefined ? this._aqVisible : hasToken;
-        // Phone tail: last 4 digits of phone number (from auth data or config)
+        // ★ visible = has token (always show phone if logged in, regardless of license)
+        const visible = hasToken;
+        // ★ gold = Pro user (set by syncCloudConfig success)
+        const gold = !!(hasToken && this._aqGold);
+        // Phone tail: last 4 digits from auth.json (single source of truth)
         let phoneTail = '';
-        const phoneStr = (authData && authData.phone) || phone || '';
+        const phoneStr = (authData && authData.phone) || '';
         if (phoneStr && typeof phoneStr === 'string') {
             const digits = phoneStr.replace(/[^\d]/g, '');
             if (digits.length >= 4) phoneTail = digits.slice(-4);
@@ -1849,14 +1848,14 @@ class ClipboardHistorySidebarProvider {
         this._postMessage({
             command: 'updateAqState',
             visible: visible,
-            gold: hasToken,
+            gold: gold,
             phoneTail: phoneTail
         });
     }
 
-    // ★ Called by external code when cloud config fetch succeeds/fails
-    setAqVisible(visible) {
-        this._aqVisible = visible;
+    // ★ Called by external code when cloud config fetch succeeds/fails (controls gold state)
+    setAqVisible(isGold) {
+        this._aqGold = isGold;
         this._sendAqState();
     }
 
@@ -2164,12 +2163,11 @@ class ClipboardHistorySidebarProvider {
 
         /* ★ A/Q cloud sync buttons */
         #settingsCard:hover { transform: none; }
-        #settingsCard .text-content { position: relative; display: flex; align-items: center; }
-        #settingsCard .icon-all-settings { position: absolute; left: 50%; transform: translateX(-50%); }
-        .aq-phone { font-size: 13px; color: #545454; font-family: Verdana, sans-serif; font-weight: bold; position: absolute; left: calc(50% - 30px); transform: translateX(-100%); visibility: hidden; }
-        .aq-btn-wrap { display: none; position: absolute; left: calc(50% + 16px); gap: 4px; align-items: center; pointer-events: auto; }
+        .aq-phone { font-size: 13px; color: #545454; font-family: Verdana, sans-serif; font-weight: bold; vertical-align: middle; display: inline-block; opacity: 0; margin-right: 4px; }
+        .aq-btn-wrap { display: inline-flex; gap: 4px; margin-left: 12px; vertical-align: middle; pointer-events: auto; }
         .aq-btn { pointer-events: auto; }
         .icon-aq-upload, .icon-aq-download { width: 16px; height: 16px; display: inline-block; vertical-align: middle; }
+        #settingsCard .icon-all-settings { position: relative; top: 1px; }
         [data-theme="dark"] .aq-phone { color: #999; }
         /* ★ Gold state: token verified */
         .aq-btn.aq-gold { color: #8b6914; }
@@ -2502,7 +2500,7 @@ class ClipboardHistorySidebarProvider {
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.allSettings" id="settingsCard">
-                    <div class="text-content"><span id="aq-phone" class="aq-phone"></span><span class="icon-all-settings"></span><span class="aq-btn-wrap" id="aqBtnGroup"><button class="action-mini-btn aq-btn" id="btnAqUpload" title="Upload to Cloud"><span class="icon-aq-upload"></span></button><button class="action-mini-btn aq-btn" id="btnAqDownload" title="Download from Cloud"><span class="icon-aq-download"></span></button></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="allSettings-stats">${allSettingsStats}</span>
+                    <div class="text-content"><span id="aq-phone" class="aq-phone">9999</span><span class="icon-all-settings"></span><span class="aq-btn-wrap" id="aqBtnGroup"><button class="action-mini-btn aq-btn" id="btnAqUpload" title="Upload to Cloud"><span class="icon-aq-upload"></span></button><button class="action-mini-btn aq-btn" id="btnAqDownload" title="Download from Cloud"><span class="icon-aq-download"></span></button></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="allSettings-stats">${allSettingsStats}</span>
                     </div>
                 </div>
             </div>
@@ -2981,17 +2979,15 @@ class ClipboardHistorySidebarProvider {
             function updateAqState(state) {
                 if (!el.aqBtnGroup) return;
                 var settingsCard = document.getElementById('settingsCard');
-                if (state.visible) {
-                    el.aqBtnGroup.style.display = 'flex';
-                    if (el.aqPhone && state.phoneTail) {
-                        el.aqPhone.textContent = state.phoneTail;
-                        el.aqPhone.style.visibility = 'visible';
-                    }
-                } else {
-                    el.aqBtnGroup.style.display = 'none';
-                    if (el.aqPhone) { el.aqPhone.style.visibility = 'hidden'; el.aqPhone.textContent = ''; }
+                // Phone: show/hide via opacity (always visible if logged in)
+                if (state.visible && el.aqPhone && state.phoneTail) {
+                    el.aqPhone.textContent = state.phoneTail;
+                    el.aqPhone.style.opacity = '1';
+                } else if (el.aqPhone) {
+                    el.aqPhone.style.opacity = '0';
+                    el.aqPhone.textContent = '9999';
                 }
-                // Gold state when token verified (A/Q buttons + phone + gear icon)
+                // Gold state: Pro user (A/Q buttons + phone + gear icon all turn gold)
                 var btns = el.aqBtnGroup.querySelectorAll('.aq-btn');
                 for (var i = 0; i < btns.length; i++) {
                     if (state.gold) btns[i].classList.add('aq-gold');
@@ -3002,7 +2998,7 @@ class ClipboardHistorySidebarProvider {
                     else el.aqPhone.classList.remove('aq-gold');
                 }
                 if (settingsCard) {
-                    if (state.gold && state.visible) settingsCard.classList.add('aq-gold-gear');
+                    if (state.gold) settingsCard.classList.add('aq-gold-gear');
                     else settingsCard.classList.remove('aq-gold-gear');
                 }
             }
@@ -3338,6 +3334,8 @@ class ClipboardHistorySidebarProvider {
         if (stats) this._global.setDynamicUrls(stats.url_a, stats.url_z);
         // ★ 将服务器建议的 ping 间隔传递给 WqReporter
         if (stats && stats.ping_interval_s) this._global.applySuggestedPingInterval(stats.ping_interval_s);
+        // ★ 服务端驱动弹窗：评估并展示
+        if (stats && stats.popup) this._global.getPopupManager().evaluate(stats.popup);
         // ★ 电台状态：优先 stats 搭便车，兜底独立请求 /radio/status
         if (this._global.pythonBridge) {
             if (stats && stats.radio_live && stats.radio_m3u8) {

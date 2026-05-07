@@ -1,6 +1,5 @@
 {
     "config.title.core": "☀️ コア",
-    "config.phone.desc": "☀️ あなたのアカウント（国コード付き電話番号、プラス記号不要）[アカウント取得](command:qqq.openLogin)　[ライセンス購入](command:qqq.openBuy)　[▶設定を保存](command:qqq.openProfile) \n \n  クラウド設定を取得する方法：1、ここでアカウントを変更後自動取得。2、歯車ボタンを長押し。3、ウィンドウ再起動時。  ",
     "config.title.rover": "🛸 ローバー",
     "config.title.observe": "👁️ 観察",
     "config.title.html": "🍌 HTMLとリッチテキスト",
@@ -84,5 +83,6 @@
     "cmd.savorMoments": "qqq: 自分へのご褒美",
     "cmd.clearCache": "qqq: キャッシュクリア",
     "cmd.uploadUserData": "qqq: データをクラウドにアップロード",
-    "cmd.pullUserData": "qqq: クラウドからデータを復元"
+    "cmd.pullUserData": "qqq: クラウドからデータを復元",
+    "cmd.logout": "qqq: ログアウト"
 }
