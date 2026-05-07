@@ -2505,7 +2505,7 @@ class ClipboardHistorySidebarProvider {
                 </div>
             </div>
             <div class="search-container">
-                <input type="text" class="search-input" id="searchBox" placeholder="find ..." spellcheck="false"><span class="spacer-75"><span class="spacer-75"></span><span id="clipboard-stats"></span>
+                <input type="text" class="search-input" id="searchBox" placeholder="find" spellcheck="false"><span class="spacer-75"><span class="spacer-75"></span><span id="clipboard-stats"></span>
                  <!-- ★ NEW: clipboard history dropdown -->
                 <div id="searchHistoryDropdown" class="history-dropdown"></div>
             </div>
@@ -3145,7 +3145,7 @@ class ClipboardHistorySidebarProvider {
 
                 if (m.command === 'updateData') {
                     if (m.fullStats !== undefined && el.searchBox) {
-                        el.searchBox.placeholder = 'find ...                                                                              ' + m.fullStats;
+                        el.searchBox.placeholder = 'find                                                                              ' + m.fullStats;
                     }
                     if (m.radioLive !== undefined) {
                         var label = document.getElementById('ms-label');

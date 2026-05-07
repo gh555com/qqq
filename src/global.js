@@ -4133,10 +4133,11 @@ function _getUserDataPaths() {
  * Returns merged config where no pinnedDir or qqiq item is ever lost.
  */
 function _mergeRoamConfig(local, cloud) {
-	if (!cloud) return local;
-	if (!local) return cloud;
+	if (!cloud) return { merged: local, added: 0 };
+	if (!local) return { merged: cloud, added: (Array.isArray(cloud.pinnedDirs) ? cloud.pinnedDirs.length : 0) + (Array.isArray(cloud.qqiq) ? cloud.qqiq.length : 0) };
 
 	const merged = { ...local };
+	let added = 0;
 
 	// ★ Merge pinnedDirs: union by path key, local order first
 	const localPinned = Array.isArray(local.pinnedDirs) ? local.pinnedDirs : [];
@@ -4148,6 +4149,7 @@ function _mergeRoamConfig(local, cloud) {
 		if (!seenPinKeys.has(k)) {
 			mergedPinned.push(dir);
 			seenPinKeys.add(k);
+			added++;
 		}
 	}
 	merged.pinnedDirs = mergedPinned.slice(0, 6);
@@ -4163,13 +4165,14 @@ function _mergeRoamConfig(local, cloud) {
 		if (!seenQqiqKeys.has(k)) {
 			mergedQqiq.push(item);
 			seenQqiqKeys.add(k);
+			added++;
 		}
 	}
 	merged.qqiq = mergedQqiq.slice(0, 100);
 
 	// ★ Scalar fields: local wins (user's current device preference takes priority)
 	// lineSpacing, sidebarWidth, sidebarRatio, isPinned — keep local values
-	return merged;
+	return { merged, added };
 }
 
 /**
@@ -4177,10 +4180,15 @@ function _mergeRoamConfig(local, cloud) {
  * On conflict (same key exists in both), keep the one with newer timestamp.
  */
 function _mergeFolderPrefs(local, cloud) {
-	if (!cloud) return local;
-	if (!local) return cloud;
+	if (!cloud) return { merged: local, added: 0 };
+	if (!local) return { merged: cloud, added: Object.keys(cloud).length };
 
 	const merged = { ...cloud }; // start with cloud as base
+	let added = 0;
+	// Count cloud-only keys (new to local)
+	for (const key of Object.keys(cloud)) {
+		if (!(key in local)) added++;
+	}
 	// Local overwrites cloud for same keys (local is fresher by definition)
 	for (const [key, val] of Object.entries(local)) {
 		const cloudVal = cloud[key];
@@ -4196,7 +4204,7 @@ function _mergeFolderPrefs(local, cloud) {
 		const toRemove = sorted.slice(0, keys.length - 500);
 		for (const k of toRemove) delete merged[k];
 	}
-	return merged;
+	return { merged, added };
 }
 
 /**
@@ -4556,6 +4564,11 @@ async function _doAuthFlow() {
 
 	if (result && result.token) {
 		_saveAuthToken(result.token, result.phone);
+		_lastAuthPhone = result.phone || null;
+		// ★ Immediately update UI: show phone (gold TBD by syncCloudConfig)
+		if (_aqStateCallback) _aqStateCallback(false); // visible via hasToken, gold pending
+		// ★ Trigger silent sync to determine Pro status (updates gold in background)
+		setTimeout(() => syncCloudConfig('', { silent: true }).catch(() => {}), 500);
 		showAutoCloseNotification('success', q('wq.authSuccess'));
 		return result;
 	} else {
@@ -4668,14 +4681,14 @@ async function uploadUserData() {
 
 		// Merge roam_config
 		const cloudConfig = cloudBlobs.roam_config?.data || null;
-		const mergedConfig = _mergeRoamConfig(localConfig, cloudConfig);
+		const { merged: mergedConfig } = _mergeRoamConfig(localConfig, cloudConfig);
 		if (mergedConfig) {
 			blobs.roam_config = { v: 1, ts: nowSec, data: mergedConfig };
 		}
 
 		// Merge folder prefs
 		const cloudFolderPrefs = cloudBlobs.roam_folder_prefs?.data || null;
-		const mergedFolderPrefs = _mergeFolderPrefs(localFolderPrefs, cloudFolderPrefs);
+		const { merged: mergedFolderPrefs } = _mergeFolderPrefs(localFolderPrefs, cloudFolderPrefs);
 		if (mergedFolderPrefs) {
 			blobs.roam_folder_prefs = { v: 1, ts: nowSec, data: mergedFolderPrefs };
 		}
@@ -4781,17 +4794,19 @@ async function pullUserData() {
 
 		const paths = _getUserDataPaths();
 		let restored = [];
+		let totalAdded = 0;
 
 		// ★ Merge roam_config (cloud ∪ local)
 		if (cloudBlobs.roam_config && cloudBlobs.roam_config.data) {
 			try {
 				let localConfig = null;
 				try { if (fs.existsSync(paths.roam_config)) localConfig = JSON.parse(fs.readFileSync(paths.roam_config, 'utf8')); } catch { }
-				const merged = _mergeRoamConfig(localConfig, cloudBlobs.roam_config.data);
+				const { merged, added } = _mergeRoamConfig(localConfig, cloudBlobs.roam_config.data);
 				const dir = path.dirname(paths.roam_config);
 				if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 				_writeFileAtomicSync(paths.roam_config, JSON.stringify(merged, null, 2));
 				restored.push('roam_config');
+				totalAdded += added;
 			} catch { }
 		}
 
@@ -4800,11 +4815,12 @@ async function pullUserData() {
 			try {
 				let localPrefs = null;
 				try { if (fs.existsSync(paths.roam_folder_prefs)) localPrefs = JSON.parse(fs.readFileSync(paths.roam_folder_prefs, 'utf8')); } catch { }
-				const merged = _mergeFolderPrefs(localPrefs, cloudBlobs.roam_folder_prefs.data);
+				const { merged, added } = _mergeFolderPrefs(localPrefs, cloudBlobs.roam_folder_prefs.data);
 				const dir = path.dirname(paths.roam_folder_prefs);
 				if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 				_writeFileAtomicSync(paths.roam_folder_prefs, JSON.stringify(merged, null, 2));
 				restored.push('roam_folder_prefs');
+				totalAdded += added;
 			} catch { }
 		}
 
@@ -4829,9 +4845,9 @@ async function pullUserData() {
 
 		if (restored.length > 0) {
 			const timeStr = new Date().toLocaleString();
-			showAutoCloseNotification('success', q('wq.pullSuccess', timeStr));
-			logMessage(`[wq] User data merged from cloud: ${restored.join(', ')}`, 'INFO');
-			return { success: true, restored };
+			showAutoCloseNotification('success', q('wq.pullSuccess', timeStr, totalAdded));
+			logMessage(`[wq] User data merged from cloud: ${restored.join(', ')}, +${totalAdded} items`, 'INFO');
+			return { success: true, restored, totalAdded };
 		} else {
 			showAutoCloseNotification('warning', q('wq.pullNoData'));
 			return { success: false };
