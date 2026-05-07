@@ -85,5 +85,11 @@
   "cmd.uploadUserData": "qqq: 上傳資料到雲端",
   "cmd.pullUserData": "qqq: 從雲端恢復資料",
   "cmd.logout": "qqq: 登出",
-  "cmd.openProfile": "qqq: 雲端設定頁"
+  "cmd.openProfile": "qqq: 雲端設定頁",
+  "config.guide.title": "偏好指引：",
+  "config.guide.label.none": "— 選擇操作 —",
+  "config.guide.label.1": "1、取得正版",
+  "config.guide.label.2": "2、雲端儲存偏好",
+  "config.guide.label.3": "3、點我，或長按側邊 ⚙ 齒輪按鈕一秒，以拉取雲端設定",
+  "config.guide.desc.common": "本地修改偏好都不會被儲存（僅做體驗），要儲存偏好只能註冊正版，在 GH Health 官網修改和儲存偏好。\n\n拉取雲端設定的方式（時機）有3種：\n1、在此處選擇第3項「點我」。\n2、長按側邊齒輪按鈕一秒（推薦）。\n3、視窗重啟時。"
 }

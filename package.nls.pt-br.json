@@ -85,5 +85,11 @@
   "cmd.uploadUserData": "qqq: Enviar dados para a nuvem",
   "cmd.pullUserData": "qqq: Restaurar dados da nuvem",
   "cmd.logout": "qqq: Sair",
-  "cmd.openProfile": "qqq: Perfil na nuvem"
+  "cmd.openProfile": "qqq: Perfil na nuvem",
+  "config.guide.title": "Guia de preferências:",
+  "config.guide.label.none": "— Selecionar ação —",
+  "config.guide.label.1": "1. Obter licença",
+  "config.guide.label.2": "2. Preferências na nuvem",
+  "config.guide.label.3": "3. Clique aqui ou mantenha pressionado o ⚙ da barra lateral por 1 segundo",
+  "config.guide.desc.common": "Alterações locais não são salvas (apenas teste). Para salvar preferências, registre uma licença e modifique no site GH Health.\n\nFormas de obter a configuração da nuvem:\n1. Selecione a opção 3 aqui.\n2. Mantenha pressionado o botão engrenagem por 1 segundo (recomendado).\n3. Ao reiniciar a janela."
 }

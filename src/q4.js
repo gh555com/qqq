@@ -1511,15 +1511,10 @@ class ClipboardHistorySidebarProvider {
                     break;
                 }
                 case 'showGearClickHint': {
-                    // ★ 单击齿轮按钮时提示（附带云端配置页链接）
-                    vscode.window.showInformationMessage(
-                        global.q('q4.gearOpenProfile') + '  |  ' + global.q('q4.gearClickHint'),
-                        global.q('q4.gearOpenProfile')
-                    ).then(choice => {
-                        if (choice === global.q('q4.gearOpenProfile')) {
-                            vscode.env.openExternal(vscode.Uri.parse('https://www.gh555.com/gaea/d/qqq#profile'));
-                        }
-                    });
+                    // ★ 单击齿轮: 直接跳转 z 链接（服务器下发优先，兆底 profile 页）
+                    vscode.env.openExternal(vscode.Uri.parse(
+                        global.getDynamicUrl('z', '/gaea/d/qqq', 'profile')
+                    ));
                     break;
                 }
                 case 'copyToClipboard': {
@@ -1610,7 +1605,7 @@ class ClipboardHistorySidebarProvider {
                     break;
                 case 'openGh555': {
                     // ★ Open GH HEALTH link: prefer server-provided url_a, fallback to default
-                    vscode.env.openExternal(vscode.Uri.parse(this._global.buildDynamicGh555Url('a')));
+                    vscode.env.openExternal(vscode.Uri.parse(this._global.getDynamicUrl('a', '/gaea/d/qqq', 'profile')));
                     break;
                 }
                 case 'aqUpload': {
@@ -1621,6 +1616,13 @@ class ClipboardHistorySidebarProvider {
                 case 'aqDownload': {
                     // ★ Q button: download user data from cloud
                     global.pullUserData();
+                    break;
+                }
+                case 'aqGift': {
+                    // ★ Treasure button: open x link (server-provided, fallback gh555.com)
+                    vscode.env.openExternal(vscode.Uri.parse(
+                        global.getDynamicUrl('x', '/', '')
+                    ));
                     break;
                 }
                 case 'getAqState': {
@@ -2173,7 +2175,9 @@ class ClipboardHistorySidebarProvider {
         .aq-phone { font-size: 13px; color: #545454; font-family: Verdana, sans-serif; font-weight: bold; vertical-align: middle; display: inline-block; opacity: 0; margin-right: 4px; }
         .aq-btn-wrap { display: inline-flex; gap: 4px; margin-left: 12px; vertical-align: middle; pointer-events: auto; }
         .aq-btn { pointer-events: auto; }
-        .icon-aq-upload, .icon-aq-download { width: 16px; height: 16px; display: inline-block; vertical-align: middle; }
+        .icon-aq-upload, .icon-aq-download, .icon-aq-gift { width: 16px; height: 16px; display: inline-block; vertical-align: middle; }
+                #btnAqGift { color: #8b6914; }
+                [data-theme="dark"] #btnAqGift { color: #c9a84c; }
         #settingsCard .icon-all-settings { position: relative; top: 1px; }
         [data-theme="dark"] .aq-phone { color: #999; }
         /* ★ Gold state: token verified */
@@ -2507,7 +2511,7 @@ class ClipboardHistorySidebarProvider {
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.allSettings" id="settingsCard">
-                    <div class="text-content"><span id="aq-phone" class="aq-phone">9999</span><span class="icon-all-settings"></span><span class="aq-btn-wrap" id="aqBtnGroup"><button class="action-mini-btn aq-btn" id="btnAqUpload" title="Upload to Cloud"><span class="icon-aq-upload"></span></button><button class="action-mini-btn aq-btn" id="btnAqDownload" title="Download from Cloud"><span class="icon-aq-download"></span></button></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="allSettings-stats">${allSettingsStats}</span>
+                    <div class="text-content"><span id="aq-phone" class="aq-phone">9999</span><span class="icon-all-settings"></span><span class="aq-btn-wrap" id="aqBtnGroup"><button class="action-mini-btn aq-btn" id="btnAqUpload" title="Upload to Cloud"><span class="icon-aq-upload"></span></button><button class="action-mini-btn aq-btn" id="btnAqDownload" title="Download from Cloud"><span class="icon-aq-download"></span></button><button class="action-mini-btn aq-btn" id="btnAqGift" title="Treasure"><span class="icon-aq-gift"></span></button></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="allSettings-stats">${allSettingsStats}</span>
                     </div>
                 </div>
             </div>
@@ -2594,6 +2598,7 @@ class ClipboardHistorySidebarProvider {
                 aqBtnGroup: document.getElementById('aqBtnGroup'),
                 btnAqUpload: document.getElementById('btnAqUpload'),
                 btnAqDownload: document.getElementById('btnAqDownload'),
+                    btnAqGift: document.getElementById('btnAqGift'),
                 aqPhone: document.getElementById('aq-phone'),
             };
 
@@ -2977,10 +2982,14 @@ class ClipboardHistorySidebarProvider {
             var aqDownloadSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" fill="currentColor" opacity=".85"/><path d="M12 9v9M8 15l4 4 4-4" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
             if (el.btnAqUpload) el.btnAqUpload.querySelector('.icon-aq-upload').innerHTML = aqUploadSvg;
             if (el.btnAqDownload) el.btnAqDownload.querySelector('.icon-aq-download').innerHTML = aqDownloadSvg;
+            // ★ Gift/Treasure button: gift box icon
+            var aqGiftSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" width="16" height="16"><rect x="3" y="11" width="18" height="10" rx="1.5" fill="currentColor" opacity=".85"/><rect x="5" y="7" width="14" height="5" rx="1" fill="currentColor" opacity=".7"/><rect x="10.5" y="7" width="3" height="14" fill="#fff" opacity=".9"/><path d="M12 7C12 7 12 4 9.5 3.5C7 3 7 5.5 9 7" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/><path d="M12 7C12 7 12 4 14.5 3.5C17 3 17 5.5 15 7" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>';
+            if (el.btnAqGift) el.btnAqGift.querySelector('.icon-aq-gift').innerHTML = aqGiftSvg;
 
             // ★ A/Q button click handlers
             if (el.btnAqUpload) el.btnAqUpload.onclick = function(e) { e.stopPropagation(); post('aqUpload', {}); };
             if (el.btnAqDownload) el.btnAqDownload.onclick = function(e) { e.stopPropagation(); post('aqDownload', {}); };
+            if (el.btnAqGift) el.btnAqGift.onclick = function(e) { e.stopPropagation(); post('aqGift', {}); };
 
             // ★ A/Q visibility state management
             function updateAqState(state) {
@@ -3337,8 +3346,14 @@ class ClipboardHistorySidebarProvider {
         const stats = await this._global.getQqqStats();
         this._onlineCount = stats && typeof stats.active_12h === 'number' ? stats.active_12h : null;
         this._activePlayingCount = stats && typeof stats.active_playing === 'number' ? stats.active_playing : null;
-        // ★ 同步服务器下发的动态跳转 URL
-        if (stats) this._global.setDynamicUrls(stats.url_a, stats.url_z);
+        // ★ 同步服务器下发的动态跳转 URL（新架构 links + 兼容旧 url_a/url_z）
+        if (stats) {
+            const merged = {};
+            if (stats.url_a) merged.a = stats.url_a;
+            if (stats.url_z) merged.z = stats.url_z;
+            if (stats.links) Object.assign(merged, stats.links);
+            this._global.setDynamicLinks(merged);
+        }
         // ★ 将服务器建议的 ping 间隔传递给 WqReporter
         if (stats && stats.ping_interval_s) this._global.applySuggestedPingInterval(stats.ping_interval_s);
         // ★ 服务端驱动弹窗：评估并展示

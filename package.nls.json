@@ -85,5 +85,11 @@
   "cmd.uploadUserData": "qqq: Upload Data to Cloud",
   "cmd.pullUserData": "qqq: Restore Data from Cloud",
   "cmd.logout": "qqq: Log Out",
-  "cmd.openProfile": "qqq: Cloud Profile"
+  "cmd.openProfile": "qqq: Cloud Profile",
+  "config.guide.title": "Preference Guide:",
+  "config.guide.label.none": "— Select an action —",
+  "config.guide.label.1": "1. Get Licensed",
+  "config.guide.label.2": "2. Cloud Preferences",
+  "config.guide.label.3": "3. Click me, or long-press the sidebar ⚙ gear for 1 second to pull cloud config",
+  "config.guide.desc.common": "Local preference changes are not saved (for trial only). To save preferences, register for a license and modify preferences on the GH Health website.\n\nWays to pull cloud config:\n1. Select option 3 above.\n2. Long-press the sidebar gear button for 1 second (recommended).\n3. On window restart."
 }

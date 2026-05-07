@@ -85,5 +85,11 @@
   "cmd.uploadUserData": "qqq: 上传数据到云端",
   "cmd.pullUserData": "qqq: 从云端恢复数据",
   "cmd.logout": "qqq: 退出登录",
-  "cmd.openProfile": "qqq: 云端配置页"
+  "cmd.openProfile": "qqq: 云端配置页",
+  "config.guide.title": "偏好指引：",
+  "config.guide.label.none": "— 选择操作 —",
+  "config.guide.label.1": "1、获取正版",
+  "config.guide.label.2": "2、云端储存偏好",
+  "config.guide.label.3": "3、点我，或长按侧边 ⚙ 齿轮按钮一秒，以拉取云端配置",
+  "config.guide.desc.common": "本地修改偏好都不会被保存（仅做体验），要保存偏好只能注册正版，在 GH Health 官网修改和保存偏好。\n\n拉取云端配置的方式（时机）有3种：\n1、在此处选择第3项\"点我\"。\n2、长按侧边齿轮按钮一秒（推荐）。\n3、窗口重启时。"
 }
