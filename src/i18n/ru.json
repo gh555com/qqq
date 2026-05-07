@@ -296,7 +296,8 @@
       "no": "Нет",
       "sessionDuration": "Длительность сессии",
       "quarantinedFiles": "Файлы на карантине"
-    }
+    },
+    "gearOpenProfile": "Открыть облачный профиль"
   },
   "qqq": {
     "log": {

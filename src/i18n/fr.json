@@ -296,7 +296,8 @@
       "no": "Non",
       "sessionDuration": "Durée de session",
       "quarantinedFiles": "Fichiers en quarantaine"
-    }
+    },
+    "gearOpenProfile": "Ouvrir le profil cloud"
   },
   "qqq": {
     "log": {

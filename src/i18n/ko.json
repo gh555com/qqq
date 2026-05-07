@@ -296,7 +296,8 @@
       "no": "아니오",
       "sessionDuration": "세션 시간",
       "quarantinedFiles": "격리 파일 수"
-    }
+    },
+    "gearOpenProfile": "클라우드 설정 열기"
   },
   "qqq": {
     "log": {

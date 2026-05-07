@@ -296,7 +296,8 @@
       "no": "いいえ",
       "sessionDuration": "セッション時間",
       "quarantinedFiles": "隔離ファイル数"
-    }
+    },
+    "gearOpenProfile": "クラウド設定を開く"
   },
   "qqq": {
     "log": {

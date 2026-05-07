@@ -296,7 +296,8 @@
       "no": "否",
       "sessionDuration": "会话时长",
       "quarantinedFiles": "物理文件隔离数"
-    }
+    },
+    "gearOpenProfile": "打开云端配置页"
   },
   "qqq": {
     "log": {
