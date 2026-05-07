@@ -4128,7 +4128,7 @@ function generateSidebarHtml(config) {
   const qqiqHtml = showqqiq
     ? `
   <div class="divider"></div>
-    ${_qqiqExpanded ? '<div class="qq-filter-container"><input type="text" class="qq-filter-input" id="qqFilterInput" placeholder="find ..." spellcheck="false"><div id="qqFilterHistoryDropdown" class="history-dropdown"></div></div>' : ''}
+    ${_qqiqExpanded ? '<div class="qq-filter-container"><input type="text" class="qq-filter-input" id="qqFilterInput" placeholder="find" spellcheck="false"><div id="qqFilterHistoryDropdown" class="history-dropdown"></div></div>' : ''}
     <div class="qq-iq-section">
       ${displayedqqiq.map(generateqqiqItemHtml).join("")}
     </div>`
