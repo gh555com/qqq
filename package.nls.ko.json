@@ -1,6 +1,5 @@
 {
     "config.title.core": "☀️ 코어",
-    "config.phone.desc": "☀️ 귀하의 계정 (국가 코드가 포함된 휴대폰 번호, 플러스 기호 불필요) [계정 가져오기](command:qqq.openLogin)　[라이선스 구매](command:qqq.openBuy)　[▶설정 저장](command:qqq.openProfile) \n \n  클라우드 설정을 가져오는 방법: 1. 여기서 계정 변경 후 자동 가져오기. 2. 기어 버튼 길게 누르기. 3. 창 재시작 시.  ",
     "config.title.rover": "🛸 로버",
     "config.title.observe": "👁️ 관찰",
     "config.title.html": "🍌 HTML과 리치 텍스트",
@@ -84,5 +83,6 @@
     "cmd.savorMoments": "qqq: 나를 위한 시간",
     "cmd.clearCache": "qqq: 캐시 지우기",
     "cmd.uploadUserData": "qqq: 데이터를 클라우드에 업로드",
-    "cmd.pullUserData": "qqq: 클라우드에서 데이터 복원"
+    "cmd.pullUserData": "qqq: 클라우드에서 데이터 복원",
+    "cmd.logout": "qqq: 로그아웃"
 }

@@ -1,6 +1,5 @@
 {
     "config.title.core": "☀️ Kernel",
-    "config.phone.desc": "☀️ Your account (phone number with country code, no plus sign needed) [Get Account](command:qqq.openLogin)　[Buy License](command:qqq.openBuy)　[▶Save Preferences](command:qqq.openProfile) \n \n  Ways to fetch cloud config: 1. Auto-fetch after changing account here. 2. Long-press gear button. 3. On window restart.  ",
     "config.title.rover": "🛸 Roam",
     "config.title.observe": "👁️ observer",
     "config.title.html": "🍌 HTML & Rich Text",
@@ -84,5 +83,6 @@
     "cmd.savorMoments": "qqq: Savor moments for yourself",
     "cmd.clearCache": "qqq: Clear Cache",
     "cmd.uploadUserData": "qqq: Upload Data to Cloud",
-    "cmd.pullUserData": "qqq: Restore Data from Cloud"
+    "cmd.pullUserData": "qqq: Restore Data from Cloud",
+    "cmd.logout": "qqq: Log Out"
 }

@@ -1,6 +1,5 @@
 {
     "config.title.core": "☀️ Noyau",
-    "config.phone.desc": "☀️ Votre compte (numéro de téléphone avec indicatif pays, sans signe plus) [Obtenir un compte](command:qqq.openLogin)　[Acheter une licence](command:qqq.openBuy)　[▶Enregistrer les préférences](command:qqq.openProfile) \n \n  Méthodes pour récupérer la config cloud: 1. Auto après changement de compte ici. 2. Appui long sur le bouton engrenage. 3. Au redémarrage de la fenêtre.  ",
     "config.title.rover": "🛸 Explorateur",
     "config.title.observe": "👁️ Observation",
     "config.title.html": "🍌 HTML et texte enrichi",
@@ -84,5 +83,6 @@
     "cmd.savorMoments": "qqq: Savoure tes moments",
     "cmd.clearCache": "qqq: Vider le cache",
     "cmd.uploadUserData": "qqq: Téléverser les données vers le cloud",
-    "cmd.pullUserData": "qqq: Restaurer les données depuis le cloud"
+    "cmd.pullUserData": "qqq: Restaurer les données depuis le cloud",
+    "cmd.logout": "qqq: Se déconnecter"
 }

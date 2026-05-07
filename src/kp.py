@@ -127,19 +127,19 @@ _AUDIO_IS_LOOPING = False  # Flag whether it is infinite loop; infinite loop doe
 _AUDIO_CURRENT_FILE = None
 _AUDIO_LOOP_COUNT = 0
 _AUDIO_START_TIME = 0
+_DEVICE_LOST_LAST_RESET = 0  # ★ Cooldown: prevent device_lost reset spam
 
 def _on_audio_device_lost():
-    """★ 当音乐引擎检测到设备丢失时触发，联动重置 SFX 引擎"""
+    """★ 当音乐引擎检测到设备丢失时触发，联动重置 SFX 引擎（30s冷却防死循环）"""
+    global _DEVICE_LOST_LAST_RESET
+    now = time.time()
+    # ★ Cooldown: screensaver/sleep can trigger device_lost every ~8s, only reset once per 30s
+    if now - _DEVICE_LOST_LAST_RESET < 30:
+        return
+    _DEVICE_LOST_LAST_RESET = now
     _log("[Audio] Device lost detected by music engine, resetting SFX hub...")
     _reset_audio_hub()
-    # ★ 埋点：记录当前音频状态，供下次排查
-    try:
-        import datetime
-        _log(f"[Audio] Diagnostic: time={datetime.datetime.now().isoformat()}, "
-             f"file={_AUDIO_CURRENT_FILE}, looping={_AUDIO_IS_LOOPING}, "
-             f"engine_alive={_AUDIO_ENGINE is not None}")
-    except Exception:
-        pass
+    _log("[Audio] AudioHub (SFX engine) reset complete")
 
 
 def _init_audio_engine():

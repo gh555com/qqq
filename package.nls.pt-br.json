@@ -1,6 +1,5 @@
 {
     "config.title.core": "☀️ Núcleo",
-    "config.phone.desc": "☀️ Sua conta (número de telefone com código do país, sem sinal de mais) [Obter conta](command:qqq.openLogin)　[Comprar licença](command:qqq.openBuy)　[▶Salvar preferências](command:qqq.openProfile) \n \n  Métodos para obter config da nuvem: 1. Auto após alterar conta aqui. 2. Pressionar longo no botão engrenagem. 3. Ao reiniciar janela.  ",
     "config.title.rover": "🛸 Explorador",
     "config.title.observe": "👁️ Observação",
     "config.title.html": "🍌 HTML e texto formatado",
@@ -84,5 +83,6 @@
     "cmd.savorMoments": "qqq: Saboreie seus momentos",
     "cmd.clearCache": "qqq: Limpar cache",
     "cmd.uploadUserData": "qqq: Enviar dados para a nuvem",
-    "cmd.pullUserData": "qqq: Restaurar dados da nuvem"
+    "cmd.pullUserData": "qqq: Restaurar dados da nuvem",
+    "cmd.logout": "qqq: Sair"
 }

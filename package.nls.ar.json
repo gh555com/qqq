@@ -1,6 +1,5 @@
 {
     "config.title.core": "☀️ الأساسي",
-    "config.phone.desc": "☀️ حسابك (رقم الهاتف مع رمز الدولة، بدون علامة الزائد) [احصل على حساب](command:qqq.openLogin)　[شراء الترخيص](command:qqq.openBuy)　[▶حفظ التفضيلات](command:qqq.openProfile) \n \n  طرق جلب التكوين السحابي: 1. تلقائي بعد تغيير الحساب هنا. 2. الضغط المطول على زر الترس. 3. عند إعادة تشغيل النافذة.  ",
     "config.title.rover": "🛸 المتصفح",
     "config.title.observe": "👁️ المراقبة",
     "config.title.html": "🍌 HTML والنص المنسق",
@@ -84,5 +83,6 @@
     "cmd.savorMoments": "qqq: استمتع بلحظاتك",
     "cmd.clearCache": "qqq: مسح ذاكرة التخزين المؤقت",
     "cmd.uploadUserData": "qqq: رفع البيانات إلى السحابة",
-    "cmd.pullUserData": "qqq: استعادة البيانات من السحابة"
+    "cmd.pullUserData": "qqq: استعادة البيانات من السحابة",
+    "cmd.logout": "qqq: تسجيل الخروج"
 }

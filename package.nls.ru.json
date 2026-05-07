@@ -1,6 +1,5 @@
 {
     "config.title.core": "☀️ Ядро",
-    "config.phone.desc": "☀️ Ваш аккаунт (номер телефона с кодом страны, без знака плюса) [Получить аккаунт](command:qqq.openLogin)　[Купить лицензию](command:qqq.openBuy)　[▶Сохранить настройки](command:qqq.openProfile) \n \n  Способы получения облачной конфигурации: 1. Авто после смены аккаунта здесь. 2. Долгое нажатие на шестеренку. 3. При перезапуске окна.  ",
     "config.title.rover": "🛸 Ровер",
     "config.title.observe": "👁️ Наблюдение",
     "config.title.html": "🍌 HTML и форматированный текст",
@@ -84,5 +83,6 @@
     "cmd.savorMoments": "qqq: Наслаждайся моментами",
     "cmd.clearCache": "qqq: Очистить кэш",
     "cmd.uploadUserData": "qqq: Загрузить данные в облако",
-    "cmd.pullUserData": "qqq: Восстановить данные из облака"
+    "cmd.pullUserData": "qqq: Восстановить данные из облака",
+    "cmd.logout": "qqq: Выйти"
 }
