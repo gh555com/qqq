@@ -85,5 +85,11 @@
   "cmd.uploadUserData": "qqq: Daten in die Cloud hochladen",
   "cmd.pullUserData": "qqq: Daten aus der Cloud wiederherstellen",
   "cmd.logout": "qqq: Abmelden",
-  "cmd.openProfile": "qqq: Cloud-Profil"
+  "cmd.openProfile": "qqq: Cloud-Profil",
+  "config.guide.title": "Einstellungsanleitung:",
+  "config.guide.label.none": "— Aktion wählen —",
+  "config.guide.label.1": "1. Lizenz erwerben",
+  "config.guide.label.2": "2. Cloud-Einstellungen",
+  "config.guide.label.3": "3. Hier klicken oder das Seitenleisten-⚙ 1 Sekunde lang drücken",
+  "config.guide.desc.common": "Lokale Einstellungsänderungen werden nicht gespeichert (nur zum Testen). Um Einstellungen zu speichern, registrieren Sie eine Lizenz und ändern Sie die Einstellungen auf der GH Health-Website.\n\nMethoden zum Abrufen der Cloud-Konfiguration:\n1. Hier Option 3 wählen.\n2. Seitenleisten-Zahnrad 1 Sekunde lang drücken (empfohlen).\n3. Beim Fensterneustart."
 }

@@ -1810,13 +1810,12 @@ function _registerCommands(context) {
 			vscode.env.openExternal(vscode.Uri.parse(global.buildGh555Url('/login')));
 		}),
 		safeRegisterCommand('qqq.openBuy', () => {
-			vscode.env.openExternal(vscode.Uri.parse(global.buildGh555Url('/gaea/d/qqq', 'price')));
+			vscode.env.openExternal(vscode.Uri.parse(global.getDynamicUrl('price', '/gaea/d/qqq', 'price')));
 		}),
 		safeRegisterCommand('qqq.openProfile', () => {
-			vscode.env.openExternal(vscode.Uri.parse(global.buildGh555Url('/gaea/d/qqq', 'profile')));
+			vscode.env.openExternal(vscode.Uri.parse(global.getDynamicUrl('profile', '/gaea/d/qqq', 'profile')));
 		}),
 		safeRegisterCommand('qqq.logout', () => global.logoutAuth()),
-		safeRegisterCommand('qqq.openProfile', () => vscode.env.openExternal(vscode.Uri.parse('https://www.gh555.com/gaea/d/qqq#profile'))),
 
 		// ★ Cloud user data sync commands (upload/pull roam config + clipboard history)
 		safeRegisterCommand('qqq.uploadUserData', global.withReady(() => global.uploadUserData())),
@@ -1826,8 +1825,30 @@ function _registerCommands(context) {
 
 		// ★ Ultimate version: unified settings change entry point (via ConfigGate)
 		vscode.workspace.onDidChangeConfiguration((event) => {
-			// ★ Only handle qqq. configuration changes
+		// ★ Only handle qqq. configuration changes
 			if (!event.affectsConfiguration(global.cfgNs())) return;
+
+			// ★ 工作指引下拉框：用户选择后立即执行对应操作，然后重置回空
+			if (event.affectsConfiguration('qqq.guide')) {
+				const val = vscode.workspace.getConfiguration(global.cfgNs()).get('guide', '');
+				if (val === '1') {
+					// ★ 获取正版: 跳转服务器 price 链接，兆底 #price
+					vscode.env.openExternal(vscode.Uri.parse(global.getDynamicUrl('price', '/gaea/d/qqq', 'price')));
+				} else if (val === '2') {
+					// ★ 云端储存偏好: 跳转服务器 profile 链接，兆底 #profile
+					vscode.env.openExternal(vscode.Uri.parse(global.getDynamicUrl('profile', '/gaea/d/qqq', 'profile')));
+				} else if (val === '3') {
+					// ★ 拉取云端配置: 等同长按齿轮
+					syncCloudConfig('', { silent: false });
+				}
+				// ★ 重置回空（不保留选中状态）
+				if (val) {
+					setTimeout(() => {
+						vscode.workspace.getConfiguration(global.cfgNs()).update('guide', '', vscode.ConfigurationTarget.Global);
+					}, 500);
+				}
+				return;
+			}
 
 			// ★ 手机号配置已废弃，身份统一由 auth.json 管理
 			// (phone config listener removed — auth.json file watcher handles cross-window sync)
