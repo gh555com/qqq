@@ -416,6 +416,10 @@
       {
         "command": "qqq.logout",
         "title": "%cmd.logout%"
+      },
+      {
+        "command": "qqq.openProfile",
+        "title": "%cmd.openProfile%"
       }
     ],
     "keybindings": [

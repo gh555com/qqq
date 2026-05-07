@@ -1511,8 +1511,15 @@ class ClipboardHistorySidebarProvider {
                     break;
                 }
                 case 'showGearClickHint': {
-                    // ★ 单击齿轮按钮时提示
-                    global.showAutoCloseNotification('info', global.q('q4.gearClickHint'));
+                    // ★ 单击齿轮按钮时提示（附带云端配置页链接）
+                    vscode.window.showInformationMessage(
+                        global.q('q4.gearOpenProfile') + '  |  ' + global.q('q4.gearClickHint'),
+                        global.q('q4.gearOpenProfile')
+                    ).then(choice => {
+                        if (choice === global.q('q4.gearOpenProfile')) {
+                            vscode.env.openExternal(vscode.Uri.parse('https://www.gh555.com/gaea/d/qqq#profile'));
+                        }
+                    });
                     break;
                 }
                 case 'copyToClipboard': {

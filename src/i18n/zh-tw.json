@@ -296,7 +296,8 @@
       "no": "否",
       "sessionDuration": "工作階段時長",
       "quarantinedFiles": "隔離檔案數"
-    }
+    },
+    "gearOpenProfile": "開啟雲端設定頁"
   },
   "qqq": {
     "log": {

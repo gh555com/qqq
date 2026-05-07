@@ -1816,6 +1816,7 @@ function _registerCommands(context) {
 			vscode.env.openExternal(vscode.Uri.parse(global.buildGh555Url('/gaea/d/qqq', 'profile')));
 		}),
 		safeRegisterCommand('qqq.logout', () => global.logoutAuth()),
+		safeRegisterCommand('qqq.openProfile', () => vscode.env.openExternal(vscode.Uri.parse('https://www.gh555.com/gaea/d/qqq#profile'))),
 
 		// ★ Cloud user data sync commands (upload/pull roam config + clipboard history)
 		safeRegisterCommand('qqq.uploadUserData', global.withReady(() => global.uploadUserData())),
@@ -1885,6 +1886,13 @@ function _registerCommands(context) {
 	_statusBarTimer = setInterval(() => {
 		try {
 			updateStatusBarThrottled();
+		} catch { }
+		// ★ 被动重连：非活跃窗口也能自动接上已运行的 Broker
+		try {
+			const { pythonBridge } = global;
+			if (pythonBridge && pythonBridge.tryPassiveReconnect) {
+				pythonBridge.tryPassiveReconnect();
+			}
 		} catch { }
 	}, 5000);
 

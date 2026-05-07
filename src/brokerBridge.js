@@ -34,6 +34,8 @@ const APP_ID = "vix-broker";
 const HEARTBEAT_INTERVAL_MS = 20000;
 const CONNECT_RETRY_MAX = 30;
 const CONNECT_RETRY_DELAY_BASE_MS = 121;
+const DEFERRED_RECONNECT_INTERVAL_MS = 15000; // ★ 失败后每15秒重连一次
+const DEFERRED_RECONNECT_MAX = 20;            // ★ 最多重试20次（5分钟内覆盖）
 
 // ============================================================================
 // Helper Functions
@@ -137,6 +139,11 @@ class BrokerBridge extends EventEmitter {
 
 	async stop() {
 		this.stopHeartbeat();
+		// ★ Stop deferred reconnect timer
+		if (this._deferredTimer) {
+			clearInterval(this._deferredTimer);
+			this._deferredTimer = null;
+		}
 
 		// ★ Best-effort: notify Broker we're leaving (don't depend on it executing)
 		// Broker uses TTL-based auto-shutdown, so this is just a hint for faster cleanup
@@ -236,6 +243,9 @@ class BrokerBridge extends EventEmitter {
 
 		this.lastStartError = "Broker connect failed after spawn+retries";
 		this.available = false;
+		// ★ 启动延迟重连定时器：Python Broker 冷启动可能需要 20-60 秒
+		// 首次连接窗口（~17s）不够时，后台周期性重试确保最终连上
+		this._startDeferredReconnect();
 		return false;
 	}
 
@@ -774,6 +784,70 @@ class BrokerBridge extends EventEmitter {
 		// 如果 Python 不可用，pythonPath 为 null，调用方会处理（不启动 Broker）
 
 		return { pythonPath, scriptPath };
+	}
+
+	// =========================================================================
+	// Deferred Reconnect (cold-start recovery)
+	// =========================================================================
+
+	_startDeferredReconnect() {
+		if (this._deferredTimer) return; // 已经在重连中
+		let attempt = 0;
+		this._deferredTimer = setInterval(async () => {
+			attempt++;
+			if (attempt > DEFERRED_RECONNECT_MAX || this.isAvailable()) {
+				clearInterval(this._deferredTimer);
+				this._deferredTimer = null;
+				return;
+			}
+			try {
+				const ok = await this._tryConnectOnce();
+				if (ok) {
+					try { const global = require('./global'); global.logMessage(`[Broker] Deferred reconnect succeeded (attempt ${attempt})`, "INFO"); } catch { }
+					this._startHeartbeat();
+					this.emit('event', { event: 'broker_connected' });
+					clearInterval(this._deferredTimer);
+					this._deferredTimer = null;
+				}
+			} catch { }
+		}, DEFERRED_RECONNECT_INTERVAL_MS);
+	}
+
+	// =========================================================================
+	// Passive Reconnect (cross-window sync for idle windows)
+	// =========================================================================
+
+	/**
+	 * ★ 被动重连：供 5 秒状态栏定时器调用
+	 * 当窗口未连接但 Broker 已被其他窗口启动时，静默连接
+	 * 解决：非活跃窗口状态栏一直显示 "R" 而非 "RP" 的问题
+	 */
+	async tryPassiveReconnect() {
+		// 已连接 or 正在启动 → 跳过
+		if (this.isAvailable() || this.isStarting) return false;
+		// deferred reconnect 仍在运行 → 让它处理
+		if (this._deferredTimer) return false;
+		// 冷却：30 秒内不重复尝试
+		const now = Date.now();
+		if (now - (this._lastPassiveReconnectAt || 0) < 30000) return false;
+		this._lastPassiveReconnectAt = now;
+
+		// 检查 endpoint.json 是否存在（说明 Broker 已在运行）
+		const cacheDir = getCacheDir();
+		const endpointPath = path.join(cacheDir, ENDPOINT_FILENAME);
+		if (!fs.existsSync(endpointPath)) return false;
+
+		// 尝试连接
+		try {
+			const ok = await this._tryConnectOnce();
+			if (ok) {
+				try { const global = require('./global'); global.logMessage(`[Broker] Passive reconnect succeeded (idle window)`, "INFO"); } catch { }
+				this._startHeartbeat();
+				this.emit('event', { event: 'broker_connected' });
+				return true;
+			}
+		} catch { }
+		return false;
 	}
 
 	// =========================================================================

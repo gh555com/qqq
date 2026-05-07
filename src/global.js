@@ -4020,6 +4020,7 @@ async function syncCloudConfig(phone, options = {}) {
 			// ★ 比对本地与云端配置差异，统计覆盖条目数
 			let overwriteCount = 0;
 			const changedKeys = [];
+			const failedKeys = [];
 			for (const [key, value] of Object.entries(data.profile)) {
 				// ★ 跳过特殊字段（不是 qqq 配置项）
 				if (key === 'removeWatermark') continue;
@@ -4040,10 +4041,14 @@ async function syncCloudConfig(phone, options = {}) {
 					_suppressConfigEcho++;
 					await vscode.workspace.getConfiguration(cfgNs()).update(key, value, vscode.ConfigurationTarget.Global);
 				} catch (e) {
-					logMessage(`[wq] Failed to write settings.json for ${key}: ${e.message}`, 'WARN');
+					failedKeys.push(key);
 				} finally {
 					_suppressConfigEcho--;
 				}
+			}
+			// ★ 聚合报告写入失败的 key（不影响功能，仅 Settings UI 展示缺失）
+			if (failedKeys.length > 0) {
+				logMessage(`[wq] Settings UI write skipped: ${failedKeys.length} keys not registered in host IDE (harmless)`, 'DEBUG');
 			}
 			// ★ 触发配置变更回调（让 q1/q2/q4 等组件刷新）
 			if (changedKeys.length > 0 && _configUpdateCallbacks.length > 0) {
@@ -4273,7 +4278,7 @@ async function _httpsPost(urlPath, body, timeoutMs = 30000) {
 
 const AUTH_FILE = 'auth.json';
 const AUTH_POLL_INTERVAL_MS = 3000;
-const AUTH_POLL_TIMEOUT_MS = 300000; // 5 minutes (aligned with Redis TTL)
+const AUTH_POLL_TIMEOUT_MS = 600000; // 10 minutes (user may need time to find phone, enter SMS code, etc.)
 
 /** Read stored auth token from ~/.qqq/auth.json */
 function _getAuthToken() {

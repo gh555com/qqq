@@ -296,7 +296,8 @@
       "no": "لا",
       "sessionDuration": "مدة الجلسة",
       "quarantinedFiles": "الملفات المعزولة"
-    }
+    },
+    "gearOpenProfile": "فتح الملف السحابي"
   },
   "qqq": {
     "log": {
