@@ -884,5 +884,6 @@
     "authExpired": "Sitzung abgelaufen, bitte erneut anmelden",
     "notLoggedIn": "Nicht angemeldet",
     "loggedOut": "Abgemeldet ({0})"
-  }
+  },
+  "pullConfirmBtn": "Download bestätigen"
 }

@@ -891,5 +891,6 @@
     "viewDetails": "查看详情",
     "upgradeNow": "立即升级",
     "dismiss": "忽略"
-  }
+  },
+  "pullConfirmBtn": "确认下载"
 }
