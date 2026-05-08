@@ -884,5 +884,6 @@
     "authExpired": "Session expirée, veuillez vous reconnecter",
     "notLoggedIn": "Non connecté",
     "loggedOut": "Déconnecté ({0})"
-  }
+  },
+  "pullConfirmBtn": "Confirmer le téléchargement"
 }

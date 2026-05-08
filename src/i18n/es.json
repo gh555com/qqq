@@ -884,5 +884,6 @@
     "authExpired": "Sesión expirada, inicie sesión nuevamente",
     "notLoggedIn": "No ha iniciado sesión",
     "loggedOut": "Sesión cerrada ({0})"
-  }
+  },
+  "pullConfirmBtn": "Confirmar descarga"
 }

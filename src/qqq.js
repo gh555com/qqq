@@ -1826,11 +1826,11 @@ function _registerCommands(context) {
 		// ★ Ultimate version: unified settings change entry point (via ConfigGate)
 		vscode.workspace.onDidChangeConfiguration((event) => {
 		// ★ Only handle qqq. configuration changes
-			if (!event.affectsConfiguration(global.cfgNs())) return;
+			if (!event.affectsConfiguration('qqq')) return;
 
 			// ★ 工作指引下拉框：用户选择后立即执行对应操作，然后重置回空
 			if (event.affectsConfiguration('qqq.guide')) {
-				const val = vscode.workspace.getConfiguration(global.cfgNs()).get('guide', '');
+				const val = vscode.workspace.getConfiguration('qqq').get('guide', '');
 				if (val === '1') {
 					// ★ 获取正版: 跳转服务器 price 链接，兆底 #price
 					vscode.env.openExternal(vscode.Uri.parse(global.getDynamicUrl('price', '/gaea/d/qqq', 'price')));
@@ -1844,7 +1844,7 @@ function _registerCommands(context) {
 				// ★ 重置回空（不保留选中状态）
 				if (val) {
 					setTimeout(() => {
-						vscode.workspace.getConfiguration(global.cfgNs()).update('guide', '', vscode.ConfigurationTarget.Global);
+						vscode.workspace.getConfiguration('qqq').update('guide', '', vscode.ConfigurationTarget.Global);
 					}, 500);
 				}
 				return;
