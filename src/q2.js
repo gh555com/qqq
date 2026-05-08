@@ -759,9 +759,10 @@ function openAdminTerminal(targetPath, termType) {
       // ★ Linux: open normal terminal (not sudo) — user can sudo manually if needed
       const cdCmd = `cd '${escapedPath}'`;
 
-      // Try common Linux terminals
+      // Try common Linux terminals (ordered by popularity on modern distros)
       const terminals = [
-        { cmd: 'gnome-terminal', args: ['--', 'bash', '-c', cdCmd + '; exec bash'] },
+        { cmd: 'gnome-terminal', args: ['--working-directory=' + absPath] }, // ★ Simplest syntax, works on all gnome-terminal versions
+        { cmd: 'kgx', args: ['-w', absPath] }, // ★ GNOME Console (Ubuntu 24.04+ default)
         { cmd: 'konsole', args: ['--workdir', absPath] },
         { cmd: 'xfce4-terminal', args: ['--default-working-directory', absPath] },
         { cmd: 'mate-terminal', args: ['--working-directory', absPath] },
@@ -784,13 +785,24 @@ function openAdminTerminal(targetPath, termType) {
               setTimeout(() => { try { child.kill(); } catch { } resolve(false); }, 1000);
             });
             if (exists) {
-              cp.spawn(term.cmd, term.args, { detached: true, stdio: 'ignore' }).unref();
+              // ★ Use shell: true to inherit full environment (DBUS_SESSION_BUS_ADDRESS etc.)
+              // gnome-terminal needs D-Bus; direct spawn without shell may lose env vars
+              const cmdLine = [term.cmd, ...term.args].map(a => a.includes(' ') ? `"${a}"` : a).join(' ');
+              cp.spawn('sh', ['-c', cmdLine], { detached: true, stdio: 'ignore', cwd: absPath, env: process.env }).unref();
               global.showAutoCloseNotification('info', `qqq: Terminal ${absPath}`);
               return;
             }
           } catch { }
         }
-        global.showAutoCloseNotification('error', q('q2.error.noTerminal'));
+        // ★ Ultimate fallback: VS Code integrated terminal (always available)
+        try {
+          const vscodeModule = require('vscode');
+          const term = vscodeModule.window.createTerminal({ name: `qqq: ${path.basename(absPath)}`, cwd: absPath });
+          term.show();
+          global.showAutoCloseNotification('info', `qqq: Terminal (integrated) ${absPath}`);
+        } catch (e) {
+          global.showAutoCloseNotification('error', q('q2.error.noTerminal'));
+        }
       })();
     }
 
@@ -4267,10 +4279,38 @@ async function performQ2Paste(targetDir, refreshCallback) {
   // ★ Get clipboard snapshot
   const snapshot = await wq();
 
-  // ★ If clipboard is whitelist type (plain text), do not process
+  // ★ If clipboard is whitelist type (plain text), check if it's actually file paths
+  // This handles the case where our own copyFilesToClipboard wrote file paths
+  // but the clipboard detection only sees text (common on Linux without proper MIME support)
   if (snapshot.type === 'whitelist') {
-    global.showAutoCloseNotification('info', q('q2.paste.plainTextOnly'))
-    return;
+    try {
+      const clipText = await vscode.env.clipboard.readText();
+      if (clipText) {
+        const lines = clipText.split(/\r?\n/).filter(l => l.trim());
+        // Check if ALL lines are existing absolute paths
+        if (lines.length > 0 && lines.every(l => path.isAbsolute(l) && fs.existsSync(l))) {
+          // ★ It's a file paste disguised as text! Override snapshot
+          snapshot.type = 'file';
+          snapshot.subType = 'file';
+          snapshot.rawStatus = { hasFile: true, hasHtml: false, hasImage: false, hasText: true };
+          snapshot.files = lines;
+          snapshot.totalSize = 0;
+          for (const f of lines) {
+            try { snapshot.totalSize += fs.statSync(f).size; } catch { }
+          }
+          global.logMessage(`[Q2Paste] Detected ${lines.length} file path(s) in text clipboard, treating as file paste`, 'INFO');
+        } else {
+          global.showAutoCloseNotification('info', q('q2.paste.plainTextOnly'));
+          return;
+        }
+      } else {
+        global.showAutoCloseNotification('info', q('q2.paste.plainTextOnly'));
+        return;
+      }
+    } catch {
+      global.showAutoCloseNotification('info', q('q2.paste.plainTextOnly'));
+      return;
+    }
   }
 
   // ★ Determine task type and estimated size

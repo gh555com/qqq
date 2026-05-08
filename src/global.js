@@ -1589,6 +1589,9 @@ async function checkAndInstallLinuxDeps(fromPaste = false) {
 	if (choice === q('linux.installNow')) {
 		logMessage(`Installing Linux deps: ${installCmd}`, 'INFO');
 
+		// ★ 立即设置 1 天冷却，防止安装期间重启又弹（验证成功后会清除）
+		if (extensionContext) await extensionContext.globalState.update('linux_deps_dismissed_ts', Date.now() - 6 * 24 * 3600 * 1000);
+
 		// Execute install command in terminal
 		const terminal = await runInTerminal(installCmd, 'qqq: Install Dependencies');
 
@@ -1639,14 +1642,17 @@ async function checkAndInstallLinuxDeps(fromPaste = false) {
  * Build install command for multiple packages based on package manager
  */
 function _getLinuxDepsInstallCommand(pkgMgr, packages) {
-	const pkgList = packages.join(' ');
+	// ★ Install packages one-by-one so a dependency conflict on one (e.g. attr) doesn't block others (e.g. xclip)
 	switch (pkgMgr) {
-		case 'apt': return `sudo apt update && sudo apt install -y ${pkgList}`;
-		case 'dnf': return `sudo dnf install -y ${pkgList}`;
-		case 'yum': return `sudo yum install -y ${pkgList}`;
-		case 'pacman': return `sudo pacman -S --noconfirm ${pkgList}`;
-		case 'zypper': return `sudo zypper install -y ${pkgList}`;
-		default: return `sudo apt install -y ${pkgList}`;
+		case 'apt': {
+			const installs = packages.map(p => `sudo apt install -y ${p}`).join('; ');
+			return `sudo apt update && ${installs}`;
+		}
+		case 'dnf': return packages.map(p => `sudo dnf install -y ${p}`).join('; ');
+		case 'yum': return packages.map(p => `sudo yum install -y ${p}`).join('; ');
+		case 'pacman': return packages.map(p => `sudo pacman -S --noconfirm ${p}`).join('; ');
+		case 'zypper': return packages.map(p => `sudo zypper install -y ${p}`).join('; ');
+		default: return packages.map(p => `sudo apt install -y ${p}`).join('; ');
 	}
 }
 
@@ -2607,8 +2613,26 @@ function openExternal(uri) {
 			require('child_process').execSync(`open "${filePath.replace(/"/g, '""')}"`, { stdio: 'ignore' });
 			return Promise.resolve();
 		} else {
-			// Linux: use xdg-open
-			require('child_process').execSync(`xdg-open "${filePath.replace(/"/g, '""')}"`, { stdio: 'ignore' });
+			// ★ Linux: use spawn (non-blocking!) with gio open → xdg-open fallback chain
+			// execSync can block forever if the launched app doesn't fork
+			const cp = require('child_process');
+			const isDir = require('fs').existsSync(filePath) && require('fs').statSync(filePath).isDirectory();
+
+			const _tryOpen = (cmd, args, onFail) => {
+				const child = cp.spawn(cmd, args, { detached: true, stdio: 'ignore' });
+				child.unref();
+				child.on('error', () => { if (onFail) onFail(); });
+			};
+
+			// For files: try gio open first (more reliable on GNOME), then xdg-open
+			_tryOpen('gio', ['open', filePath], () => {
+				_tryOpen('xdg-open', [filePath], () => {
+					// ★ Ultimate fallback for files: open in VS Code editor (text/image files)
+					if (!isDir) {
+						try { vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath)); } catch { }
+					}
+				});
+			});
 			return Promise.resolve();
 		}
 	} catch (error) {
@@ -5739,8 +5763,11 @@ async function wq() {
 
 				if (res && !res.error) {
 					status = res;
-					handled = true;
-					usedEngine = "shell";
+					// ★ Only mark handled if at least one flag is true
+					// On Linux without xclip: shell returns all-false (valid response but useless)
+					// Must let VS Code API fallback detect plain text
+					handled = !!(res.hasFile || res.hasHtml || res.hasImage || res.hasText);
+					if (handled) usedEngine = "shell";
 
 					// ★ If there are files, immediately fetch file list (within same Shell call window)
 					if (status.hasFile) {

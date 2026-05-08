@@ -2471,61 +2471,57 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
 
     log(q('h.autoDetect.startDetect', !!snapshot, handled), "INFO");
 
-    // Fallback: if no snapshot passed in, try fetching
+    // ★ Fallback: if no snapshot passed in, use global.wq() which has full engine fallback chain
+    // (Rust → Shell → VS Code API), not just shellBridge alone
     if (!handled) {
         if (progressCallback) {
             progressCallback(1, q('h.progress.detectClipboard'));
         }
         try {
-            if (global.shellBridge && global.shellBridge.isAvailable()) {
-                log(q('h.autoDetect.tryShellBridge'), "INFO");
-                const res = await global.shellBridge.call("wq", {}, 3000);
-                if (res && !res.error) {
-                    qStatus = res;
-                    if (res.files) preFiles = res.files;
-                    handled = true;
-                    log(q('h.autoDetect.shellBridgeSuccess', res.hasFile, res.hasHtml, res.hasImage, res.files?.length || 0), "INFO");
+            if (global.wq) {
+                log("[AutoDetect] Using global.wq() (Rust→Shell→API fallback chain)", "INFO");
+                const wqResult = await global.wq();
+                if (wqResult && wqResult.rawStatus) {
+                    qStatus = wqResult.rawStatus;
+                    if (wqResult.files && wqResult.files.length > 0) preFiles = wqResult.files;
+                    handled = !!(qStatus.hasFile || qStatus.hasHtml || qStatus.hasImage || qStatus.hasText);
+                    log(`[AutoDetect] wq() result: engine=${wqResult._engine}, hasFile=${qStatus.hasFile}, hasHtml=${qStatus.hasHtml}, hasImage=${qStatus.hasImage}, hasText=${qStatus.hasText}`, "INFO");
                 }
             } else {
-                log(q('h.autoDetect.shellBridgeUnavailable'), "INFO");
-            }
-        } catch (e) {
-            log(q('h.autoDetect.shellBridgeFailed', e.message), "WARN");
-        }
-    }
-
-    if (!handled && process.platform === "win32") {
-        try {
-            log(q('h.autoDetect.tryPowerShell'), "INFO");
-            const psScript = `Add-Type -A System.Windows.Forms;$f=[System.Windows.Forms.Clipboard]::GetDataObject().GetFormats();$o=@{hasFile=$false;hasHtml=$false;hasImage=$false;hasText=$false};if($f -contains 'FileDrop'){$o.hasFile=$true};if($f -contains 'HTML Format'){$o.hasHtml=$true};if(($f -contains 'Bitmap')-or($f -contains 'DeviceIndependentBitmap')-or($f -contains 'PNG')){$o.hasImage=$true};if(($f -contains 'Text')-or($f -contains 'UnicodeText')){$o.hasText=$true};$o|ConvertTo-Json -Compress`;
-            const jsonStr = await spawnOutput("powershell", ["-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript]);
-            if (jsonStr && jsonStr.trim()) {
-                const parsed = JSON.parse(jsonStr);
-                if (parsed) {
-                    qStatus = parsed;
-                    handled = true;
-                    log(q('h.autoDetect.powerShellSuccess', parsed.hasFile, parsed.hasHtml, parsed.hasImage), "INFO");
+                // Legacy fallback: try shellBridge directly
+                if (global.shellBridge && global.shellBridge.isAvailable()) {
+                    log(q('h.autoDetect.tryShellBridge'), "INFO");
+                    const res = await global.shellBridge.call("wq", {}, 3000);
+                    if (res && !res.error) {
+                        qStatus = res;
+                        if (res.files) preFiles = res.files;
+                        handled = !!(res.hasFile || res.hasHtml || res.hasImage || res.hasText);
+                        log(q('h.autoDetect.shellBridgeSuccess', res.hasFile, res.hasHtml, res.hasImage, res.files?.length || 0), "INFO");
+                    }
                 }
             }
         } catch (e) {
-            log(q('h.autoDetect.powerShellFailed', e.message), "WARN");
+            log(`[AutoDetect] Detection failed: ${e.message}`, "WARN");
         }
     }
 
+    // ★ Final text fallback: if still not handled, try VS Code native API (text only)
     if (!handled) {
         try {
             const text = await vscode.env.clipboard.readText();
             if (text) {
                 qStatus.hasText = true;
+                handled = true;
                 log(q('h.autoDetect.vsCodeApiText'), "INFO");
             }
         } catch (e) { }
     }
 
     // ★ Linux: if detection returned all-false AND no text either, xclip might be missing → prompt install
+    // IMPORTANT: fire-and-forget! Must NOT await — otherwise paste hangs until user clicks notification
     if (process.platform === 'linux' && !qStatus.hasFile && !qStatus.hasHtml && !qStatus.hasImage && !qStatus.hasText) {
         if (global.checkAndInstallLinuxDeps) {
-            await global.checkAndInstallLinuxDeps(true);
+            global.checkAndInstallLinuxDeps(true).catch(() => {});
         }
     }
 
