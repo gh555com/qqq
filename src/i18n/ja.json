@@ -884,5 +884,6 @@
     "authExpired": "ログインが期限切れです。再度ログインしてください",
     "notLoggedIn": "ログインしていません",
     "loggedOut": "ログアウトしました ({0})"
-  }
+  },
+  "pullConfirmBtn": "ダウンロード確認"
 }

@@ -891,5 +891,6 @@
     "viewDetails": "View Details",
     "upgradeNow": "Upgrade Now",
     "dismiss": "Dismiss"
-  }
+  },
+  "pullConfirmBtn": "Confirm Download"
 }

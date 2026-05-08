@@ -884,5 +884,6 @@
     "authExpired": "登入已過期，請重新登入",
     "notLoggedIn": "目前未登入",
     "loggedOut": "已登出 ({0})"
-  }
+  },
+  "pullConfirmBtn": "確認下載"
 }

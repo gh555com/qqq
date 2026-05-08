@@ -68,6 +68,9 @@ assets/vcruntime140_1.dll
 assets/runtimes/x86/**
 # 2. q_engine 平台二进制：4个全部打入 Universal 包（运行时按 platform+arch 选用）
 # assets/q_win_x64.exe, assets/q_linux_x64, assets/q_mac_x64, assets/q_mac_arm64
+# ★ 排除旧版遗留的 q_engine 通用名（不应存在，仅为保险）
+assets/q_engine.exe
+assets/q_engine
 # 3. 排除备份文件
 assets/*.bak
 

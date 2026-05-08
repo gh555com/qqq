@@ -59,7 +59,7 @@
 
  Original name: qqq
 
-  **qqq 16.4.1+ required for Linux / macOS.** [Details](#how-to-install)  ![](https://gh555.com/px?g=qqq&s=jarekw.richnote.readme)
+  **qqq 16.4.1+ required for Linux / macOS.** [Details](#how-to-install)  ![](https://gh555.com/px?g=qqq&s=jarekw.ric.readme)
 
 
  You need not have opened a note-taking application specially.
