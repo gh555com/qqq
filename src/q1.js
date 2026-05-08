@@ -3361,22 +3361,22 @@ function openFileCommand(filePath) {
 		} else if (process.platform === "darwin") {
 			cp.exec(`open "${filePath}"`);
 		} else {
-			// ★ Linux: chain xdg-open → gio open → VS Code API
-			// 注: xdg-open 即使返回 0 也可能没真正打开，加 3s 超时保底
+			// ★ Linux: gio open → xdg-open → VS Code editor fallback
+			// Use spawn (non-blocking) instead of exec to avoid hanging
+			const isDir = fs.statSync(filePath).isDirectory();
 			const _tryLinuxOpen = (cmd, args, fallback) => {
-				const child = cp.spawn(cmd, args, { stdio: 'ignore' });
-				let done = false;
-				const timer = setTimeout(() => { if (!done) { done = true; } }, 3000);
-				child.on('error', () => { if (!done) { done = true; clearTimeout(timer); fallback(); } });
-				child.on('close', (code) => {
-					clearTimeout(timer);
-					if (!done && code !== 0) { done = true; fallback(); }
-					else { done = true; }
-				});
+				const child = cp.spawn(cmd, args, { detached: true, stdio: 'ignore' });
+				child.unref();
+				child.on('error', () => { if (fallback) fallback(); });
 			};
-			_tryLinuxOpen('xdg-open', [filePath], () => {
-				_tryLinuxOpen('gio', ['open', filePath], () => {
-					vscode.env.openExternal(vscode.Uri.file(filePath));
+			_tryLinuxOpen('gio', ['open', filePath], () => {
+				_tryLinuxOpen('xdg-open', [filePath], () => {
+					// ★ Ultimate fallback: open in VS Code editor for files
+					if (!isDir) {
+						vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
+					} else {
+						vscode.env.openExternal(vscode.Uri.file(filePath));
+					}
 				});
 			});
 		}

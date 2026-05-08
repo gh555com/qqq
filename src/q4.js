@@ -2173,7 +2173,7 @@ class ClipboardHistorySidebarProvider {
         /* ★ A/Q cloud sync buttons */
         #settingsCard:hover { transform: none; }
         .aq-phone { font-size: 13px; color: #545454; font-family: Verdana, sans-serif; font-weight: bold; vertical-align: middle; display: inline-block; opacity: 0; margin-right: 4px; }
-        .aq-btn-wrap { display: inline-flex; gap: 4px; margin-left: 12px; vertical-align: middle; pointer-events: auto; }
+        .aq-btn-wrap { display: inline-flex; gap: 4px; margin-left: 18px; vertical-align: middle; pointer-events: auto; }
         .aq-btn { pointer-events: auto; }
         .icon-aq-upload, .icon-aq-download, .icon-aq-gift { width: 16px; height: 16px; display: inline-block; vertical-align: middle; }
                 #btnAqGift { color: #8b6914; }
@@ -2511,7 +2511,7 @@ class ClipboardHistorySidebarProvider {
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.allSettings" id="settingsCard">
-                    <div class="text-content"><span id="aq-phone" class="aq-phone">9999</span><span class="icon-all-settings"></span><span class="aq-btn-wrap" id="aqBtnGroup"><button class="action-mini-btn aq-btn" id="btnAqUpload" title="Upload to Cloud"><span class="icon-aq-upload"></span></button><button class="action-mini-btn aq-btn" id="btnAqDownload" title="Download from Cloud"><span class="icon-aq-download"></span></button><button class="action-mini-btn aq-btn" id="btnAqGift" title="Treasure"><span class="icon-aq-gift"></span></button></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="allSettings-stats">${allSettingsStats}</span>
+                    <div class="text-content"><span id="aq-phone" class="aq-phone">9999</span><span class="icon-all-settings"></span><span class="aq-btn-wrap" id="aqBtnGroup"><button class="action-mini-btn aq-btn" id="btnAqUpload" title="Upload to Cloud"><span class="icon-aq-upload"></span></button><button class="action-mini-btn aq-btn" id="btnAqDownload" title="Download from Cloud"><span class="icon-aq-download"></span></button></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><button class="action-mini-btn aq-btn" id="btnAqGift" title="Treasure"><span class="icon-aq-gift"></span></button><span class="spacer-75"></span><span id="allSettings-stats">${allSettingsStats}</span>
                     </div>
                 </div>
             </div>
