@@ -214,7 +214,7 @@ The company undertakes never to collect clipboard content or any sensitive user 
 </p>
 
 <p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/ZAVTVRFVTJ6ME.png " width="60%" alt="company">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/ZAVTVRFVTJ6ME.png" width="60%" alt="company">
 </p>
 
 
