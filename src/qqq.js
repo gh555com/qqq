@@ -1627,7 +1627,7 @@ async function _delayedActivate(context) {
 	// Listen for configuration changes
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration((event) => {
-			if (event.affectsConfiguration("qqq.takeOverCodelensStyle")) {
+			if (event.affectsConfiguration(`${global.cfgNs()}.takeOverCodelensStyle`)) {
 				updateCodeLensStyle();
 			}
 		})
@@ -1824,28 +1824,41 @@ function _registerCommands(context) {
 
 
 		// ★ Ultimate version: unified settings change entry point (via ConfigGate)
-		vscode.workspace.onDidChangeConfiguration((event) => {
-		// ★ Only handle qqq. configuration changes
-			if (!event.affectsConfiguration('qqq')) return;
+		vscode.workspace.onDidChangeConfiguration(async (event) => {
+			// ★ 调试日志：确认事件被触发
+			const ns = global.cfgNs();
+			const guideKey = `${ns}.guide`;
+			const affectsNs = event.affectsConfiguration(ns);
+			const affectsGuide = event.affectsConfiguration(guideKey);
+			global.logMessage(`[CfgEvent] ns="${ns}" affectsNs=${affectsNs} affectsGuide=${affectsGuide}`, 'INFO');
 
-			// ★ 工作指引下拉框：用户选择后立即执行对应操作，然后重置回空
-			if (event.affectsConfiguration('qqq.guide')) {
-				const val = vscode.workspace.getConfiguration('qqq').get('guide', '');
-				if (val === '1') {
-					// ★ 获取正版: 跳转服务器 price 链接，兆底 #price
-					vscode.env.openExternal(vscode.Uri.parse(global.getDynamicUrl('price', '/gaea/d/qqq', 'price')));
-				} else if (val === '2') {
-					// ★ 云端储存偏好: 跳转服务器 profile 链接，兆底 #profile
-					vscode.env.openExternal(vscode.Uri.parse(global.getDynamicUrl('profile', '/gaea/d/qqq', 'profile')));
-				} else if (val === '3') {
-					// ★ 拉取云端配置: 等同长按齿轮
-					syncCloudConfig('', { silent: false });
-				}
-				// ★ 重置回空（不保留选中状态）
-				if (val) {
-					setTimeout(() => {
-						vscode.workspace.getConfiguration('qqq').update('guide', '', vscode.ConfigurationTarget.Global);
-					}, 500);
+			if (!affectsNs) return;
+
+			// ★ 工作指引下拉框：用户选择后立即执行对应操作
+			if (affectsGuide) {
+				try {
+					const val = vscode.workspace.getConfiguration(ns).get('guide', '');
+					global.logMessage(`[Guide] selected: "${val}"`, 'INFO');
+					if (val === '1') {
+						const url = global.getDynamicUrl('price', '/gaea/d/qqq', 'price');
+						global.logMessage(`[Guide] opening price: ${url}`, 'INFO');
+						await vscode.env.openExternal(vscode.Uri.parse(url));
+					} else if (val === '2') {
+						const url = global.getDynamicUrl('profile', '/gaea/d/qqq', 'profile');
+						global.logMessage(`[Guide] opening profile: ${url}`, 'INFO');
+						await vscode.env.openExternal(vscode.Uri.parse(url));
+					} else if (val === '3') {
+						global.logMessage('[Guide] pulling cloud config...', 'INFO');
+						await syncCloudConfig('', { silent: false });
+					}
+					// ★ 重置回 default（不保留选中状态）
+					if (val && val !== '1') {
+						setTimeout(() => {
+							vscode.workspace.getConfiguration(ns).update('guide', '1', vscode.ConfigurationTarget.Global);
+						}, 800);
+					}
+				} catch (e) {
+					global.logMessage(`[Guide] error: ${e.message}\n${e.stack}`, 'ERROR');
 				}
 				return;
 			}
@@ -1862,7 +1875,7 @@ function _registerCommands(context) {
 				}
 
 				// ★ Handle ioEngine switch: start the newly selected daemon
-				if (event.affectsConfiguration("qqq.ioEngine")) {
+				if (event.affectsConfiguration(`${global.cfgNs()}.ioEngine`)) {
 					const val = global.getEnginePreference();
 					global.logMessage(q('qqq.log.engineSwitch', val), "INFO");
 

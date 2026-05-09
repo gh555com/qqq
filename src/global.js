@@ -3173,7 +3173,9 @@ function getClientVersion() {
 function buildGh555Url(path, fragment) {
 	const ide = getIDEFamily();
 	const ver = getClientVersion();
-	const base = `https://www.gh555.com${path}?ref=qqq-${ide}&ver=${ver}`;
+	// ★ path 可能自带 query（如 /gaea/d/qqq?lang=zh），需正确拼接
+	const sep = path.includes('?') ? '&' : '?';
+	const base = `https://www.gh555.com${path}${sep}ref=qqq-${ide}&ver=${ver}`;
 	return fragment ? `${base}#${fragment}` : base;
 }
 
@@ -3205,8 +3207,18 @@ function getDynamicUrl(key, fallbackPath, fallbackFragment) {
 	const ide = getIDEFamily();
 	const ver = getClientVersion();
 	if (serverUrl) {
-		const sep = serverUrl.includes('?') ? '&' : '?';
-		return `${serverUrl}${sep}ref=qqq-${ide}&ver=${ver}`;
+		// ★ 必须在 fragment(#) 之前插入 ref/ver 参数
+		const hashIdx = serverUrl.indexOf('#');
+		let urlPart, hashPart;
+		if (hashIdx >= 0) {
+			urlPart = serverUrl.slice(0, hashIdx);
+			hashPart = serverUrl.slice(hashIdx); // 包含 #
+		} else {
+			urlPart = serverUrl;
+			hashPart = '';
+		}
+		const sep = urlPart.includes('?') ? '&' : '?';
+		return `${urlPart}${sep}ref=qqq-${ide}&ver=${ver}${hashPart}`;
 	}
 	if (fallbackPath) return buildGh555Url(fallbackPath, fallbackFragment);
 	return buildGh555Url('/gaea/d/qqq', 'profile');

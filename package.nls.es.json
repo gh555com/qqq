@@ -87,7 +87,6 @@
   "cmd.logout": "qqq: Cerrar sesión",
   "cmd.openProfile": "qqq: Perfil en la nube",
   "config.guide.title": "Guía de preferencias:",
-  "config.guide.label.none": "— Seleccionar acción —",
   "config.guide.label.1": "1. Obtener licencia",
   "config.guide.label.2": "2. Preferencias en la nube",
   "config.guide.label.3": "3. Haz clic aquí o mantén presionado el ⚙ de la barra lateral 1 segundo",

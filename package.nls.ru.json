@@ -87,7 +87,6 @@
   "cmd.logout": "qqq: Выйти",
   "cmd.openProfile": "qqq: Облачный профиль",
   "config.guide.title": "Руководство по настройкам:",
-  "config.guide.label.none": "— Выберите действие —",
   "config.guide.label.1": "1. Получить лицензию",
   "config.guide.label.2": "2. Облачные настройки",
   "config.guide.label.3": "3. Нажмите здесь или удерживайте ⚙ на боковой панели 1 секунду",

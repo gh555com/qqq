@@ -87,7 +87,6 @@
   "cmd.logout": "qqq: Log Out",
   "cmd.openProfile": "qqq: Cloud Profile",
   "config.guide.title": "Preference Guide:",
-  "config.guide.label.none": "— Select an action —",
   "config.guide.label.1": "1. Get Licensed",
   "config.guide.label.2": "2. Cloud Preferences",
   "config.guide.label.3": "3. Click me, or long-press the sidebar ⚙ gear for 1 second to pull cloud config",

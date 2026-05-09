@@ -87,7 +87,6 @@
   "cmd.logout": "qqq: ログアウト",
   "cmd.openProfile": "qqq: クラウド設定",
   "config.guide.title": "設定ガイド：",
-  "config.guide.label.none": "— 操作を選択 —",
   "config.guide.label.1": "1、ライセンスを取得",
   "config.guide.label.2": "2、クラウドに設定を保存",
   "config.guide.label.3": "3、ここをクリック、またはサイドバーの ⚙ を1秒長押しでクラウド設定を取得",
