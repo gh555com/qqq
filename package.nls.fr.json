@@ -90,5 +90,6 @@
   "config.guide.label.1": "1. Obtenir la licence",
   "config.guide.label.2": "2. Préférences cloud",
   "config.guide.label.3": "3. Cliquez ici ou maintenez l'⚙ de la barre latérale 1 seconde",
-  "config.guide.desc.common": "Les modifications locales ne sont pas sauvegardées (essai uniquement). Pour sauvegarder, obtenez une licence et modifiez vos préférences sur le site GH Health.\n\nMéthodes pour récupérer la configuration cloud :\n1. Sélectionnez l'option 3 ici.\n2. Maintenez le bouton engrenage 1 seconde (recommandé).\n3. Au redémarrage de la fenêtre."
+  "config.guide.desc.common": "Les modifications locales des préférences ne sont pas sauvegardées (essai uniquement). Pour sauvegarder vos préférences, enregistrez une licence et modifiez-les sur le site GH Health.\n\nMéthodes pour récupérer la configuration cloud :\n1. Sélectionnez l'option 3 \"Cliquez ici...\" ici même.\n2. Appuyez longuement sur le bouton engrenage de la barre latérale pendant 1 seconde (recommandé).\n3. Au redémarrage de la fenêtre.",
+  "config.guide.label.none": "— Sélectionner une action —"
 }
