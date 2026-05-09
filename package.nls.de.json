@@ -90,5 +90,6 @@
   "config.guide.label.1": "1. Lizenz erwerben",
   "config.guide.label.2": "2. Cloud-Einstellungen",
   "config.guide.label.3": "3. Hier klicken oder das Seitenleisten-⚙ 1 Sekunde lang drücken",
-  "config.guide.desc.common": "Lokale Einstellungsänderungen werden nicht gespeichert (nur zum Testen). Um Einstellungen zu speichern, registrieren Sie eine Lizenz und ändern Sie die Einstellungen auf der GH Health-Website.\n\nMethoden zum Abrufen der Cloud-Konfiguration:\n1. Hier Option 3 wählen.\n2. Seitenleisten-Zahnrad 1 Sekunde lang drücken (empfohlen).\n3. Beim Fensterneustart."
+  "config.guide.desc.common": "Lokale Einstellungsänderungen werden nicht gespeichert (nur zur Probe). Um Einstellungen zu speichern, registrieren Sie eine Lizenz und ändern Sie die Einstellungen auf der GH Health Website.\n\nMöglichkeiten, Cloud-Konfiguration abzurufen:\n1. Wählen Sie hier Option 3 \"Klick mich...\" aus.\n2. Seitenleisten-Zahnrad-Button 1 Sekunde lang drücken (empfohlen).\n3. Bei Fensterneustart.",
+  "config.guide.label.none": "— Aktion wählen —"
 }

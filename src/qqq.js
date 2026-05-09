@@ -1659,6 +1659,7 @@ function _registerCommands(context) {
 		}
 	};
 
+	let _guideResetting = false; // ★ 防止程序重置 guide 时触发事件
 	context.subscriptions.push(
 		safeRegisterCommand("qqq.showStatusPanel", global.withReady(() => {
 			// 状态栏点击 → 打开扩展设置界面（等同于 q4 齿轮按钮短按）
@@ -1839,6 +1840,10 @@ function _registerCommands(context) {
 				try {
 					const val = vscode.workspace.getConfiguration(ns).get('guide', '');
 					global.logMessage(`[Guide] selected: "${val}"`, 'INFO');
+					// ★ 空值 = 程序重置或初始状态，不触发任何操作
+					if (!val) return;
+					// ★ 防重入：重置期间忽略事件
+					if (_guideResetting) return;
 					if (val === '1') {
 						const url = global.getDynamicUrl('price', '/gaea/d/qqq', 'price');
 						global.logMessage(`[Guide] opening price: ${url}`, 'INFO');
@@ -1851,12 +1856,12 @@ function _registerCommands(context) {
 						global.logMessage('[Guide] pulling cloud config...', 'INFO');
 						await syncCloudConfig('', { silent: false });
 					}
-					// ★ 重置回 default（不保留选中状态）
-					if (val && val !== '1') {
-						setTimeout(() => {
-							vscode.workspace.getConfiguration(ns).update('guide', '1', vscode.ConfigurationTarget.Global);
-						}, 800);
-					}
+					// ★ 执行完毕后重置回空（不保留选中状态）
+					_guideResetting = true;
+					setTimeout(() => {
+						vscode.workspace.getConfiguration(ns).update('guide', '', vscode.ConfigurationTarget.Global)
+							.then(() => { _guideResetting = false; }, () => { _guideResetting = false; });
+					}, 800);
 				} catch (e) {
 					global.logMessage(`[Guide] error: ${e.message}\n${e.stack}`, 'ERROR');
 				}

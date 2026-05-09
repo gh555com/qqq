@@ -90,5 +90,6 @@
   "config.guide.label.1": "1. Obtener licencia",
   "config.guide.label.2": "2. Preferencias en la nube",
   "config.guide.label.3": "3. Haz clic aquí o mantén presionado el ⚙ de la barra lateral 1 segundo",
-  "config.guide.desc.common": "Los cambios locales no se guardan (solo prueba). Para guardar preferencias, registre una licencia y modifique en el sitio web de GH Health.\n\nFormas de obtener la configuración en la nube:\n1. Seleccione la opción 3 aquí.\n2. Mantenga presionado el engranaje 1 segundo (recomendado).\n3. Al reiniciar la ventana."
+  "config.guide.desc.common": "Los cambios de preferencias locales no se guardan (solo prueba). Para guardar preferencias, registre una licencia y modifíquelas en el sitio web de GH Health.\n\nFormas de obtener la configuración en la nube:\n1. Seleccione la opción 3 \"Haga clic aquí...\" aquí mismo.\n2. Mantenga pulsado el botón de engranaje de la barra lateral durante 1 segundo (recomendado).\n3. Al reiniciar la ventana.",
+  "config.guide.label.none": "— Seleccionar acción —"
 }

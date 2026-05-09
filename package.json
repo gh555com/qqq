@@ -1,17 +1,8 @@
 {
-
-
-
-
-
-
-  "name": "Ric",
+  "name": "ric",
   "displayName": "RichNote",
-
-
-
-  "publisher": "jarekw",
-  "version": "16.14.2",
+  "publisher": "KeeleyLednergznl",
+  "version": "1.1.2",
   "description": "gif,Paste image,File Explorer,Rich text,WYSIWYG,Preview,粘贴图片,文件管理器,富文本,所见既得,预览。画像の貼り付け,ファイルマネージャー,リッチテキスト,WYSIWYG, プレビュー。Bild einfügen,Dateimanager,Rich-Text,WYSIWYG,Vorschau。이미지 붙여넣기,파일 관리자,리치 텍스트,WYSIWYG,미리보기。Вставить изображение,Диспетчер файлов,Рич-текст,WYSIWYG,Предварительный просмотр。لصق الصورة,مدير الملفات,نص منسق,WYSIWYG,معاينة。Pegar imagen,Administrador de archivos,Texto enriquecido,WYSIWYG,Vista previa。Coller une image,Gestionnaire de fichiers,Texte enrichi,WYSIWYG,Aperçu。Colar imagem,Gerenciador de arquivos,Texto rico,WYSIWYG,Pré-visualização。छवि चिपकाएं,फ़ाइल प्रबंधक,समृद्ध पाठ,WYSIWYG,पूर्वावलोकन。Dán hình ảnh,Trình quản lý tệp,Văn bản đa dạng thức,WYSIWYG,Xem trước。",
   "icon": "assets/q.gif",
   "engines": {
@@ -41,21 +32,24 @@
           "qqq.guide": {
             "order": 1,
             "type": "string",
-            "default": "1",
+            "default": "",
             "enum": [
+              "",
               "1",
               "2",
               "3"
             ],
             "enumItemLabels": [
+              "%config.guide.label.none%",
               "%config.guide.label.1%",
               "%config.guide.label.2%",
               "%config.guide.label.3%"
             ],
             "markdownEnumDescriptions": [
               "%config.guide.desc.common%",
-              "%config.guide.desc.common%",
-              "%config.guide.desc.common%"
+              "",
+              "",
+              ""
             ],
             "markdownDescription": "%config.guide.title%"
           },
