@@ -87,7 +87,6 @@
   "cmd.logout": "qqq: 退出登录",
   "cmd.openProfile": "qqq: 云端配置页",
   "config.guide.title": "偏好指引：",
-  "config.guide.label.none": "— 选择操作 —",
   "config.guide.label.1": "1、获取正版",
   "config.guide.label.2": "2、云端储存偏好",
   "config.guide.label.3": "3、点我，或长按侧边 ⚙ 齿轮按钮一秒，以拉取云端配置",

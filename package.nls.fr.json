@@ -87,7 +87,6 @@
   "cmd.logout": "qqq: Se déconnecter",
   "cmd.openProfile": "qqq: Profil cloud",
   "config.guide.title": "Guide des préférences :",
-  "config.guide.label.none": "— Sélectionner une action —",
   "config.guide.label.1": "1. Obtenir la licence",
   "config.guide.label.2": "2. Préférences cloud",
   "config.guide.label.3": "3. Cliquez ici ou maintenez l'⚙ de la barre latérale 1 seconde",

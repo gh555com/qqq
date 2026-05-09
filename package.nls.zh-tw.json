@@ -87,7 +87,6 @@
   "cmd.logout": "qqq: 登出",
   "cmd.openProfile": "qqq: 雲端設定頁",
   "config.guide.title": "偏好指引：",
-  "config.guide.label.none": "— 選擇操作 —",
   "config.guide.label.1": "1、取得正版",
   "config.guide.label.2": "2、雲端儲存偏好",
   "config.guide.label.3": "3、點我，或長按側邊 ⚙ 齒輪按鈕一秒，以拉取雲端設定",

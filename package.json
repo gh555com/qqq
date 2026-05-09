@@ -41,21 +41,18 @@
           "qqq.guide": {
             "order": 1,
             "type": "string",
-            "default": "",
+            "default": "1",
             "enum": [
-              "",
               "1",
               "2",
               "3"
             ],
             "enumItemLabels": [
-              "%config.guide.label.none%",
               "%config.guide.label.1%",
               "%config.guide.label.2%",
               "%config.guide.label.3%"
             ],
             "markdownEnumDescriptions": [
-              "%config.guide.desc.common%",
               "%config.guide.desc.common%",
               "%config.guide.desc.common%",
               "%config.guide.desc.common%"

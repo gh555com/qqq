@@ -87,7 +87,6 @@
   "cmd.logout": "qqq: تسجيل الخروج",
   "cmd.openProfile": "qqq: الملف السحابي",
   "config.guide.title": "دليل التفضيلات:",
-  "config.guide.label.none": "— اختر إجراءً —",
   "config.guide.label.1": "1. الحصول على الترخيص",
   "config.guide.label.2": "2. تفضيلات السحابة",
   "config.guide.label.3": "3. انقر هنا أو اضغط مطولاً على ⚙ في الشريط الجانبي لمدة ثانية",

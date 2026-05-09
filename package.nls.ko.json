@@ -87,7 +87,6 @@
   "cmd.logout": "qqq: 로그아웃",
   "cmd.openProfile": "qqq: 클라우드 프로필",
   "config.guide.title": "환경설정 가이드:",
-  "config.guide.label.none": "— 작업 선택 —",
   "config.guide.label.1": "1. 정품 구매",
   "config.guide.label.2": "2. 클라우드 환경설정",
   "config.guide.label.3": "3. 여기를 클릭하거나, 사이드바 ⚙ 기어를 1초 길게 눌러 클라우드 설정 가져오기",
