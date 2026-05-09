@@ -1567,6 +1567,12 @@ async function checkAndInstallLinuxDeps(fromPaste = false) {
 		return;
 	}
 
+	// ★ attr is non-critical (only for setfattr tagging); if only attr is missing, don't bother user
+	if (hasXclip && !hasAttr) {
+		logMessage('Linux dependency check: only attr missing (non-critical, skip prompt)', 'INFO');
+		return;
+	}
+
 	logMessage(`Linux dependency check: missing [${missing.join(', ')}], prompting user`, 'INFO');
 
 	// Detect package manager and build install command
@@ -1607,17 +1613,15 @@ async function checkAndInstallLinuxDeps(fromPaste = false) {
 				const nowHasXclip = await checkXclipInstalled();
 				_xclipAvailable = nowHasXclip;
 				const nowHasAttr = await _checkCommandExists('setfattr');
-				if (nowHasXclip && nowHasAttr) {
-					showAutoCloseNotification('success', 'qqq: All dependencies installed successfully');
-					logMessage('Linux deps install success (xclip + attr)', 'INFO');
+				if (nowHasXclip) {
+					// ★ xclip is the critical dep; attr failure is acceptable
+					showAutoCloseNotification('success', 'qqq: Dependencies installed successfully');
+					logMessage(`Linux deps install success (xclip=OK, attr=${nowHasAttr ? 'OK' : 'SKIP'})`, 'INFO');
 					// ★ Clear cooldown on successful install
 					if (extensionContext) extensionContext.globalState.update('linux_deps_dismissed_ts', undefined);
 				} else {
-					const still = [];
-					if (!nowHasXclip) still.push('xclip');
-					if (!nowHasAttr) still.push('attr');
-					showAutoCloseNotification('warning', `qqq: Still missing: ${still.join(', ')}`);
-					logMessage(`Linux deps install may have failed, still missing: ${still.join(', ')}`, 'WARN');
+					showAutoCloseNotification('warning', 'qqq: xclip install failed — paste may not work correctly');
+					logMessage(`Linux deps install failed: xclip still missing`, 'WARN');
 				}
 			}
 		});
@@ -1685,6 +1689,53 @@ async function cleanupGhostDaemons() {
 	// No-op: no longer clean up any processes
 }
 
+/**
+ * ★ Kill ghost Rust daemon processes that belong to this extension host's PID
+ * but are NOT currently tracked by rustBridge.process.
+ * This prevents accumulation when extension host restarts without properly killing the old daemon.
+ */
+function _killGhostRustProcesses() {
+	if (process.platform !== 'win32' && process.platform !== 'linux') return;
+	const cp = require('child_process');
+	const myPid = process.pid;
+	const currentRustPid = rustBridge.process?.pid;
+
+	try {
+		if (process.platform === 'win32') {
+			// Find q_win_x64.exe processes with --daemon argument
+			const out = cp.execSync('wmic process where "commandline like \'%q_win_x64%\' and commandline like \'%--daemon%\'" get processid,parentprocessid /format:csv', { encoding: 'utf8', timeout: 5000 });
+			const lines = out.split(/\r?\n/).filter(l => l.trim() && !l.startsWith('Node'));
+			for (const line of lines) {
+				const parts = line.split(',').map(s => s.trim());
+				// CSV format: Node,ParentProcessId,ProcessId
+				const ppid = parseInt(parts[1]);
+				const pid = parseInt(parts[2]);
+				if (isNaN(pid) || isNaN(ppid)) continue;
+				// Only kill ghosts: same parent (our extension host) but NOT the one we're about to use
+				if (ppid === myPid && pid !== currentRustPid) {
+					logMessage(`[GhostClean] Killing orphan Rust daemon PID=${pid} (parent=${ppid})`, 'INFO');
+					try { process.kill(pid); } catch { }
+				}
+			}
+		} else {
+			// Linux: find q_linux_x64 --daemon processes
+			const out = cp.execSync('ps -eo pid,ppid,args | grep "q_linux_x64.*--daemon" | grep -v grep', { encoding: 'utf8', timeout: 5000 }).trim();
+			for (const line of out.split('\n')) {
+				const m = line.trim().match(/^(\d+)\s+(\d+)/);
+				if (!m) continue;
+				const pid = parseInt(m[1]);
+				const ppid = parseInt(m[2]);
+				if (ppid === myPid && pid !== currentRustPid) {
+					logMessage(`[GhostClean] Killing orphan Rust daemon PID=${pid} (parent=${ppid})`, 'INFO');
+					try { process.kill(pid); } catch { }
+				}
+			}
+		}
+	} catch {
+		// Command failed or no matching processes — perfectly fine
+	}
+}
+
 async function startDaemons() {
 	// ★ Ultimate fix: check if any bridge is available or starting
 	// available === true means usable
@@ -1697,9 +1748,14 @@ async function startDaemons() {
 
 	if (pythonBusy || rustBusy || shellBusy) {
 		logMessage(q('daemons.bridgeBusy', pythonBusy, rustBusy, shellBusy), "INFO");
+		// ★ Even if Python is busy, if Rust is NOT busy we should still kill any ghost Rust processes
+		// that may be lingering from a previous extension host lifecycle
+		if (!rustBusy) {
+			try { _killGhostRustProcesses(); } catch { }
+		}
 	} else {
 		// ★ Primary init task: purge all "previous life" residual ghost processes
-		try { await cleanupGhostDaemons(); } catch (e) { }
+		try { _killGhostRustProcesses(); } catch { }
 	}
 
 	const bootSeq = ++_daemonBootSeq;
@@ -4662,7 +4718,13 @@ function _getEmbeddedChromePath(chromeHome) {
  * the merged result will have all 88+3 unique items (minus deduplicates).
  * No data is ever lost from either side.
  */
+let _cloudLok = false; // ★ 防报锁：上传/下载期间禁止重复发起
 async function uploadUserData() {
+	// ★ 防抠：正在进行中则轻量提示并返回
+	if (_cloudLok) {
+		showAutoCloseNotification('info', q('wq.lok'), 3);
+		return { success: false };
+	}
 	// ★ Auth gate: ensure user has valid token (triggers SMS verify if needed)
 	const auth = await _ensureAuth();
 	if (!auth) return { success: false };
@@ -4684,6 +4746,7 @@ async function uploadUserData() {
 	}
 
 	showAutoCloseNotification('info', q('wq.uploading'));
+	_cloudLok = true;
 
 	try {
 		const paths = _getUserDataPaths();
@@ -4777,6 +4840,7 @@ async function uploadUserData() {
 			return { success: true };
 		} else {
 			let reason = data.error || 'unknown';
+			logMessage(`[wq] Upload rejected by server: ${reason}`, 'WARN');
 			if (data.error === 'not_purchased') reason = q('wq.errNotPurchased');
 			else if (data.error === 'rate_limit') reason = q('wq.errRateLimit');
 			else if (data.error === 'quota_exceeded') reason = q('wq.errQuotaExceeded');
@@ -4789,6 +4853,8 @@ async function uploadUserData() {
 		logMessage(`[wq] Upload user data error: ${e.message}`, 'WARN');
 		showAutoCloseNotification('error', q('wq.uploadFailed', q('wq.errNetwork')));
 		return { success: false };
+	} finally {
+		_cloudLok = false;
 	}
 }
 
@@ -4797,6 +4863,11 @@ async function uploadUserData() {
  * Uses the same set-union merge logic to ensure no local data is lost.
  */
 async function pullUserData() {
+	// ★ 防抠：正在进行中则轻量提示并返回
+	if (_cloudLok) {
+		showAutoCloseNotification('info', q('wq.lok'), 3);
+		return { success: false };
+	}
 	// ★ Auth gate: ensure user has valid token (triggers SMS verify if needed)
 	const auth = await _ensureAuth();
 	if (!auth) return { success: false };
@@ -4818,12 +4889,14 @@ async function pullUserData() {
 	}
 
 	showAutoCloseNotification('info', q('wq.pulling'));
+	_cloudLok = true;
 
 	try {
 		const data = await _httpsPost('/gaea/qqq/user-data/pull', { phone: auth.phone, device_id: deviceId, device_name: _buildDeviceName(), token: auth.token, keys: USER_DATA_BLOB_KEYS });
 
 		if (!data.ok) {
 			let reason = data.error || 'unknown';
+			logMessage(`[wq] Pull rejected by server: ${reason}`, 'WARN');
 			if (data.error === 'not_purchased') reason = q('wq.errNotPurchased');
 			else if (data.error === 'rate_limit') reason = q('wq.errRateLimit');
 			else if (data.error === 'quota_exceeded') reason = q('wq.errQuotaExceeded');
@@ -4903,6 +4976,8 @@ async function pullUserData() {
 		logMessage(`[wq] Pull user data error: ${e.message}`, 'WARN');
 		showAutoCloseNotification('error', q('wq.pullFailed', q('wq.errNetwork')));
 		return { success: false };
+	} finally {
+		_cloudLok = false;
 	}
 }
 
