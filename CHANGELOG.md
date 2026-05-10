@@ -6,6 +6,36 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [16.4.2] - 2026-05-05
+
+### Fixed
+- **Extension startup no longer freezes the editor**: Previously, opening a window could cause 7-8 seconds of unresponsiveness (unable to click, type, or switch tabs) because internal config cleanup ran synchronously one-by-one, flooding the editor with 30+ redundant refresh events. Now batched with a single debounced refresh — startup is instant.
+- **macOS: browsing home directory no longer errors**: Navigating to `~` in Roam would trigger permission errors from the system-protected `.Trash` folder. Now automatically skipped.
+- **macOS: audio engine no longer attempts recovery after exit**: Closing the extension could trigger a spurious "failed to init device" error in the background. Fixed.
+- **macOS: no more "Broken pipe" errors in broker log**: The audio broker now cleanly disconnects without socket write errors.
+- **macOS: xattr warnings no longer leak to console**: Internal ownership checks on directories previously printed "No such xattr" to the debug console. Silenced.
+
+### Added
+- **macOS: Space+Q global hotkey now works**: The "press Space+Q anywhere to bring IDE to front" feature previously only worked on Windows. Now fully functional on macOS — activates the correct app (VS Code, Cursor, Qoder, etc.) via AppleScript. Requires Accessibility permission (System Settings → Privacy & Security → Accessibility).
+
+### macOS vs Windows — what's the same, what's different
+
+| Feature | Windows | macOS | Notes |
+|---------|---------|-------|-------|
+| Roam file browsing (q/w/d/e/a) | Same | Same | Single-key shortcuts, no modifier needed |
+| Copy/Paste/Select All in Roam | Ctrl+C/V/A | Cmd+C/V/A | Automatically handled — just use Cmd |
+| Paste anything in editor | Ctrl+V | Cmd+V | VS Code maps this automatically |
+| Space+Q bring IDE to front | Works | Works (new!) | macOS needs Accessibility permission once |
+| Terminal shortcut (a key) | Opens Admin CMD | Opens Terminal.app | Platform-native terminal |
+| .lnk shortcut jump | Works | N/A | .lnk is Windows-only |
+| Shift+Delete permanent delete | Works | Works | Same behavior |
+| Sound effects & radio | Works | Works | Same audio engine |
+
+**For macOS users**: All keyboard shortcuts use **Cmd** (⌘) instead of Ctrl. You don't need to configure anything — this is handled automatically. The only new setup needed is granting Accessibility permission if you want the Space+Q global hotkey.
+
+---
+
+
 ## [16.4.1] - 2026-05-05
 
 ### Improved

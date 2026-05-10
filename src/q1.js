@@ -3694,27 +3694,31 @@ async function activate(context) {
 
 	// ★ Ultimate fix: receive config update notifications via ConfigGate callback mechanism (solves race conditions)
 	// Previously listening to onDidChangeConfiguration caused refreshConfig() to run before sessionOverrides update
+	let _cfgUpdateTimer = null;
 	global.ConfigManager.onConfigUpdated((changedKeys, event) => {
 		global.logMessage(q('q1.log.configUpdateCallback', changedKeys.join(', ')), "DEBUG");
-		const oldCleanFreakMode = cleanFreakMode; // ★ Remember old value before refresh
-		const oldFrameSizeMode = frameSizeMode;   // ★ Remember old frame size mode
-		refreshConfig();
-		clearDecorations();
-		if (codeLensProvider) codeLensProvider.refresh();
-		renderVisibleEditors(10);
+		// ★ Debounce: if multiple config keys change in rapid succession, only execute once (300ms)
+		if (_cfgUpdateTimer) clearTimeout(_cfgUpdateTimer);
+		_cfgUpdateTimer = setTimeout(() => {
+			_cfgUpdateTimer = null;
+			const oldCleanFreakMode = cleanFreakMode;
+			const oldFrameSizeMode = frameSizeMode;
+			refreshConfig();
+			clearDecorations();
+			if (codeLensProvider) codeLensProvider.refresh();
+			renderVisibleEditors(10);
 
-		// ★★★ If frameSizeMode changed, trigger full update (blank lines may need adjustment) ★★★
-		if (frameSizeMode !== oldFrameSizeMode) {
-			global.logMessage(`[Config] frameSizeMode changed: ${oldFrameSizeMode} -> ${frameSizeMode}, triggering full update.`, "DEBUG");
-			forceFullUpdateAllVisibleEditors();
-		} else if (getEffectiveCleanFreakMode() !== "never") {
-			performGlobalClean(vscode.window.activeTextEditor);
-		}
+			if (frameSizeMode !== oldFrameSizeMode) {
+				global.logMessage(`[Config] frameSizeMode changed: ${oldFrameSizeMode} -> ${frameSizeMode}, triggering full update.`, "DEBUG");
+				forceFullUpdateAllVisibleEditors();
+			} else if (getEffectiveCleanFreakMode() !== "never") {
+				performGlobalClean(vscode.window.activeTextEditor);
+			}
 
-		// ★ Notify q4 if cleanFreakMode changed (for weave button sync)
-		if (cleanFreakMode !== oldCleanFreakMode && q1Utils.onCleanFreakModeChange) {
-			q1Utils.onCleanFreakModeChange(cleanFreakMode);
-		}
+			if (cleanFreakMode !== oldCleanFreakMode && q1Utils.onCleanFreakModeChange) {
+				q1Utils.onCleanFreakModeChange(cleanFreakMode);
+			}
+		}, 300);
 	});
 
 	// ★ 水印状态变化时刷新所有已渲染的相框

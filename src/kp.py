@@ -132,6 +132,9 @@ _DEVICE_LOST_LAST_RESET = 0  # ★ Cooldown: prevent device_lost reset spam
 def _on_audio_device_lost():
     """★ 当音乐引擎检测到设备丢失时触发，联动重置 SFX 引擎（30s冷却防死循环）"""
     global _DEVICE_LOST_LAST_RESET
+    # ★ If broker is shutting down, skip recovery entirely
+    if _SHUTDOWN_FLAG:
+        return
     now = time.time()
     # ★ Cooldown: screensaver/sleep can trigger device_lost every ~8s, only reset once per 30s
     if now - _DEVICE_LOST_LAST_RESET < 30:
@@ -726,13 +729,47 @@ def _test_activate_vscode():
     Find and activate IDE window with visible q2. Returns True if activated.
     Reads hwnd directly from temp file written by JS side.
     """
-    if platform.system() != 'Windows':
-        return False
-
     import tempfile
     import json
 
     tracking_file = os.path.join(tempfile.gettempdir(), 'vix_q2_windows.json')
+
+    # ★ macOS: use osascript to activate the app by bundle name
+    if platform.system() == 'Darwin':
+        records = {}
+        try:
+            if os.path.exists(tracking_file):
+                with open(tracking_file, 'r', encoding='utf-8') as f:
+                    records = json.load(f)
+        except Exception as e:
+            _log(f"[Hotkey] macOS: Failed to read tracking file: {e}")
+            return False
+
+        if not records:
+            _log("[Hotkey] macOS: No q2 windows in tracking file")
+            return False
+
+        # Find the most recent mac_ entry
+        mac_entries = [(k, v) for k, v in records.items() if k.startswith('mac_') and isinstance(v, dict) and 'app' in v]
+        if not mac_entries:
+            _log("[Hotkey] macOS: No mac entries in tracking file")
+            return False
+
+        mac_entries.sort(key=lambda x: x[1].get('ts', 0), reverse=True)
+        app_name = mac_entries[0][1]['app']
+        _log(f"[Hotkey] macOS: Activating app '{app_name}'")
+
+        try:
+            import subprocess
+            subprocess.Popen(['osascript', '-e', f'tell application "{app_name}" to activate'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except Exception as e:
+            _log(f"[Hotkey] macOS: osascript failed: {e}")
+            return False
+
+    if platform.system() != 'Windows':
+        return False
     user32 = ctypes.windll.user32
     current = user32.GetForegroundWindow()
 
@@ -1458,10 +1495,13 @@ def _get_recycle_bin_size(drives: list = None) -> int:
                 if os.path.isdir(recycle_path):
                     total += _get_folder_size_fast(recycle_path)
     elif platform.system() == "Darwin":
-        # macOS: ~/.Trash
+        # macOS: ~/.Trash (may require Full Disk Access permission)
         trash_path = os.path.expanduser("~/.Trash")
         if os.path.isdir(trash_path):
-            total += _get_folder_size_fast(trash_path)
+            try:
+                total += _get_folder_size_fast(trash_path)
+            except PermissionError:
+                pass  # ★ SIP protects .Trash without Full Disk Access
     else:
         # Linux: ~/.local/share/Trash/files
         trash_path = os.path.expanduser("~/.local/share/Trash/files")
@@ -3002,6 +3042,7 @@ def _broker_dispatch(cmd: dict, cancel_version: int = None) -> dict:
     if action == "bye":
         # Graceful disconnect hint from client — acknowledge and let lease handle cleanup
         out["status"] = "goodbye"
+        out["_bye"] = True  # ★ Signal to skip sendall (client already disconnecting)
         return out
 
     res = _dispatch_action(cmd, cancel_version, allow_process_exit=False)
@@ -3083,6 +3124,9 @@ def _unix_client_loop(conn: socket.socket):
 
                 if action not in _QUIET_ACTIONS:
                     _log(f"[TCP/Unix] Send: _id={res.get('_id')}, ok={res.get('ok')}")
+                # ★ bye: client already disconnecting, skip sendall to avoid Broken pipe
+                if res.get("_bye"):
+                    break
                 try:
                     conn.sendall((json.dumps(res, ensure_ascii=False) + "\n").encode("utf-8"))
                 except Exception as e:
