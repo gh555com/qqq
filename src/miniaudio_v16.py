@@ -2335,6 +2335,11 @@ def az(file_path: str, loop_times: int, final_fade_seconds: float, trim_silence:
 _SENTINEL = object()
 
 class UltraFastConcurrentSFX:
+    """★ Rewritten to use a SINGLE persistent PlaybackDevice with mixing.
+    Old design created a new PlaybackDevice per sound → device handle exhaustion
+    when multiple miniaudio instances coexist (e.g. external q3.py + our broker).
+    New design: one device, mix all concurrent voices into a single output stream.
+    """
     def __init__(self, max_concurrent_voices=24, submit_queue_size=1024, sample_rate=44100, nchannels=2, sample_format=None):
         if miniaudio is None:
             raise RuntimeError("miniaudio not available")
@@ -2344,6 +2349,7 @@ class UltraFastConcurrentSFX:
         self.sample_rate = sample_rate
         self.nchannels = nchannels
         self.sample_format = sample_format
+        self._max_voices = max_concurrent_voices
 
         self._submit_q = queue.Queue(maxsize=submit_queue_size)
         self._cache = {}
@@ -2352,7 +2358,12 @@ class UltraFastConcurrentSFX:
         self._running = threading.Event()
         self._running.set()
 
-        self._pool = ThreadPoolExecutor(max_workers=max_concurrent_voices, thread_name_prefix="sfx-voice")
+        # ★ Single persistent device + mixer
+        self._voices_lock = threading.Lock()
+        self._voices = []  # list of {"pcm": bytes, "offset": int, "length": int}
+        self._device = None
+        self._device_lock = threading.Lock()
+
         self._dispatch_thread = threading.Thread(target=self._dispatch_loop, name="sfx-dispatch", daemon=True)
         self._dispatch_thread.start()
 
@@ -2375,7 +2386,11 @@ class UltraFastConcurrentSFX:
         except Exception:
             pass
         self._dispatch_thread.join(timeout=2.0)
-        self._pool.shutdown(wait=False, cancel_futures=False)
+        with self._device_lock:
+            if self._device:
+                try: self._device.close()
+                except Exception: pass
+                self._device = None
 
     def _decode_cache(self, path):
         if not os.path.isfile(path):
@@ -2401,27 +2416,92 @@ class UltraFastConcurrentSFX:
             item = self._submit_q.get()
             if item is _SENTINEL:
                 break
-            self._pool.submit(self._voice_worker, item)
+            self._add_voice(item)
 
-    def _voice_worker(self, path):
+    def _add_voice(self, path):
         cached = self._decode_cache(path)
         if not cached:
             return
         pcm_bytes, duration = cached
-        device = None
-        try:
-            device = miniaudio.PlaybackDevice(output_format=self.sample_format, nchannels=self.nchannels, sample_rate=self.sample_rate)
-            stream = miniaudio.stream_raw_pcm_memory(pcm_bytes, nchannels=self.nchannels, sample_rate=self.sample_rate, output_format=self.sample_format)
-            device.start(stream)
-            time.sleep((duration if duration > 0 else 0.2) + 0.02)
-        except Exception:
-            pass
-        finally:
-            if device:
-                try: device.stop()
-                except Exception: pass
-                try: device.close()
-                except Exception: pass
+        voice = {"pcm": pcm_bytes, "offset": 0, "length": len(pcm_bytes)}
+        with self._voices_lock:
+            # ★ Limit concurrent voices to prevent memory bloat
+            if len(self._voices) >= self._max_voices:
+                self._voices.pop(0)  # drop oldest
+            self._voices.append(voice)
+        # ★ Ensure persistent device is running
+        self._ensure_device()
+
+    def _ensure_device(self):
+        with self._device_lock:
+            if self._device is not None:
+                return
+            try:
+                self._device = miniaudio.PlaybackDevice(
+                    output_format=self.sample_format,
+                    nchannels=self.nchannels,
+                    sample_rate=self.sample_rate,
+                )
+                self._device.start(self._mix_generator())
+            except Exception:
+                self._device = None
+
+    def _mix_generator(self):
+        """★ Single generator that mixes all active voices into one output stream."""
+        import array
+        bytes_per_sample = 2  # SIGNED16
+        frame_size = bytes_per_sample * self.nchannels
+        # Yield small chunks (~10ms) for low latency
+        chunk_frames = self.sample_rate // 100
+        chunk_bytes = chunk_frames * frame_size
+        silence_frames = 0
+        max_silence = self.sample_rate * 2  # 2s of silence → stop device to save resources
+
+        while self._running.is_set():
+            with self._voices_lock:
+                active = [v for v in self._voices if v["offset"] < v["length"]]
+                # Remove finished voices
+                self._voices = active
+
+            if not active:
+                silence_frames += chunk_frames
+                if silence_frames >= max_silence:
+                    # ★ No voices for 2s → stop device to release handle
+                    with self._device_lock:
+                        if self._device:
+                            # Schedule close on another thread to avoid deadlock
+                            dev = self._device
+                            self._device = None
+                            threading.Thread(target=lambda d: (d.close()), args=(dev,), daemon=True).start()
+                    return  # exit generator
+                # Yield silence
+                yield bytes(chunk_bytes)
+                continue
+
+            silence_frames = 0
+            # Mix voices
+            mixed = array.array('h', [0] * (chunk_frames * self.nchannels))
+            for v in active:
+                pcm = v["pcm"]
+                start = v["offset"]
+                end = min(start + chunk_bytes, v["length"])
+                # Read samples from this voice
+                voice_chunk = pcm[start:end]
+                v["offset"] = end
+                # Mix (additive with clamp)
+                num_samples = len(voice_chunk) // bytes_per_sample
+                voice_arr = array.array('h')
+                voice_arr.frombytes(voice_chunk if isinstance(voice_chunk, bytes) else bytes(voice_chunk))
+                for i in range(min(num_samples, len(mixed))):
+                    s = mixed[i] + voice_arr[i]
+                    # Clamp to int16 range
+                    if s > 32767: s = 32767
+                    elif s < -32768: s = -32768
+                    mixed[i] = s
+
+            yield mixed.tobytes()
+        # Generator exit
+        return
 
 
 # =========================
