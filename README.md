@@ -55,7 +55,7 @@
  Full source code transparency, security, and auditability are guaranteed. [Feedback & Issues](https://github.com/gh555com/qqq/issues)
 
 
- Original name: qqq [![GitHub stars](https://img.shields.io/github/stars/gh555com/qqq?style=social)](https://github.com/gh555com/qqq)
+ Original **name**: qqq [![GitHub stars](https://img.shields.io/github/stars/gh555com/qqq?style=social)](https://github.com/gh555com/qqq)
 
   **qqq 16.4.1+ required for Linux / macOS.** [Details](#how-to-install)  ![](https://gh555.com/px?g=qqq&s=jarekw.richnote.readme)
 
@@ -228,5 +228,8 @@ Virus detection or submission: https://www.avira.com/en/analysis/submit
 
 
 
- <a href="https://www.gh555.com"> GH Health </a> All Rights Reserved.
+ <a href="https://www.gh555.com">GH Health</a> All Rights Reserved.
+
+
+
 

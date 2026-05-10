@@ -82,11 +82,41 @@ const Q2_TRACKING_FILE = path.join(os.tmpdir(), 'vix_q2_windows.json');
 const _updateQ2TrackingFile = (action) => {
   // action: 'register' - add/update this window in tracking file
   if (!activePanelAlive || action !== 'register') return;
-  if (process.platform !== 'win32') return; // ★ HWND is Windows-only, skip on Linux/macOS
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return; // ★ Windows: HWND, macOS: app bundle name
   if (!global.pythonBridge?.isAvailable()) return;
 
-  // Get current foreground window hwnd via Python and write to file
   const procName = path.basename(process.execPath);
+
+  // ★ macOS: no HWND concept, directly write app bundle name to tracking file
+  if (process.platform === 'darwin') {
+    try {
+      let records = {};
+      if (fs.existsSync(Q2_TRACKING_FILE)) {
+        try { records = JSON.parse(fs.readFileSync(Q2_TRACKING_FILE, 'utf8')); } catch {}
+      }
+      // Extract .app bundle name from execPath: /Applications/Visual Studio Code.app/Contents/MacOS/Electron → "Visual Studio Code"
+      const execP = process.execPath;
+      const appMatch = execP.match(/\/([^/]+)\.app\//);
+      const appName = appMatch ? appMatch[1] : procName;
+      const key = `mac_${process.pid}`;
+      records[key] = { ts: Date.now(), proc: procName, app: appName };
+      // Clean stale
+      const now = Date.now();
+      const sevenDays = 7 * 24 * 60 * 60 * 1000;
+      for (const k in records) {
+        const entry = records[k];
+        if (typeof entry !== 'object' || !entry.ts || (now - entry.ts) > sevenDays) {
+          delete records[k];
+        }
+      }
+      fs.writeFileSync(Q2_TRACKING_FILE, JSON.stringify(records), 'utf8');
+    } catch (e) {
+      console.error('[q2.js] _updateQ2TrackingFile macOS write error:', e);
+    }
+    return;
+  }
+
+  // ★ Windows: Get current foreground window hwnd via Python and write to file
   global.pythonBridge.call("get_foreground_hwnd", { expected_proc: procName }, 1000)
     .then(r => {
       if (r?.hwnd) {
@@ -1527,6 +1557,9 @@ async function getDirectoryContents(dirPath, sortBy = "name", szDisplayMode = "n
       const isFile = type === vscode.FileType.File;
 
       if (!isDir && !isFile) continue;
+
+      // ★ Skip system-protected directories that cause EPERM on macOS/Linux
+      if (isDir && (name === '.Trash' || name === '$Recycle.Bin')) continue;
 
       const itemPath = path.join(canonDir, name);
       const item = {
@@ -4561,7 +4594,7 @@ function showSaveAsDialog() {
   _updateQ2TrackingFile('register')
 
   // ★ Re-register hwnd when broker becomes ready (fixes Space+Q delay after broker restart)
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' || process.platform === 'darwin') {
     global.onBrokerReady(() => {
       if (activePanelAlive) _updateQ2TrackingFile('register');
     });

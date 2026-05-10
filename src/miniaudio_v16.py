@@ -1811,12 +1811,34 @@ class NonBlockingAudioEngine:
                     device.start(gen)
 
                     # 监控循环：检测设备静音/断流
+                    _last_recovery_time = 0  # ★ Track rapid recovery cycling (screensaver scenario)
+                    _rapid_recovery_count = 0  # ★ How many times we recovered within a short window
                     while not token.stopped:
                         time.sleep(0.5)
                         # ★ Device actively pulling data → it's healthy, reset failure counter
                         if _consecutive_device_failures > 0 and token.device_silent_seconds() < 1.0:
                             _consecutive_device_failures = 0
+                        # ★ If device is healthy for >60s after a recovery, reset rapid counter
+                        if _rapid_recovery_count > 0 and _last_recovery_time > 0 and (time.time() - _last_recovery_time) > 60:
+                            _rapid_recovery_count = 0
                         if device and token.device_silent_seconds() > 5.0:
+                            # ★ Anti-storm: if recovering too frequently (screensaver), wait before retrying
+                            if _rapid_recovery_count > 0:
+                                storm_wait = min(10.0 * _rapid_recovery_count, 120.0)
+                                self._log_critical(f"[Radio] Screensaver storm detected (cycle #{_rapid_recovery_count}), waiting {storm_wait:.0f}s before recovery")
+                                _storm_start = time.time()
+                                while not token.stopped and (time.time() - _storm_start) < storm_wait:
+                                    time.sleep(1.0)
+                                    # ★ If device resumes pulling on its own (wake from sleep), cancel wait
+                                    if token.device_silent_seconds() < 2.0:
+                                        self._log_critical("[Radio] Device resumed during wait — system woke up")
+                                        break
+                                if token.stopped:
+                                    break
+                                # ★ Re-check: device might have woken up during wait
+                                if token.device_silent_seconds() < 2.0:
+                                    _rapid_recovery_count = 0
+                                    continue
                             if self._on_device_lost:
                                 try: self._on_device_lost()
                                 except Exception: pass
@@ -1846,12 +1868,32 @@ class NonBlockingAudioEngine:
                                     gen_detach = threading.Event()
                                     gen = self._radio_stream_gen(source_stream, token, already_primed=True, detach=gen_detach)
                                     next(gen)  # prime wrapper
-                                    device = self.PlaybackDevice(
-                                        output_format=self.REQUESTED_FORMAT,
-                                        nchannels=self.REQUESTED_CHANNELS,
-                                        sample_rate=self.REQUESTED_RATE,
-                                    )
-                                    device.start(gen)
+                                    # ★ Device creation with timeout: PlaybackDevice() can hang during screensaver/sleep
+                                    _dev_result = [None]
+                                    _dev_error = [None]
+                                    def _create_dev():
+                                        try:
+                                            _dev_result[0] = self.PlaybackDevice(
+                                                output_format=self.REQUESTED_FORMAT,
+                                                nchannels=self.REQUESTED_CHANNELS,
+                                                sample_rate=self.REQUESTED_RATE,
+                                            )
+                                            _dev_result[0].start(gen)
+                                        except Exception as e:
+                                            _dev_error[0] = e
+                                    _dev_thread = threading.Thread(target=_create_dev, daemon=True)
+                                    _dev_thread.start()
+                                    _dev_thread.join(timeout=8.0)  # ★ 8s timeout: if device creation hangs, skip
+                                    if _dev_thread.is_alive():
+                                        # Device creation hung (system asleep) — don't wait, skip this retry
+                                        self._log_critical(f"【!!】 Radio: device creation timed out (8s), system likely asleep — skipping retry {retry_n}")
+                                        device = None
+                                        # ★ Wait longer before next attempt (system is clearly suspended)
+                                        backoff = min(backoff * 4, 60.0)
+                                        continue
+                                    if _dev_error[0]:
+                                        raise _dev_error[0]
+                                    device = _dev_result[0]
                                     # ★ 不手动 touch — 让设备真正拉取数据来证明自己
                                     time.sleep(2.0)
                                     silent = token.device_silent_seconds()
@@ -1871,6 +1913,8 @@ class NonBlockingAudioEngine:
 
                             if recovered:
                                 _consecutive_device_failures = 0  # ★ Device works! Reset failure counter
+                                _last_recovery_time = time.time()  # ★ Track for rapid-cycle detection
+                                _rapid_recovery_count += 1
                                 continue  # ★ 回到监控循环，继续播放
                             else:
                                 _consecutive_device_failures += 1
@@ -1889,9 +1933,13 @@ class NonBlockingAudioEngine:
                         except Exception: pass
 
                 if not token.stopped:
-                    # ★ If device keeps failing, use longer delay (device not ready yet)
-                    actual_delay = max(reconnect_delay, min(_consecutive_device_failures * 10, 60.0)) if device_dead else reconnect_delay
-                    time.sleep(actual_delay)
+                    # ★ If device keeps failing, use longer delay (device not ready yet / system asleep)
+                    actual_delay = max(reconnect_delay, min(_consecutive_device_failures * 15, 120.0)) if device_dead else reconnect_delay
+                    self._log_critical(f"[Radio] Waiting {actual_delay:.0f}s before reconnect (failures={_consecutive_device_failures})")
+                    # ★ Sleep in chunks so we can detect system wake-up early
+                    _wait_start = time.time()
+                    while not token.stopped and (time.time() - _wait_start) < actual_delay:
+                        time.sleep(2.0)
                     reconnect_delay = min(reconnect_delay * 1.5, 30.0)
 
         finally:

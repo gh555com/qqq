@@ -2937,11 +2937,21 @@ const ConfigManager = {
 				}
 			}
 		}
-		// Only write if there's actually something to clear (zero writes = zero conflict)
+		// ★ Hold suppress lock for the ENTIRE batch to prevent event storm
+		// VS Code fires onDidChangeConfiguration asynchronously; per-key locking leaks events
 		if (keysToClear.length > 0) {
-			for (const k of keysToClear) {
-				await _clearVscodeSettingEverywhere(k);
+			_suppressConfigEcho++;
+			try {
+				for (const k of keysToClear) {
+					await _clearVscodeSettingEverywhere(k);
+				}
+			} finally {
+				_suppressConfigEcho--;
 			}
+			// ★ Drain: wait for any trailing async events to arrive while still logically suppressed
+			_suppressConfigEcho++;
+			await new Promise(r => setTimeout(r, 200));
+			_suppressConfigEcho--;
 		}
 		_bootstrapResetDone = true; // ★ Clearing done, now get() can read settings.json
 	},
