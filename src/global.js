@@ -1700,27 +1700,26 @@ function _killGhostRustProcesses() {
 	const myPid = process.pid;
 	const currentRustPid = rustBridge.process?.pid;
 
-	try {
-		if (process.platform === 'win32') {
-			// Find q_win_x64.exe processes with --daemon argument
-			const out = cp.execSync('wmic process where "commandline like \'%q_win_x64%\' and commandline like \'%--daemon%\'" get processid,parentprocessid /format:csv', { encoding: 'utf8', timeout: 5000 });
+	// ★ 全部用异步 exec，绝不阻塞 extension host 事件循环
+	if (process.platform === 'win32') {
+		cp.exec('wmic process where "commandline like \'%q_win_x64%\' and commandline like \'%--daemon%\'" get processid,parentprocessid /format:csv', { encoding: 'utf8', timeout: 8000 }, (err, out) => {
+			if (err || !out) return;
 			const lines = out.split(/\r?\n/).filter(l => l.trim() && !l.startsWith('Node'));
 			for (const line of lines) {
 				const parts = line.split(',').map(s => s.trim());
-				// CSV format: Node,ParentProcessId,ProcessId
 				const ppid = parseInt(parts[1]);
 				const pid = parseInt(parts[2]);
 				if (isNaN(pid) || isNaN(ppid)) continue;
-				// Only kill ghosts: same parent (our extension host) but NOT the one we're about to use
 				if (ppid === myPid && pid !== currentRustPid) {
 					logMessage(`[GhostClean] Killing orphan Rust daemon PID=${pid} (parent=${ppid})`, 'INFO');
 					try { process.kill(pid); } catch { }
 				}
 			}
-		} else {
-			// Linux: find q_linux_x64 --daemon processes
-			const out = cp.execSync('ps -eo pid,ppid,args | grep "q_linux_x64.*--daemon" | grep -v grep', { encoding: 'utf8', timeout: 5000 }).trim();
-			for (const line of out.split('\n')) {
+		});
+	} else {
+		cp.exec('ps -eo pid,ppid,args | grep "q_linux_x64.*--daemon" | grep -v grep', { encoding: 'utf8', timeout: 5000 }, (err, out) => {
+			if (err || !out) return;
+			for (const line of out.trim().split('\n')) {
 				const m = line.trim().match(/^(\d+)\s+(\d+)/);
 				if (!m) continue;
 				const pid = parseInt(m[1]);
@@ -1730,9 +1729,7 @@ function _killGhostRustProcesses() {
 					try { process.kill(pid); } catch { }
 				}
 			}
-		}
-	} catch {
-		// Command failed or no matching processes — perfectly fine
+		});
 	}
 }
 
