@@ -590,6 +590,9 @@ pythonBridge.on('event', (evt) => {
 		logMessage("[Broker] Connected, refreshing engine cache", "DEBUG");
 		invalidateEngineCache();
 		recordEngineAvailable("P"); // ★ 记录 Python 引擎可用时间戳
+		// ★ Reset qqq.js audio cache so next play attempt re-probes (fixes stale "unavailable" after deferred reconnect)
+		try { const qqq = require('./qqq'); if (qqq.resetPythonAudioCache) qqq.resetPythonAudioCache(); } catch {}
+		try { const q4 = require('./q4'); if (q4.resetQ4AudioSource) q4.resetQ4AudioSource(); } catch {}
 	} else if (evt.event === 'broker_disconnected') {
 		logMessage("[Broker] Disconnected", "DEBUG");
 		invalidateEngineCache();
@@ -1698,20 +1701,22 @@ function _killGhostRustProcesses() {
 	if (process.platform !== 'win32' && process.platform !== 'linux') return;
 	const cp = require('child_process');
 	const myPid = process.pid;
-	const currentRustPid = rustBridge.process?.pid;
 
 	// ★ 全部用异步 exec，绝不阻塞 extension host 事件循环
+	// ★ CRITICAL: currentRustPid must be read INSIDE the callback (not at invocation time)
+	//   because wmic/ps is async and rust may start between invocation and callback return
 	if (process.platform === 'win32') {
 		cp.exec('wmic process where "commandline like \'%q_win_x64%\' and commandline like \'%--daemon%\'" get processid,parentprocessid /format:csv', { encoding: 'utf8', timeout: 8000 }, (err, out) => {
 			if (err || !out) return;
+			const liveRustPid = rustBridge.process?.pid; // ★ Read LIVE pid at callback time
 			const lines = out.split(/\r?\n/).filter(l => l.trim() && !l.startsWith('Node'));
 			for (const line of lines) {
 				const parts = line.split(',').map(s => s.trim());
 				const ppid = parseInt(parts[1]);
 				const pid = parseInt(parts[2]);
 				if (isNaN(pid) || isNaN(ppid)) continue;
-				if (ppid === myPid && pid !== currentRustPid) {
-					logMessage(`[GhostClean] Killing orphan Rust daemon PID=${pid} (parent=${ppid})`, 'INFO');
+				if (ppid === myPid && pid !== liveRustPid) {
+					logMessage(`[GhostClean] Killing orphan Rust daemon PID=${pid} (parent=${ppid}, live=${liveRustPid})`, 'INFO');
 					try { process.kill(pid); } catch { }
 				}
 			}
@@ -1719,13 +1724,14 @@ function _killGhostRustProcesses() {
 	} else {
 		cp.exec('ps -eo pid,ppid,args | grep "q_linux_x64.*--daemon" | grep -v grep', { encoding: 'utf8', timeout: 5000 }, (err, out) => {
 			if (err || !out) return;
+			const liveRustPid = rustBridge.process?.pid; // ★ Read LIVE pid at callback time
 			for (const line of out.trim().split('\n')) {
 				const m = line.trim().match(/^(\d+)\s+(\d+)/);
 				if (!m) continue;
 				const pid = parseInt(m[1]);
 				const ppid = parseInt(m[2]);
-				if (ppid === myPid && pid !== currentRustPid) {
-					logMessage(`[GhostClean] Killing orphan Rust daemon PID=${pid} (parent=${ppid})`, 'INFO');
+				if (ppid === myPid && pid !== liveRustPid) {
+					logMessage(`[GhostClean] Killing orphan Rust daemon PID=${pid} (parent=${ppid}, live=${liveRustPid})`, 'INFO');
 					try { process.kill(pid); } catch { }
 				}
 			}

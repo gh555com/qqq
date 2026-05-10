@@ -1899,15 +1899,18 @@ class ClipboardHistorySidebarProvider {
                         return AUDIO_SOURCE.PYTHON;
                     } else {
                         this._global.logMessage(`[Audio] ${q('q4.log.pythonNoMiniaudio')}`, "WARN");
+                        // ★ miniaudio genuinely missing → permanent failure
+                        this._pythonAudioFailed = true;
                     }
                 }
             }
+            // ★ If bridge not available, do NOT mark _pythonAudioFailed
+            // Let user retry (broker may connect via deferred reconnect)
         } catch (e) {
             this._global.logMessage(`[Audio] ${q('q4.log.pythonProbeError', e.message)}`, "WARN");
         }
 
-        // ★ Do NOT log here - let caller (triggerSavor) handle the unified notification
-        this._pythonAudioFailed = true;
+        // ★ Do NOT set _pythonAudioFailed here for transient connection issues
         return null; // Python unavailable, no fallback
     }
 

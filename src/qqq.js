@@ -1062,8 +1062,8 @@ async function checkPythonAudioEngine() {
 	try {
 		const bridge = pythonBridge;
 		if (!bridge || bridge.available !== true) {
-			_pythonAudioChecked = true;
-			_pythonAudioAvailable = false;
+			// ★ Do NOT set _pythonAudioChecked here! Let subsequent calls retry
+			// This handles deferred reconnect: broker may become available soon
 			return false;
 		}
 
@@ -1072,7 +1072,7 @@ async function checkPythonAudioEngine() {
 			const version = res.miniaudio_version || 'unknown';
 			global.logMessage(q('qqq.log.pythonAudioDetected', version), "INFO");
 			global.pythonAudioDetected = true;
-			_pythonAudioChecked = true;
+			_pythonAudioChecked = true;  // ★ Only cache on SUCCESS
 			_pythonAudioAvailable = true;
 			return true;
 		} else {
@@ -1085,7 +1085,8 @@ async function checkPythonAudioEngine() {
 		global.logMessage(`[Audio] ${q('qqq.log.pythonCheckError', e.message)}`, "WARN");
 	}
 
-	_pythonAudioChecked = true;
+	// ★ Do NOT set _pythonAudioChecked=true here! Allow retry on next user click
+	// Only cache permanent failures (miniaudio missing), not transient (broker not ready)
 	_pythonAudioAvailable = false;
 	return false;
 }
