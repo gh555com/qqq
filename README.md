@@ -228,5 +228,5 @@ Virus detection or submission: https://www.avira.com/en/analysis/submit
 
 
 
- <a href="https://www.gh555.com"> GH Health </a>
+ <a href="https://www.gh555.com"> GH Health </a> All Rights Reserved.
 
