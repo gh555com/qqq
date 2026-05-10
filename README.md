@@ -187,7 +187,7 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
 
 
 
-  ## How to install ##
+  ## How to install
 
  **qqq 16.4.1+**: A single universal installer for Windows(x64), Linux(x64) and macOS(x64, arm), compatible with almost all operating systems and processor architectures — no installation options, no choices required. One package works for everything.
 
