@@ -344,11 +344,11 @@ function isOurQqqFolder(dirPath) {
             const salt = fs.readFileSync(dirPath + ":qqq", "utf8");
             return salt === QQQ_ADS_SALT;
         } else if (process.platform === "darwin") {
-            const out = cp.execFileSync("xattr", ["-p", XATTR_KEY_DARWIN, dirPath], { timeout: 1000, encoding: "utf8" });
+            const out = cp.execFileSync("xattr", ["-p", XATTR_KEY_DARWIN, dirPath], { timeout: 1000, encoding: "utf8", stdio: ['pipe', 'pipe', 'pipe'] });
             return out.trim() === QQQ_ADS_SALT;
         } else {
             // Linux: getfattr
-            const out = cp.execFileSync("getfattr", ["--only-values", "-n", XATTR_KEY_LINUX, dirPath], { timeout: 1000, encoding: "utf8" });
+            const out = cp.execFileSync("getfattr", ["--only-values", "-n", XATTR_KEY_LINUX, dirPath], { timeout: 1000, encoding: "utf8", stdio: ['pipe', 'pipe', 'pipe'] });
             return out.trim() === QQQ_ADS_SALT;
         }
     } catch {
