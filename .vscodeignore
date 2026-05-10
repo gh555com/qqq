@@ -130,6 +130,8 @@ DISPOSABLE_*.md
 REPAIR_BLUEPRINT.md
 qqq-wq-integration.md
 
-# ★ 中文文件名 (微软市场编码问题导致重复键冲突)
+# ★ 中文文件名 (OPC URI 规范不兼容中文/特殊字符)
 qqq滴登录设计
+微软事件总结. txt
+时间参数提前
 ignore/
