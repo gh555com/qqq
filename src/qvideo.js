@@ -2377,7 +2377,10 @@ $of = $vi.OriginalFilename;
                     progress.report({ message: 'Slimming...' });
                     await this._slimChromium(path.join(this.chromeHome, chromeInfo.folderName));
 
-                    const exeName = process.platform === 'win32' ? 'chrome.exe' : 'chrome';
+                    // ★ macOS Chrome for Testing exe is named differently
+                    const exeName = process.platform === 'win32' ? 'chrome.exe'
+                        : process.platform === 'darwin' ? 'Google Chrome for Testing'
+                        : 'chrome';
                     const foundExe = this._findFileRecursive(this.chromeHome, exeName, 6);
 
                     if (!foundExe) throw new Error(q('video.error.extractNoExe'));
