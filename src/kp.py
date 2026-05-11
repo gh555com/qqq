@@ -707,11 +707,32 @@ def _reset_all_audio():
 #  ★ Global Keyboard Hook (pynput) - Space+Q to restore q2 visible window
 # =============================================================================
 _HOTKEY_LISTENER = None
-_HOTKEY_PRESSED_KEYS = set()
+_HOTKEY_PRESSED_KEYS = {}  # ★ {normalized_key_str: press_timestamp_ms} — timestamps prevent stale keys
 _HOTKEY_LOCK = threading.Lock()
 _HOTKEY_ENABLED = True
 _HOTKEY_LAST_TRIGGER = 0
 _HOTKEY_DEBOUNCE_MS = 400
+_HOTKEY_KEY_TTL_MS = 600  # ★ Keys older than this are considered stale (released but missed)
+
+def _normalize_key(key):
+    """Normalize pynput key to a stable string identifier.
+    Fixes Windows bug where press/release emit different objects for same physical key."""
+    try:
+        # Special keys (space, ctrl, alt, etc.)
+        if hasattr(key, 'name') and key.name:
+            return f"special:{key.name}"
+        # Regular character keys
+        if hasattr(key, 'char') and key.char:
+            return f"char:{key.char.lower()}"
+        # Fallback: use vk code if available
+        if hasattr(key, 'vk') and key.vk is not None:
+            # Map known vk codes to canonical names
+            if key.vk == 32:
+                return "special:space"
+            return f"vk:{key.vk}"
+    except:
+        pass
+    return f"raw:{repr(key)}"
 
 def _activate_window(hwnd):
     """Activate window: restore if minimized, then bring to foreground."""
@@ -881,33 +902,49 @@ def _get_foreground_hwnd(cmd: dict):
     return {"status": "ok", "hwnd": hwnd}
 
 def _hotkey_on_press(key):
-    """pynput key press callback"""
+    """pynput key press callback — uses normalized keys + TTL to prevent ghost triggers"""
     global _HOTKEY_PRESSED_KEYS, _HOTKEY_LAST_TRIGGER
     if not _HOTKEY_ENABLED or not _HAS_PYNPUT:
         return
 
+    now = time.time() * 1000
+    norm = _normalize_key(key)
+
     with _HOTKEY_LOCK:
-        _HOTKEY_PRESSED_KEYS.add(key)
+        # ★ Record press timestamp
+        _HOTKEY_PRESSED_KEYS[norm] = now
 
-        # Check Space + Q
-        space = pynput_keyboard.Key.space in _HOTKEY_PRESSED_KEYS
-        q = any(hasattr(k, 'char') and k.char and k.char.lower() == 'q' for k in _HOTKEY_PRESSED_KEYS)
+        # ★ Purge stale keys (missed release events)
+        stale_cutoff = now - _HOTKEY_KEY_TTL_MS
+        stale = [k for k, ts in _HOTKEY_PRESSED_KEYS.items() if ts < stale_cutoff]
+        for k in stale:
+            del _HOTKEY_PRESSED_KEYS[k]
 
-        if space and q:
-            now = time.time() * 1000
+        # Check Space + Q (both must be fresh)
+        space_ts = _HOTKEY_PRESSED_KEYS.get("special:space")
+        q_ts = _HOTKEY_PRESSED_KEYS.get("char:q")
+
+        if space_ts and q_ts:
+            # ★ Both keys must have been pressed within TTL of each other
+            if abs(space_ts - q_ts) > _HOTKEY_KEY_TTL_MS:
+                return
             if now - _HOTKEY_LAST_TRIGGER < _HOTKEY_DEBOUNCE_MS:
                 return
             _HOTKEY_LAST_TRIGGER = now
+            # ★ Clear both keys immediately to prevent re-trigger
+            _HOTKEY_PRESSED_KEYS.pop("special:space", None)
+            _HOTKEY_PRESSED_KEYS.pop("char:q", None)
             # ★ Only play sound if window was actually activated
             if _test_activate_vscode():
                 _play_sfx("yz", name="kj3.mp3")
 
 def _hotkey_on_release(key):
-    """pynput key release callback"""
+    """pynput key release callback — normalized key removal"""
     if not _HAS_PYNPUT:
         return
+    norm = _normalize_key(key)
     with _HOTKEY_LOCK:
-        _HOTKEY_PRESSED_KEYS.discard(key)
+        _HOTKEY_PRESSED_KEYS.pop(norm, None)
 
 def _start_hotkey_listener():
     """Start global keyboard hook"""
