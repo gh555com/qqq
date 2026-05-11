@@ -208,11 +208,13 @@ Built on a highly efficient Rust-based underlying architecture with extreme perf
  ## Security
 The source code is fully open source and available for self-compilation: https://github.com/gh555com/qqq, Windows 7 is supported, for key compilation notes: https://github.com/gh555com/qqq/blob/qq/docs/Rust%20win7.md.
 
-The company undertakes never to collect clipboard content or any sensitive user information, and welcomes public supervision:
-<p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/MSNRJ5YUR7YY6.jpg" width="100%" alt="company">
-</p>
+The company undertakes never to collect clipboard content or any sensitive user information, and welcomes public supervision.
 
+Business License:
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/MSNRJ5YUR7YY6.jpg" width="100%" alt="Business License">
+</p>
+Domain Registration Certificate:
 <p align="left">
   <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/ZAVTVRFVTJ6ME.png" width="60%" alt="company">
 </p>
