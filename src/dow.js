@@ -2931,6 +2931,8 @@ class UnifiedMediaDownloader {
      */
     _scheduleInstallCheck(context, intervalMs = 5000, timeoutMs = 121000) {
         const global = require('./global');
+        const path = require('path');
+        const fs = require('fs');
 
         // Prevent multiple schedulers
         if (this._installCheckTimer) return;
@@ -2943,6 +2945,24 @@ class UnifiedMediaDownloader {
                 global.logMessage("[PythonCheck] Periodic check timeout, stopping", "INFO");
                 clearInterval(this._installCheckTimer);
                 this._installCheckTimer = null;
+
+                // ★ CRITICAL FIX: if qlok still exists after timeout, the installer is dead
+                // Force-clean and trigger our own download attempt
+                try {
+                    const qlokPath = path.join(context.globalStorageUri.fsPath, "python_installing.qlok");
+                    if (fs.existsSync(qlokPath)) {
+                        fs.unlinkSync(qlokPath);
+                        global.logMessage("[PythonCheck] ★ Timeout: cleaned stale qlok, starting own download", "WARN");
+                    }
+                } catch { }
+                // ★ Re-trigger Python install from this window
+                try {
+                    if (this.python && this.python.autoInstall) {
+                        this.python.autoInstall(context);
+                    }
+                } catch (e) {
+                    global.logMessage(`[PythonCheck] Recovery install failed: ${e.message}`, "WARN");
+                }
                 return;
             }
 
