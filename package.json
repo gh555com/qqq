@@ -8,7 +8,11 @@
 
   "publisher": "HeleneSmith",
   "version": "16.5.1",
-  "description": "soldier.",
+
+
+  "description": "Paste image,File Explorer,Rich media,WYSIWYG,Preview, 粘贴图片，文件管理器，富媒体，所见既得，预览。画像の貼り付け，ファイルマネージャー，リッチメディア，WYSIWYG, プレビュー。Bild einfügen,Dateimanager,Rich-Media,WYSIWYG,Vorschau。이미지 붙여넣기,파일 관리자,리치 미디어,WYSIWYG,미리보기。Вставить изображение,Диспетчер файлов,Рич-медиа,WYSIWYG,Предварительный просмотр。لصق الصورة,مدير الملفات,وسائط غنية,WYSIWYG,معاينة。Pegar imagen,Administrador de archivos,Medios enriquecidos,WYSIWYG,Vista previa。Coller une image,Gestionnaire de fichiers,Médias enrichis,WYSIWYG,Aperçu。Colar imagem,Gerenciador de arquivos,Mídia rica,WYSIWYG,Pré-visualização。छवि चिपकाएं,फ़ाइल प्रबंधक,समृद्ध मीडिया,WYSIWYG,पूर्वावलोकन。Dán hình ảnh,Trình quản lý tệp,Phương tiện đa dạng thức,WYSIWYG,Xem trước。",
+
+
   "icon": "assets/q.gif",
   "engines": {
     "vscode": "^1.51.0"

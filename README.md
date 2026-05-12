@@ -57,7 +57,7 @@
 
  Original **name**: qqq [![GitHub stars](https://img.shields.io/github/stars/gh555com/qqq?style=social)](https://github.com/gh555com/qqq)
 
-  **qqq 16.4.1+ required for Linux / macOS.** [Details](#how-to-install)  ![](https://gh555.com/px?g=qqq&s=keeleylednergz.rsw.readme)
+  **qqq 16.4.1+ required for Linux / macOS.** [Details](#how-to-install)  ![](https://gh555.com/px?g=qqq&s=helenesmith.rsw.readme)
 
 
 <p align="left">
