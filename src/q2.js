@@ -2105,6 +2105,8 @@ function checkAndApplyResponsive(){
     const filterWrapper = document.querySelector('.filter-input-wrapper');
 
     if (sortByGroup) sortByGroup.style.display = (rw < 340) ? 'none' : '';
+    const filesOnTopBtn = document.getElementById('filesOnTopBtn');
+    if (filesOnTopBtn) filesOnTopBtn.style.display = (rw < 340) ? 'none' : '';
     if (filterWrapper) filterWrapper.style.display = (rw < 340) ? 'none' : '';
     if (szModeGroup) szModeGroup.style.display = (rw < 200) ? 'none' : '';
   }

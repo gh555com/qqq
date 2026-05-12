@@ -790,7 +790,8 @@
         "orphanException": "[Limpieza de respaldo] Excepción: {0}"
     },
     "recovery": {
-        "found": "[Recovery] Encontradas {0} transacciones incompletas, iniciando limpieza..."
+        "found": "[Recovery] Encontradas {0} transacciones incompletas, iniciando limpieza...",
+        "skippedLanded": "[Recovery] Transacción {0} tiene {1} archivo(s) guardado(s), omitiendo rollback, solo eliminando registro"
     },
     "q2paste": {
         "targetEmpty": "[Q2] Pegar falló: directorio destino vacío",

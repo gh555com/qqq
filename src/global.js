@@ -5629,13 +5629,9 @@ const TransactionManager = {
 			// ★ Get all files and folders in qqq folder (treat equally)
 			let qqqItems = [];  // { name: string, isDir: boolean }
 			try {
-				const entries = fs.readdirSync(targetDir);
-				for (const f of entries) {
-					try {
-						const fullPath = path.join(targetDir, f);
-						const stat = fs.statSync(fullPath);
-						qqqItems.push({ name: f, isDir: stat.isDirectory() });
-					} catch { }
+				const entries = fs.readdirSync(targetDir, { withFileTypes: true });
+				for (const entry of entries) {
+					qqqItems.push({ name: entry.name, isDir: entry.isDirectory() });
 				}
 			} catch { return; }
 
@@ -5706,6 +5702,14 @@ const TransactionManager = {
 
 		logMessage(q('recovery.found', list.length), "WARN");
 		for (const trans of list) {
+			// ★ If landedFiles is non-empty, the download already succeeded (file verified + on disk).
+			// This means window reloaded between _postProcess landing and processResult calling removeTransaction.
+			// In this case, just clean up the transaction record — do NOT rollback (which would delete the anchor).
+			if (Array.isArray(trans.landedFiles) && trans.landedFiles.length > 0) {
+				logMessage(q('recovery.skippedLanded', trans.id, trans.landedFiles.length), "INFO");
+				await this.removeTransaction(trans.id);
+				continue;
+			}
 			// Simple rule: if leftover, clean it. recover is only called on startup.
 			// ★ Pass isRecover: true so cleanup uses lastActiveAt as time baseline
 			// instead of file birthtime, so even if VS Code restarts long after crash, rollback works correctly

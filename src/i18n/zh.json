@@ -790,7 +790,8 @@
         "orphanException": "[兜底清理] 异常: {0}"
     },
     "recovery": {
-        "found": "[Recovery] 发现 {0} 个未完成事务，开始清理..."
+        "found": "[Recovery] 发现 {0} 个未完成事务，开始清理...",
+        "skippedLanded": "[Recovery] 事务 {0} 已有 {1} 个落盘文件，跳过回滚，仅清除记录"
     },
     "q2paste": {
         "targetEmpty": "[Q2] 粘贴失败：目标目录为空",

@@ -20,7 +20,12 @@ All notable changes to this project will be documented in this file.
 ## [16.5.0] - 2026-05-12
 
 ### Fixed
-- Fixed all known bugs.
+- **cdp-sniffer no longer lost after window reload**: Previously, if the IDE window happened to reload right after a video finished downloading, the file would be rolled back and deleted — even though it was already verified and saved to disk. Now the system recognizes completed downloads and preserves them through any reload.
+
+### Improved
+- **Faster file operations**: Directory scanning in video deduplication, file search, and cleanup routines now uses optimized OS calls — eliminating redundant per-file system queries. Noticeable improvement in folders with many files.
+- **90% less log noise during video capture**: The enhanced browser sniffer previously logged every single HTTP response (hundreds of JS/CSS/image requests) and dumped full cookie JSON blobs into the output. Now only media-related activity is logged, with large responses automatically truncated. The "qqq" and "qqq: Video Downloader" channels no longer print duplicates of each other.
+
 
 ---
 

@@ -790,7 +790,8 @@
         "orphanException": "[Fallback-Bereinigung] Ausnahme: {0}"
     },
     "recovery": {
-        "found": "[Recovery] {0} unvollendete Transaktionen gefunden, Bereinigung gestartet..."
+        "found": "[Recovery] {0} unvollendete Transaktionen gefunden, Bereinigung gestartet...",
+        "skippedLanded": "[Recovery] Transaktion {0} hat {1} gespeicherte Datei(en), Rollback übersprungen, nur Eintrag entfernt"
     },
     "q2paste": {
         "targetEmpty": "[Q2] Einfügen fehlgeschlagen: Zielverzeichnis leer",

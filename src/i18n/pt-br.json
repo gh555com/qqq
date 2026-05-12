@@ -790,7 +790,8 @@
         "orphanException": "[Limpeza de reserva] Exceção: {0}"
     },
     "recovery": {
-        "found": "[Recovery] {0} transações incompletas encontradas, iniciando limpeza..."
+        "found": "[Recovery] {0} transações incompletas encontradas, iniciando limpeza...",
+        "skippedLanded": "[Recovery] Transação {0} possui {1} arquivo(s) salvo(s), rollback ignorado, apenas registro removido"
     },
     "q2paste": {
         "targetEmpty": "[Q2] Colagem falhou: diretório de destino vazio",

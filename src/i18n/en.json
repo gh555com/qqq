@@ -790,7 +790,8 @@
         "orphanException": "[Fallback cleanup] Exception: {0}"
     },
     "recovery": {
-        "found": "[Recovery] Found {0} incomplete transactions, starting cleanup..."
+        "found": "[Recovery] Found {0} incomplete transactions, starting cleanup...",
+        "skippedLanded": "[Recovery] Transaction {0} has {1} landed file(s), skipping rollback, removing record only"
     },
     "q2paste": {
         "targetEmpty": "[Q2] Paste failed: target directory is empty",

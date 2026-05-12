@@ -790,7 +790,8 @@
         "orphanException": "[폴백 정리] 예외: {0}"
     },
     "recovery": {
-        "found": "[Recovery] {0}개 미완료 트랜잭션 발견, 정리 시작..."
+        "found": "[Recovery] {0}개 미완료 트랜잭션 발견, 정리 시작...",
+        "skippedLanded": "[Recovery] 트랜잭션 {0}에 {1}개 파일이 존재, 롤백 건너뛰고 기록만 제거"
     },
     "q2paste": {
         "targetEmpty": "[Q2] 붙여넣기 실패: 대상 디렉토리가 비어 있음",

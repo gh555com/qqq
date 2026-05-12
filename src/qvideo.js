@@ -1556,13 +1556,14 @@ class Qvideo {
             if (currentFp) {
                 // ★ Only dedupe within same folder; allow same file across different folders
                 const dir = path.dirname(filePath);
-                const files = fs.readdirSync(dir);
-                for (const f of files) {
+                const entries = fs.readdirSync(dir, { withFileTypes: true });
+                for (const entry of entries) {
                     if (this._isTaskCancelled(task)) return null;  // ★ Cancel check
 
+                    if (!entry.isFile()) continue;
+                    const f = entry.name;
                     const full = path.join(dir, f);
                     if (full === filePath) continue;
-                    if (!fs.statSync(full).isFile()) continue;
                     if (f.endsWith('.part') || f.endsWith('.ytdl') || f.endsWith('.tmp')) continue;
 
                     const otherFp = h.computeFingerprint(full);
@@ -2539,16 +2540,13 @@ $of = $vi.OriginalFilename;
     _findFileRecursive(dir, fileName, maxDepth = 5, depth = 0) {
         if (depth > maxDepth) return null;
         try {
-            const files = fs.readdirSync(dir);
-            for (const f of files) {
-                const full = path.join(dir, f);
-                let st;
-                try { st = fs.statSync(full); } catch (e) { continue; }
-
-                if (st.isDirectory()) {
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+                const full = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
                     const found = this._findFileRecursive(full, fileName, maxDepth, depth + 1);
                     if (found) return found;
-                } else if (f.toLowerCase() === fileName.toLowerCase()) {
+                } else if (entry.name.toLowerCase() === fileName.toLowerCase()) {
                     return full;
                 }
             }

@@ -790,7 +790,8 @@
         "orphanException": "[Nettoyage de secours] Exception: {0}"
     },
     "recovery": {
-        "found": "[Recovery] {0} transactions incomplètes trouvées, démarrage du nettoyage..."
+        "found": "[Recovery] {0} transactions incomplètes trouvées, démarrage du nettoyage...",
+        "skippedLanded": "[Recovery] Transaction {0} possède {1} fichier(s) enregistré(s), rollback ignoré, suppression de l'entrée uniquement"
     },
     "q2paste": {
         "targetEmpty": "[Q2] Collage échoué: répertoire cible vide",

@@ -321,7 +321,6 @@ class CdpSniffer {
         ];
 
         const logMsg = (msg) => {
-            h.log(msg);
             if (onLog) onLog(msg);
         };
 
@@ -367,8 +366,14 @@ class CdpSniffer {
                         if (msg.error) {
                             logMsg(`[CDP Error] ${JSON.stringify(msg)}`);
                         } else if (msg.id && msg.id >= 100) {
-                            // 打印所有我们发出的命令的响应
-                            logMsg(`[CDP] Command Response ${msg.id}: ${JSON.stringify(msg)}`);
+                            // ★ 跳过保活响应（Network.enable 等空 result）避免每 2s 刷屏
+                            const r = msg.result;
+                            if (r && Object.keys(r).length === 0) { /* skip keepalive */ }
+                            else {
+                                // ★ 截断大型响应（如 Cookie）避免日志爆炸
+                                const raw = JSON.stringify(msg);
+                                logMsg(`[CDP] Command Response ${msg.id}: ${raw.length > 200 ? raw.slice(0, 200) + '...' : raw}`);
+                            }
                         }
 
                         // 主动 Attach 到新发现的 Page
@@ -427,10 +432,11 @@ class CdpSniffer {
                             const url = resp.url;
                             const mime = resp.mimeType || '';
 
-                            logMsg(`[Response] ${mime} : ${url}`);
-
-                            if (mime.includes('video') || mime.includes('audio') || mime.includes('mpeg') || mime.includes('stream') ||
-                                url.includes('.m3u8') || url.includes('.mpd')) {
+                            // ★ 只处理媒体类型响应，过滤掉 js/css/html/image 等静态资源
+                            const isMedia = mime.includes('video') || mime.includes('audio') || mime.includes('mpeg') || mime.includes('stream') ||
+                                url.includes('.m3u8') || url.includes('.mpd');
+                            if (isMedia) {
+                                logMsg(`[Response] ${mime} : ${url}`);
 
                                 const lenStr = resp.headers['Content-Length'] || resp.headers['content-length'];
                                 const len = lenStr ? parseInt(lenStr, 10) : null;
