@@ -879,6 +879,7 @@
         "pullNoData": "クラウドにデータがありません",
         "errQuotaExceeded": "データが容量制限を超えています",
         "authWaiting": "ブラウザでのログインを待機中...",
+        "authPollError": "ネットワークが不安定です、再試行中...",
         "authSuccess": "ログイン成功",
         "authTimeout": "ログインがタイムアウトしました。もう一度お試しください",
         "authNoBrowser": "ブラウザを開けません。ブラウザがインストールされていることを確認してください",

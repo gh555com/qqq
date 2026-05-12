@@ -879,6 +879,7 @@
         "pullNoData": "云端暂无数据",
         "errQuotaExceeded": "数据超出配额限制",
         "authWaiting": "等待浏览器登录完成...",
+                "authPollError": "网络连接不稳定，仍在尝试...",
         "authSuccess": "登录成功",
         "authTimeout": "登录超时，请重试",
         "authNoBrowser": "无法打开浏览器，请确保系统已安装浏览器",

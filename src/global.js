@@ -4647,6 +4647,8 @@ async function _httpsGet(urlPath, timeoutMs = 10000) {
  *   4. On success → save token locally
  */
 let _authInProgress = null; // ★ Lock: prevent multiple concurrent auth sessions
+let _lastAuthSession = null;  // ★ { id, ts } — reuse session on quick retry to prevent session mismatch
+const _AUTH_SESSION_REUSE_MS = 120000; // 2min: if user retries within this window, reuse same session
 
 async function _ensureAuth() {
 	// Check existing token
@@ -4664,8 +4666,22 @@ async function _ensureAuth() {
 
 async function _doAuthFlow() {
 	// No token — automatically open browser for login (no extra confirmation)
-	const sessionId = _generateSessionId();
 	const deviceName = _buildDeviceName();
+
+	// ★ Reuse previous session if user retries within 2min (prevents session mismatch:
+	//    user may have completed login on the OLD browser tab, so polling the old session
+	//    is the only way to retrieve the token)
+	let sessionId;
+	let reusingSession = false;
+	if (_lastAuthSession && (Date.now() - _lastAuthSession.ts) < _AUTH_SESSION_REUSE_MS) {
+		sessionId = _lastAuthSession.id;
+		reusingSession = true;
+		logMessage(`[wq-auth] Reusing previous session ${sessionId.slice(0, 8)}... (${Math.round((Date.now() - _lastAuthSession.ts) / 1000)}s old)`, 'INFO');
+	} else {
+		sessionId = _generateSessionId();
+		_lastAuthSession = { id: sessionId, ts: Date.now() };
+	}
+
 	const loginUrl = `${WQ_API_BASE.replace('/api', '')}/login?from=ide&session=${sessionId}&device_name=${encodeURIComponent(deviceName)}&goods=qqq`;
 
 	// ★ Tier 1: Try default system browser (automatic, no user click needed)
@@ -4709,8 +4725,9 @@ async function _doAuthFlow() {
 	}
 
 	// Poll for token with progress indicator (user just waits, no action needed)
-	logMessage(`[wq-auth] Poll started, session=${sessionId}, device=${deviceName}`, 'INFO');
+	logMessage(`[wq-auth] Poll started, session=${sessionId}${reusingSession ? ' (reused)' : ''}, device=${deviceName}`, 'INFO');
 	let pollCount = 0;
+	let consecutiveErrors = 0;
 	const result = await vscode.window.withProgress(
 		{ location: vscode.ProgressLocation.Notification, title: q('wq.authWaiting'), cancellable: true },
 		async (progress, cancelToken) => {
@@ -4722,20 +4739,23 @@ async function _doAuthFlow() {
 				pollCount++;
 				try {
 					const resp = await _httpsGet(`/gaea/qqq/auth/poll?session=${sessionId}&device_name=${encodeURIComponent(deviceName)}`);
-					if (pollCount <= 3 || (pollCount % 10 === 0)) {
-						logMessage(`[wq-auth] Poll #${pollCount} resp: ${JSON.stringify(resp)}`, 'INFO');
-					}
+					consecutiveErrors = 0; // reset on any successful response
 					if (resp.ok && resp.token) {
 						logMessage(`[wq-auth] Token received after ${pollCount} polls`, 'INFO');
 						return { token: resp.token, phone: resp.phone || '' };
 					}
 				} catch (e) {
-					if (pollCount <= 3) {
+					consecutiveErrors++;
+					if (pollCount <= 5 || (pollCount % 10 === 0)) {
 						logMessage(`[wq-auth] Poll #${pollCount} error: ${e.message}`, 'WARN');
+					}
+					// ★ Show network error feedback after 3+ consecutive failures
+					if (consecutiveErrors === 3) {
+						progress.report({ message: q('wq.authPollError') });
 					}
 				}
 			}
-			logMessage(`[wq-auth] Poll timeout after ${pollCount} attempts`, 'WARN');
+			logMessage(`[wq-auth] Poll timeout after ${pollCount} attempts (${consecutiveErrors} consecutive errors)`, 'WARN');
 			return null; // timeout
 		}
 	);

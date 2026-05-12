@@ -879,6 +879,7 @@
         "pullNoData": "Aucune donnée dans le cloud",
         "errQuotaExceeded": "Les données dépassent la limite de quota",
         "authWaiting": "En attente de la connexion dans le navigateur...",
+        "authPollError": "Réseau instable, nouvelle tentative...",
         "authSuccess": "Connexion réussie",
         "authTimeout": "Connexion expirée, veuillez réessayer",
         "authNoBrowser": "Impossible d'ouvrir le navigateur. Veuillez vérifier qu'un navigateur est installé.",

@@ -879,6 +879,7 @@
         "pullNoData": "Nenhum dado na nuvem",
         "errQuotaExceeded": "Dados excedem o limite de cota",
         "authWaiting": "Aguardando login no navegador...",
+        "authPollError": "Rede instável, tentando novamente...",
         "authSuccess": "Login realizado com sucesso",
         "authTimeout": "Tempo de login esgotado, tente novamente",
         "authNoBrowser": "Não foi possível abrir o navegador. Verifique se há um navegador instalado.",

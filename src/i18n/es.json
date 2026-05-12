@@ -879,6 +879,7 @@
         "pullNoData": "No hay datos en la nube",
         "errQuotaExceeded": "Los datos exceden el límite de cuota",
         "authWaiting": "Esperando inicio de sesión en el navegador...",
+        "authPollError": "Red inestable, reintentando...",
         "authSuccess": "Inicio de sesión exitoso",
         "authTimeout": "Tiempo de inicio de sesión agotado, intente de nuevo",
         "authNoBrowser": "No se puede abrir el navegador. Asegúrese de que haya un navegador instalado.",

@@ -879,6 +879,7 @@
         "pullNoData": "Keine Daten in der Cloud",
         "errQuotaExceeded": "Daten überschreiten das Kontingentlimit",
         "authWaiting": "Warte auf Browser-Anmeldung...",
+        "authPollError": "Netzwerk instabil, wird weiter versucht...",
         "authSuccess": "Anmeldung erfolgreich",
         "authTimeout": "Anmeldung abgelaufen, bitte erneut versuchen",
         "authNoBrowser": "Browser kann nicht geöffnet werden. Bitte stellen Sie sicher, dass ein Browser installiert ist.",

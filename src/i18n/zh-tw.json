@@ -879,6 +879,7 @@
         "pullNoData": "雲端暫無資料",
         "errQuotaExceeded": "資料超出配額限制",
         "authWaiting": "等待瀏覽器登入完成...",
+        "authPollError": "網路連線不穩定，仍在嘗試...",
         "authSuccess": "登入成功",
         "authTimeout": "登入逾時，請重試",
         "authNoBrowser": "無法開啟瀏覽器，請確保系統已安裝瀏覽器",

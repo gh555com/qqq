@@ -879,6 +879,7 @@
         "pullNoData": "클라우드에 데이터가 없습니다",
         "errQuotaExceeded": "데이터가 할당량 제한을 초과했습니다",
         "authWaiting": "브라우저 로그인 대기 중...",
+        "authPollError": "네트워크가 불안정합니다, 재시도 중...",
         "authSuccess": "로그인 성공",
         "authTimeout": "로그인 시간 초과, 다시 시도해 주세요",
         "authNoBrowser": "브라우저를 열 수 없습니다. 브라우저가 설치되어 있는지 확인해 주세요",
