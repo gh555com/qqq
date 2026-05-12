@@ -1320,40 +1320,41 @@ function saveLastVisitedDir(dirPath) {
 const FINE_SCM_MAX_ENTRIES = 500;
 
 function getFineSCM(folderPath) {
-  if (!folderPath) return { szMode: null, sortBy: null };
+  if (!folderPath) return { szMode: null, sortBy: null, filesOnTop: false };
   try {
     // ★ Primary source: home directory file; fallback: globalState
     let allFineSCM = _readJsonFile(_q2FineSCMPath);
     if (!allFineSCM && globalContext) {
       allFineSCM = globalContext.globalState.get("qqq_fine_scm") || {};
     }
-    if (!allFineSCM) return { szMode: null, sortBy: null };
+    if (!allFineSCM) return { szMode: null, sortBy: null, filesOnTop: false };
     const key = cacheKeyForPath(folderPath);
     const scm = allFineSCM[key];
     if (scm) {
       return {
         szMode: scm.szMode || null,
-        sortBy: scm.sortBy || null
+        sortBy: scm.sortBy || null,
+        filesOnTop: !!scm.filesOnTop
       };
     }
   } catch (e) {
     geq().logMessage(q('q2.log.readScmError', e.message), "WARN");
   }
-  return { szMode: null, sortBy: null };
+  return { szMode: null, sortBy: null, filesOnTop: false };
 }
 
-function setFineSCMValue(folderPath, szMode, sortBy) {
+function setFineSCMValue(folderPath, szMode, sortBy, filesOnTop) {
   if (!folderPath) return;
   try {
     // ★ Read fresh from disk (multi-window merge: adopt other windows' changes)
     let allFineSCM = _readJsonFile(_q2FineSCMPath) || {};
     const key = cacheKeyForPath(folderPath);
 
-    // If both are null, delete this entry
-    if (szMode === null && sortBy === null) {
+    // If all are null/false, delete this entry
+    if (szMode === null && sortBy === null && !filesOnTop) {
       delete allFineSCM[key];
     } else {
-      allFineSCM[key] = { szMode, sortBy, ts: Date.now() };
+      allFineSCM[key] = { szMode, sortBy, filesOnTop: !!filesOnTop, ts: Date.now() };
     }
 
     // ★ LRU eviction: if over limit, remove oldest entries by timestamp
@@ -1751,7 +1752,7 @@ let diskFreeInFlight = false;
 
 // ====== Fine-grained SCM system ======
 // Fine-grained SCM settings for current folder (sent from backend)
-let currentFineSCM = { szMode: null, sortBy: null };
+let currentFineSCM = { szMode: null, sortBy: null, filesOnTop: false };
 
 // ====== Command history dropdown ======
 function hideAllDropdowns() {
@@ -1811,6 +1812,16 @@ function updateFineSCMButtons() {
       }
     });
   }
+
+  // Update filesOnTop button
+  const fotBtn = document.getElementById('filesOnTopBtn');
+  if (fotBtn) {
+    if (currentFineSCM.filesOnTop) {
+      fotBtn.classList.add('active');
+    } else {
+      fotBtn.classList.remove('active');
+    }
+  }
 }
 
 function handleSzModeClick(mode) {
@@ -1823,7 +1834,8 @@ function handleSzModeClick(mode) {
     command: 'setFineSCM',
     path: currentPath,
     szMode: newMode,
-    sortBy: currentFineSCM.sortBy
+    sortBy: currentFineSCM.sortBy,
+    filesOnTop: currentFineSCM.filesOnTop
   });
 }
 
@@ -1837,7 +1849,22 @@ function handleSortByClick(sort) {
     command: 'setFineSCM',
     path: currentPath,
     szMode: currentFineSCM.szMode,
-    sortBy: newSort
+    sortBy: newSort,
+    filesOnTop: currentFineSCM.filesOnTop
+  });
+}
+
+function handleFilesOnTopClick() {
+  // Toggle filesOnTop for current folder
+  currentFineSCM.filesOnTop = !currentFineSCM.filesOnTop;
+  updateFineSCMButtons();
+  // Send to backend to save and refresh
+  vscode.postMessage({
+    command: 'setFineSCM',
+    path: currentPath,
+    szMode: currentFineSCM.szMode,
+    sortBy: currentFineSCM.sortBy,
+    filesOnTop: currentFineSCM.filesOnTop
   });
 }
 
@@ -2608,7 +2635,8 @@ window.addEventListener('message', event => {
       // ★ Update fine-grained SCM state
       currentFineSCM = {
         szMode: message.fineSCM?.szMode || null,
-        sortBy: message.fineSCM?.sortBy || null
+        sortBy: message.fineSCM?.sortBy || null,
+        filesOnTop: !!message.fineSCM?.filesOnTop
       };
       updateFineSCMButtons();
 
@@ -3497,6 +3525,15 @@ document.addEventListener('DOMContentLoaded', () => {
         e.stopPropagation();
         handleSortByClick(btn.dataset.sort);
       });
+    });
+  }
+
+  const filesOnTopBtn = document.getElementById('filesOnTopBtn');
+  if (filesOnTopBtn) {
+    filesOnTopBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      handleFilesOnTopClick();
     });
   }
 
@@ -4687,6 +4724,7 @@ function showSaveAsDialog() {
       const fineSCM = getFineSCM(currentPath);
       const szDisplayMode = fineSCM.szMode || config.szDisplayMode;
       const sortBy = fineSCM.sortBy || config.sortBy;
+      const filesOnTop = !!fineSCM.filesOnTop;
 
       const directoryContents = await getDirectoryContents(currentPath, sortBy, szDisplayMode);
       const items = [];
@@ -4735,25 +4773,32 @@ function showSaveAsDialog() {
         )}" data-name=".." data-type="folder"><div class="file-select-area"><div class="sz-area"></div><span class="file-icon">📁</span></div><div class="folder-name-area"><span class="file-name">..</span></div></div>`;
       }
 
-      directoryContents.dirs.forEach((dir) => {
-        const szContent = getSzContent(dir, true);
-        items.push({ path: dir.path, name: dir.name, type: "folder" });
-        fileListHtml += `<div class="file-item folder" data-path="${escapeHtmlAttribute(
-          dir.path
-        )}" data-name="${escapeHtmlAttribute(dir.name)}" data-type="folder"><div class="file-select-area"><div class="sz-area">${szContent}</div><span class="file-icon">📁</span></div><div class="folder-name-area"><span class="file-name">${escapeHtmlAttribute(
-          dir.name
-        )}</span></div></div>`;
-      });
+      // ★ Render order: filesOnTop inverts the default (folders first) to files first
+      const renderOrder = filesOnTop
+        ? [{ arr: directoryContents.files, isFolder: false }, { arr: directoryContents.dirs, isFolder: true }]
+        : [{ arr: directoryContents.dirs, isFolder: true }, { arr: directoryContents.files, isFolder: false }];
 
-      directoryContents.files.forEach((file) => {
-        const szContent = getSzContent(file, false);
-        items.push({ path: file.path, name: file.name, type: "file" });
-        fileListHtml += `<div class="file-item file" data-path="${escapeHtmlAttribute(
-          file.path
-        )}" data-name="${escapeHtmlAttribute(file.name)}" data-type="file"><div class="file-select-area"><div class="sz-area">${szContent}</div><span class="file-icon">🗈</span></div><div class="file-name-area"><span class="file-name">${escapeHtmlAttribute(
-          file.name
-        )}</span></div></div>`;
-      });
+      for (const { arr, isFolder } of renderOrder) {
+        const type = isFolder ? "folder" : "file";
+        for (let i = 0, len = arr.length; i < len; i++) {
+          const entry = arr[i];
+          const szContent = getSzContent(entry, isFolder);
+          items.push({ path: entry.path, name: entry.name, type });
+          if (isFolder) {
+            fileListHtml += `<div class="file-item folder" data-path="${escapeHtmlAttribute(
+              entry.path
+            )}" data-name="${escapeHtmlAttribute(entry.name)}" data-type="folder"><div class="file-select-area"><div class="sz-area">${szContent}</div><span class="file-icon">📁</span></div><div class="folder-name-area"><span class="file-name">${escapeHtmlAttribute(
+              entry.name
+            )}</span></div></div>`;
+          } else {
+            fileListHtml += `<div class="file-item file" data-path="${escapeHtmlAttribute(
+              entry.path
+            )}" data-name="${escapeHtmlAttribute(entry.name)}" data-type="file"><div class="file-select-area"><div class="sz-area">${szContent}</div><span class="file-icon">🗈</span></div><div class="file-name-area"><span class="file-name">${escapeHtmlAttribute(
+              entry.name
+            )}</span></div></div>`;
+          }
+        }
+      }
 
       panel.webview.postMessage({
         command: "update",
@@ -5591,7 +5636,8 @@ function showSaveAsDialog() {
         const folderPath = message.path;
         const szMode = message.szMode;
         const sortByValue = message.sortBy;
-        setFineSCMValue(folderPath, szMode, sortByValue);
+        const filesOnTop = !!message.filesOnTop;
+        setFineSCMValue(folderPath, szMode, sortByValue, filesOnTop);
         // Refresh UI immediately
         if (activePanel && activePanelAlive) refreshWebview();
         break;

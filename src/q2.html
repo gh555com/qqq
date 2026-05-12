@@ -979,6 +979,11 @@
 			border-right: none;
 		}
 
+		/* filesOnTop 独立按钮：紧跟 sortByGroup，无右边框 */
+		#filesOnTopBtn {
+			border-right: none;
+		}
+
 		.scm-btn:hover {
 			background-color: var(--gold-accent-bg);
 		}
@@ -1295,6 +1300,18 @@
 							</svg>
 						</button>
 					</div>
+					<button class="scm-btn" id="filesOnTopBtn" data-tooltip="文件在上 / 文件夹在下">
+						<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+							<!-- folder icon (top) -->
+							<path d="M2 3h4l1.5 1.5H14v6H2V3z"/>
+							<!-- down arrow (bottom) -->
+							<polyline points="5,12 8,15 11,12"/>
+							<line x1="8" y1="11" x2="8" y2="15"/>
+						</svg>
+						<svg class="scm-check" viewBox="0 0 10 10">
+							<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+						</svg>
+					</button>
 				</div>
 			</div>
 

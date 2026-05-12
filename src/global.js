@@ -4666,7 +4666,7 @@ async function _doAuthFlow() {
 	// No token — automatically open browser for login (no extra confirmation)
 	const sessionId = _generateSessionId();
 	const deviceName = _buildDeviceName();
-	const loginUrl = `${WQ_API_BASE.replace('/api', '')}/login?from=ide&session=${sessionId}&device_name=${encodeURIComponent(deviceName)}`;
+	const loginUrl = `${WQ_API_BASE.replace('/api', '')}/login?from=ide&session=${sessionId}&device_name=${encodeURIComponent(deviceName)}&goods=qqq`;
 
 	// ★ Tier 1: Try default system browser (automatic, no user click needed)
 	let browserOpened = false;

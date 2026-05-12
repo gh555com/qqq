@@ -6,6 +6,17 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [16.5.1] - 2026-05-12
+
+### Added
+- **Roam per-folder "files on top" toggle**: New button next to the S/C/M sort buttons — click to permanently flip a folder's display order (files above, folders below). Each folder remembers its own setting independently, syncs to cloud with your other preferences, and survives reinstalls.
+
+### Improved
+- **Sort descriptions clarified**: Setting descriptions no longer imply a fixed "folders on top" rule — now accurately reflect that folders and files are sorted independently within their own groups.
+
+---
+
+
 ## [16.5.0] - 2026-05-12
 
 ### Fixed
