@@ -774,7 +774,8 @@
         "anchorDeleted": "[Rollback] تم حذف المرساة المتبقية: {0}",
         "anchorDeleteFailed": "[Rollback] فشل حذف المرساة: {0}",
         "anchorError": "[Rollback] خطأ في معالجة المرساة: {0}",
-        "completed": "[Rollback] اكتمل التراجع"
+        "completed": "[Rollback] اكتمل التراجع",
+        "skippedLanded": "[Rollback] المعاملة {0} تحتوي على {1} ملف(ات) محفوظة، تم تخطي التراجع"
     },
     "cleanup": {
         "tempFileFailed": "[تنظيف الملفات المؤقتة] فشل: {0}",

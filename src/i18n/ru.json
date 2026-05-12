@@ -774,7 +774,8 @@
         "anchorDeleted": "[Rollback] Удалён остаточный якорь: {0}",
         "anchorDeleteFailed": "[Rollback] Удаление якоря не удалось: {0}",
         "anchorError": "[Rollback] Ошибка при обработке якоря: {0}",
-        "completed": "[Rollback] Откат завершён"
+        "completed": "[Rollback] Откат завершён",
+        "skippedLanded": "[Rollback] Транзакция {0} содержит {1} сохранённых файлов, откат пропущен"
     },
     "cleanup": {
         "tempFileFailed": "[Очистка временных файлов] Не удалось: {0}",

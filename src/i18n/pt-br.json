@@ -774,7 +774,8 @@
         "anchorDeleted": "[Rollback] Âncora residual excluída: {0}",
         "anchorDeleteFailed": "[Rollback] Exclusão de âncora falhou: {0}",
         "anchorError": "[Rollback] Erro ao processar âncora: {0}",
-        "completed": "[Rollback] Reversão concluída"
+        "completed": "[Rollback] Reversão concluída",
+        "skippedLanded": "[Rollback] Transação {0} possui {1} arquivo(s) finalizado(s), ignorando reversão"
     },
     "cleanup": {
         "tempFileFailed": "[Limpeza de arquivos temporários] Falhou: {0}",

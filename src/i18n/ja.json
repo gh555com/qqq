@@ -774,7 +774,8 @@
         "anchorDeleted": "[Rollback] 残留アンカーを削除しました: {0}",
         "anchorDeleteFailed": "[Rollback] アンカーの削除に失敗: {0}",
         "anchorError": "[Rollback] アンカー処理中にエラー: {0}",
-        "completed": "[Rollback] ロールバック完了"
+        "completed": "[Rollback] ロールバック完了",
+        "skippedLanded": "[Rollback] トランザクション {0} には {1} 個の確定済みファイルがあるため、ロールバックをスキップします"
     },
     "cleanup": {
         "tempFileFailed": "[一時ファイルクリーンアップ] 失敗: {0}",

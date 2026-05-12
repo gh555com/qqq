@@ -774,7 +774,8 @@
         "anchorDeleted": "[Rollback] Ancla residual eliminada: {0}",
         "anchorDeleteFailed": "[Rollback] Eliminación de ancla falló: {0}",
         "anchorError": "[Rollback] Error al procesar ancla: {0}",
-        "completed": "[Rollback] Reversión completada"
+        "completed": "[Rollback] Reversión completada",
+        "skippedLanded": "[Rollback] Transacción {0} tiene {1} archivo(s) guardado(s), omitiendo reversión"
     },
     "cleanup": {
         "tempFileFailed": "[Limpieza de archivos temporales] Falló: {0}",

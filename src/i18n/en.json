@@ -774,7 +774,8 @@
         "anchorDeleted": "[Rollback] Deleted residual anchor: {0}",
         "anchorDeleteFailed": "[Rollback] Delete anchor failed: {0}",
         "anchorError": "[Rollback] Error processing anchor: {0}",
-        "completed": "[Rollback] Rollback completed"
+        "completed": "[Rollback] Rollback completed",
+        "skippedLanded": "[Rollback] Transaction {0} has {1} landed file(s), skipping rollback"
     },
     "cleanup": {
         "tempFileFailed": "[Temp file cleanup] Failed: {0}",

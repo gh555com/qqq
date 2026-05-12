@@ -774,7 +774,8 @@
         "anchorDeleted": "[Rollback] Ancre résiduelle supprimée: {0}",
         "anchorDeleteFailed": "[Rollback] Suppression d'ancre échouée: {0}",
         "anchorError": "[Rollback] Erreur lors du traitement de l'ancre: {0}",
-        "completed": "[Rollback] Restauration terminée"
+        "completed": "[Rollback] Restauration terminée",
+        "skippedLanded": "[Rollback] Transaction {0} contient {1} fichier(s) finalisé(s), rollback ignoré"
     },
     "cleanup": {
         "tempFileFailed": "[Nettoyage des fichiers temporaires] Échoué: {0}",

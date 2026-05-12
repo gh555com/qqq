@@ -774,7 +774,8 @@
         "anchorDeleted": "[Rollback] Verbleibender Anker gelöscht: {0}",
         "anchorDeleteFailed": "[Rollback] Anker löschen fehlgeschlagen: {0}",
         "anchorError": "[Rollback] Fehler bei Ankerverarbeitung: {0}",
-        "completed": "[Rollback] Rollback abgeschlossen"
+        "completed": "[Rollback] Rollback abgeschlossen",
+        "skippedLanded": "[Rollback] Transaktion {0} hat {1} gesicherte Datei(en), Rollback wird übersprungen"
     },
     "cleanup": {
         "tempFileFailed": "[Temp-Dateibereinigung] Fehlgeschlagen: {0}",

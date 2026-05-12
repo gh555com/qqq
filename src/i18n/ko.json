@@ -774,7 +774,8 @@
         "anchorDeleted": "[Rollback] 잔여 앵커 삭제됨: {0}",
         "anchorDeleteFailed": "[Rollback] 앵커 삭제 실패: {0}",
         "anchorError": "[Rollback] 앵커 처리 중 오류: {0}",
-        "completed": "[Rollback] 롤백 완료"
+        "completed": "[Rollback] 롤백 완료",
+        "skippedLanded": "[Rollback] 트랜잭션 {0}에 {1}개의 저장 완료 파일이 있어 롤백을 건너뜁니다"
     },
     "cleanup": {
         "tempFileFailed": "[임시 파일 정리] 실패: {0}",

@@ -5367,6 +5367,14 @@ const TransactionManager = {
 			return;
 		}
 
+		// ★ If landedFiles is non-empty, the download already succeeded — do NOT delete the anchor.
+		// This prevents a race where _cancelTask fires right after _postProcess lands the file.
+		if (Array.isArray(trans.landedFiles) && trans.landedFiles.length > 0) {
+			logMessage(q('rollback.skippedLanded', trans.id, trans.landedFiles.length), "INFO");
+			await this.removeTransaction(trans.id);
+			return trans;
+		}
+
 		logMessage(q('rollback.rollingBack', trans.id), "WARN");
 
 		// 0. ★ Delete residual anchor (zero-cost, zero-risk: only delete the specific anchor string format)

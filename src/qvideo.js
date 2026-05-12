@@ -1464,13 +1464,19 @@ class Qvideo {
             }
 
             // ★ Cancel popup is shown in _cancelTask; here only return marker
+            // ★ BUT if outcome already has landed files, preserve them! (race: cancel fired after _postProcess succeeded)
             if (this._isTaskCancelled(task)) {
-                return {
-                    landedFiles: [],
-                    finalTotalBytes: 0,
-                    cancelled: true,
-                    targetDir: targetDir
-                };
+                if (outcome.landedFiles && outcome.landedFiles.length > 0) {
+                    // ★ Files already on disk — do NOT discard them. Rollback will also skip via landedFiles check.
+                    this.log(`[Cancel] Task cancelled but ${outcome.landedFiles.length} file(s) already landed, preserving.`);
+                } else {
+                    return {
+                        landedFiles: [],
+                        finalTotalBytes: 0,
+                        cancelled: true,
+                        targetDir: targetDir
+                    };
+                }
             }
 
             // ✅ Final safeguard: even if someone breaks needEnhanced in the future, hard block YouTube enhanced here

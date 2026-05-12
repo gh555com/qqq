@@ -21,6 +21,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **cdp-sniffer no longer lost after window reload**: Previously, if the IDE window happened to reload right after a video finished downloading, the file would be rolled back and deleted — even though it was already verified and saved to disk. Now the system recognizes completed downloads and preserves them through any reload.
+- **Download no longer rolled back by cancel race**: If a cancel signal (anchor loss, user click) arrived in the same moment a video finished landing, the rollback would delete the anchor even though the file was already on disk. Now rollback checks for landed files and skips deletion when the download already succeeded.
 - **Login no longer stuck on retry**: If you cancelled the "Waiting for browser login" prompt and tried again, the IDE generated a brand-new session — so any login you already completed on the first page was ignored. Now retries within 2 minutes reuse the same session, and the progress bar shows a network warning when the server is unreachable instead of spinning silently.
 
 ### Improved

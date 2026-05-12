@@ -774,7 +774,8 @@
         "anchorDeleted": "[Rollback] 已删除残留锚点: {0}",
         "anchorDeleteFailed": "[Rollback] 删除锚点失败: {0}",
         "anchorError": "[Rollback] 处理锚点时出错: {0}",
-        "completed": "[Rollback] 回滚完成"
+        "completed": "[Rollback] 回滚完成",
+        "skippedLanded": "[Rollback] 事务 {0} 已有 {1} 个落盘文件，跳过回滚"
     },
     "cleanup": {
         "tempFileFailed": "[临时文件清理] 失败: {0}",
