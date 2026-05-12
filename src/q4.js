@@ -2032,6 +2032,8 @@ class ClipboardHistorySidebarProvider {
     }
 
     async triggerSavor(mode = 'normal') {
+        // ★ 标记功能使用（弹窗定向用）
+        this._global.markFeatureUsed('audio');
         // ★ Core improvement: stop before play to ensure single-instance narrative
         await this._stopAudio();
 
@@ -2086,6 +2088,7 @@ class ClipboardHistorySidebarProvider {
 
                 // ★ If radio, update UI with radio indicator
                 if (isRadio) {
+                    this._global.markFeatureUsed('radio');
                     this._postMessage({ command: 'playAudio', fileName: 'Radio', count: displayCount, isRadio: true });
                 }
                 // ★ 偿还 ping：通知服务器用户正在偿还给自己（5min 防抖）

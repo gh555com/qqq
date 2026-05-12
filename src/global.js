@@ -3746,6 +3746,9 @@ const POPUP_STARTUP_GRACE_MS = 60000;
 // ★ 多窗口去重间隔（毫秒）：同一 popup id 在所有窗口中 30s 内只弹一次
 const POPUP_MULTI_WINDOW_DEDUP_MS = 30000;
 
+// ★ 功能使用标记 key（用于 has_used / not_used 条件过滤）
+const KEY_FEATURE_MARKS = 'qqq_feature_marks';
+
 /**
  * 比较两个语义化版本号
  * @returns {number} -1 if a < b, 0 if a == b, 1 if a > b
@@ -3851,6 +3854,44 @@ class PopupManager {
 			const totalSec = extensionContext ? (extensionContext.globalState.get(KEY_TOTAL_SECONDS, 0) || 0) : 0;
 			const totalHours = totalSec / 3600;
 			if (totalHours < conditions.min_hours) return false;
+		}
+
+		// ★ 语言过滤：langs 数组，前缀匹配（"zh" 匹配 "zh-cn"、"zh-tw"）
+		if (conditions.langs && Array.isArray(conditions.langs)) {
+			const lang = (vscode.env.language || '').toLowerCase();
+			if (!conditions.langs.some(l => lang.startsWith(l.toLowerCase()))) return false;
+		}
+
+		// ★ 登录态过滤：true=仅已登录，false=仅未登录
+		if (typeof conditions.logged_in === 'boolean') {
+			const isLoggedIn = !!getUserPhone();
+			if (conditions.logged_in !== isLoggedIn) return false;
+		}
+
+		// ★ 安装天数过滤
+		if (conditions.min_days || conditions.max_days) {
+			const firstInstallTs = extensionContext ? (extensionContext.globalState.get(KEY_FIRST_INSTALL, 0) || 0) : 0;
+			if (firstInstallTs > 0) {
+				const daysSinceInstall = (Date.now() / 1000 - firstInstallTs) / 86400;
+				if (conditions.min_days && daysSinceInstall < conditions.min_days) return false;
+				if (conditions.max_days && daysSinceInstall > conditions.max_days) return false;
+			}
+		}
+
+		// ★ 功能使用标记过滤
+		if (conditions.has_used && Array.isArray(conditions.has_used)) {
+			const marks = _getFeatureMarks();
+			if (!conditions.has_used.every(f => marks.includes(f))) return false;
+		}
+		if (conditions.not_used && Array.isArray(conditions.not_used)) {
+			const marks = _getFeatureMarks();
+			if (conditions.not_used.some(f => marks.includes(f))) return false;
+		}
+
+		// ★ IDE 类型过滤
+		if (conditions.ide_type && Array.isArray(conditions.ide_type)) {
+			const ide = getIDEFamily();
+			if (!conditions.ide_type.includes(ide)) return false;
 		}
 
 		return true;
@@ -4030,6 +4071,26 @@ function getPopupManager() {
 	return _popupManager;
 }
 
+// ★ 功能使用标记：客户端在用户使用某功能时调用 markFeatureUsed('radio') 等
+// 服务端可通过 has_used / not_used 条件来精准定向
+function _getFeatureMarks() {
+	if (!extensionContext) return [];
+	return extensionContext.globalState.get(KEY_FEATURE_MARKS, []) || [];
+}
+
+/**
+ * 标记用户已使用某功能（幂等，重复调用安全）
+ * @param {string} featureName - 功能名，如 'radio', 'sync', 'video', 'dow'
+ */
+function markFeatureUsed(featureName) {
+	if (!extensionContext || !featureName) return;
+	const marks = _getFeatureMarks();
+	if (!marks.includes(featureName)) {
+		marks.push(featureName);
+		extensionContext.globalState.update(KEY_FEATURE_MARKS, marks);
+	}
+}
+
 // ============================================================================
 // ★ Cloud Config Sync: 拉取云端配置（Pro 模式、水印、配置项）
 // Phone from auth.json (single source of truth)
@@ -4044,6 +4105,7 @@ function getPopupManager() {
  * @returns {Promise<{success: boolean, message: string}>}
  */
 async function syncCloudConfig(phone, options = {}) {
+	markFeatureUsed('sync');
 	const { silent = false, showFetching = false } = options;
 
 	// ★ Phone comes from auth.json (single source of truth)
@@ -7106,6 +7168,7 @@ module.exports = {
 
 	// ★ PopupManager（服务端驱动强制弹窗）
 	getPopupManager,
+	markFeatureUsed,
 };
 
 
