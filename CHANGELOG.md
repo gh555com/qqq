@@ -6,7 +6,15 @@ All notable changes to this project will be documented in this file.
 
 
 
-## [16.4.2] - 2026-05-05
+## [16.5.0] - 2026-05-12
+
+### Fixed
+- Fixed all known bugs.
+
+---
+
+
+## [16.4.4] - 2026-05-10
 
 ### Fixed
 - **Extension startup no longer freezes the editor**: Previously, opening a window could cause 7-8 seconds of unresponsiveness (unable to click, type, or switch tabs) because internal config cleanup ran synchronously one-by-one, flooding the editor with 30+ redundant refresh events. Now batched with a single debounced refresh — startup is instant.
@@ -36,7 +44,7 @@ All notable changes to this project will be documented in this file.
 ---
 
 
-## [16.4.1] - 2026-05-05
+## [16.4.1] - 2026-05-06
 
 ### Improved
 - **Single Universal package**: One installation package now works on all platforms (Windows x64, Linux x64, macOS Intel, macOS Apple Silicon) — no more downloading the wrong one.

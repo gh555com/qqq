@@ -1200,6 +1200,7 @@ async function savorMomentsCommand() {
 }
 
 async function downloadVideosFromUrlCommand(urlArg) {
+	global.markFeatureUsed('dow');
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) {
 		global.showAutoCloseNotification('error', q('qqq.ui.openDocFirst'));

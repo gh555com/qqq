@@ -57,7 +57,7 @@
 
  Original **name**: qqq [![GitHub stars](https://img.shields.io/github/stars/gh555com/qqq?style=social)](https://github.com/gh555com/qqq)
 
-  **qqq 16.4.1+ required for Linux / macOS.** [Details](#how-to-install)  ![](https://gh555.com/px?g=qqq&s=keeleylednergz.rsw.readme)
+  **qqq 16.4.4+ required for Linux / macOS.** [Details](#how-to-install)  ![](https://gh555.com/px?g=qqq&s=keeleylednergz.rsw.readme)
 
 
  You need not have opened a note-taking application specially.
@@ -189,7 +189,7 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
 
   ## How to install
 
- **qqq 16.4.1+**: A single universal installer for Windows(x64), Linux(x64) and macOS(x64, arm), compatible with almost all operating systems and processor architectures — no installation options, no choices required. One package works for everything.
+ **qqq 16.4.4+**: A single universal installer for Windows(x64), Linux(x64) and macOS(x64, arm), compatible with almost all operating systems and processor architectures — no installation options, no choices required. One package works for everything.
 
 On the other hand, Linux and macOS versions have received relatively limited testing. If you encounter any issues while using the product on Linux or macOS, please contact us directly at ky@gh555.com to help improve the product together, thanks.
 
