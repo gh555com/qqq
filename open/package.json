@@ -3,7 +3,7 @@
   "displayName": "Paste image",
   "description": "Paste images into your editor with ease.",
   "publisher": "KeeleyLednergz",
-  "version": "16.5.12",
+  "version": "16.5.32",
   "engines": {
     "vscode": "^1.75.0"
   },

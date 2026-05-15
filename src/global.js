@@ -6020,21 +6020,30 @@ async function wq() {
 					const tag = el.tagName?.toLowerCase() || el.name?.toLowerCase();
 					const src = $el.attr('src') || '';
 					const dataSrc = $el.attr('data-src') || '';
+					const dataLazySrc = $el.attr('data-lazy-src') || '';
+					const dataOriginal = $el.attr('data-original') || '';
+					const srcset = $el.attr('srcset') || $el.attr('data-srcset') || '';
 
-					// 1. 无 src 且无 data-src 的标签视为无效
-					if (!src && !dataSrc) return false;
+					// 1. 无任何有效图片源的标签视为无效
+					if (!src && !dataSrc && !dataLazySrc && !dataOriginal && !srcset) return false;
 
 					// 2. 过滤 javascript:/about:blank 等无效 src
-					if (src && /^(javascript:|about:blank|#)/i.test(src)) return false;
+					const effectiveSrc = src || dataSrc || dataLazySrc || dataOriginal;
+					if (effectiveSrc && /^(javascript:|about:blank|#)/i.test(effectiveSrc)) return false;
 
 					// 3. 过滤小型 data URI（追踪像素、占位符，通常 < 500 字符）
-					if (src && src.startsWith('data:')) {
-						// 允许较大的 base64 图片（可能是实际内容）
-						if (src.length < 500) return false;
+					if (effectiveSrc && effectiveSrc.startsWith('data:')) {
+						if (effectiveSrc.length < 500) return false;
 					}
 
 					// 4. 对于 video/iframe/embed/object，必须有有效 src
 					if (tag !== 'img' && !src) return false;
+
+					// 5. srcset 中取第一个候选验证
+					if (!effectiveSrc && srcset) {
+						const first = srcset.split(',')[0].trim().split(/\s+/)[0];
+						if (!first || /^data:/i.test(first) && first.length < 500) return false;
+					}
 
 					return true;
 				}).length > 0;

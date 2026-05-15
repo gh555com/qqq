@@ -2891,7 +2891,9 @@ async function executeClipboardCommand() {
 
 	const FILE_COUNT_THRESHOLD = 100;
 
-	if (snapshot.type === 'whitelist') {
+	// ★ html_text 不走 mode='q'：Win 11 上浏览器复制 HTML 常不含 Bitmap，被归类为 whitelist/html_text，
+	//   应走 mode='a'（带 pending 占位符 + 进度条 + 完整事务）以正确处理富文本
+	if (snapshot.type === 'whitelist' && snapshot.subType !== 'html_text') {
 		mode = 'q';
 	} else {
 		if (config === 'half') {

@@ -188,7 +188,7 @@ Independently produce and publish an introductory video for qqq. Depending on vi
 | ★★★★ | 100 Premium license keys, or the equivalent of 10,000 ge |
 | ★★★★★ | 300 Premium license keys, or the equivalent of 30,000 ge |
 
-Simply email the video link to: info@gh555.com.
+Simply email the video link to: info@gh555.com. q
 
 
 #### Method 3. Submit bugs at https://github.com/gh555com/qqq/issues.

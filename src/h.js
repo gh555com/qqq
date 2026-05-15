@@ -1391,9 +1391,50 @@ function _buildBlocksFromSanitizedDom($, baseUrl) {
             if (tag === "br") { textBuf += "\n"; return; }
             if (tag === "img") {
                 flush();
-                const rawSrc = $(node).attr("src") || $(node).attr("data-src");
-                const src = resolve(rawSrc);
+                const rawSrc = $(node).attr("src") || $(node).attr("data-src") || $(node).attr("data-lazy-src") || $(node).attr("data-original");
+                let src = resolve(rawSrc);
+                // ★ Win 11: 浏览器可能只提供 srcset 而无 src，取第一个候选
+                if (!src) {
+                    const srcset = $(node).attr("srcset") || $(node).attr("data-srcset") || "";
+                    if (srcset) {
+                        const firstCandidate = srcset.split(",")[0].trim().split(/\s+/)[0];
+                        if (firstCandidate && !/^data:/i.test(firstCandidate)) src = resolve(firstCandidate);
+                    }
+                }
                 if (src) blocks.push({ type: "media", kind: "image", src, status: "pending" });
+                return;
+            }
+            // ★ Win 11: <picture> 内可能只有 <source srcset="..."> 而无 <img>
+            if (tag === "picture") {
+                flush();
+                // 先尝试找内部的 img（正常情况）
+                const innerImg = $(node).find("img");
+                if (innerImg.length > 0) {
+                    // 走正常 img 处理
+                    const rawSrc = innerImg.attr("src") || innerImg.attr("data-src") || innerImg.attr("data-lazy-src") || innerImg.attr("data-original");
+                    let src = resolve(rawSrc);
+                    if (!src) {
+                        const srcset = innerImg.attr("srcset") || innerImg.attr("data-srcset") || "";
+                        if (srcset) {
+                            const firstCandidate = srcset.split(",")[0].trim().split(/\s+/)[0];
+                            if (firstCandidate && !/^data:/i.test(firstCandidate)) src = resolve(firstCandidate);
+                        }
+                    }
+                    if (src) blocks.push({ type: "media", kind: "image", src, status: "pending" });
+                } else {
+                    // 无 img 子元素，从 source 取 srcset
+                    const sources = $(node).find("source");
+                    for (let i = 0; i < sources.length; i++) {
+                        const srcset = $(sources[i]).attr("srcset") || "";
+                        if (srcset) {
+                            const firstCandidate = srcset.split(",")[0].trim().split(/\s+/)[0];
+                            if (firstCandidate && !/^data:/i.test(firstCandidate)) {
+                                blocks.push({ type: "media", kind: "image", src: resolve(firstCandidate), status: "pending" });
+                                break;
+                            }
+                        }
+                    }
+                }
                 return;
             }
             if (tag === "video") {
@@ -2417,6 +2458,24 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
         if (progressCallback) progressCallback(0, q('h.progress.schemeTwo'));
         blocks = _buildBlocksFromSanitizedDom($, baseUrl);
 
+        // ★ 诊断日志：查看 blocks 组成和 HTML 中的 img 标签
+        const imgCount = $('img').length;
+        const mediaBlocks = blocks.filter(b => b.type === 'media');
+        const textBlocks = blocks.filter(b => b.type === 'text');
+        log(`[SmartPaste] Blocks: ${blocks.length} total, ${textBlocks.length} text, ${mediaBlocks.length} media; DOM img tags: ${imgCount}`, "INFO");
+        if (imgCount > 0 && mediaBlocks.length === 0) {
+            // img 标签存在但未产生 media block — 打印前几个 img 的属性
+            const imgAttrs = [];
+            $('img').slice(0, 3).each((i, el) => {
+                const a = el.attribs || {};
+                imgAttrs.push(`src=${(a.src||'').slice(0,80)} data-src=${(a['data-src']||'').slice(0,80)} srcset=${(a.srcset||'').slice(0,80)}`);
+            });
+            log(`[SmartPaste] img tags found but no media blocks! attrs: ${imgAttrs.join(' | ')}`, "WARN");
+        }
+        if (imgCount === 0) {
+            log(`[SmartPaste] HTML has 0 img tags. First 300 chars: ${$.html().slice(0, 300)}`, "DEBUG");
+        }
+
         // Quality Check for Scheme 2 Result
         if (!_isResultQualityAcceptable(blocks)) {
             log("[SmartPaste] Scheme 2 result quality low, falling back to Scheme 1", "WARN");
@@ -2454,6 +2513,20 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
         await _materializeImageBlocksToFiles(blocks, targetDir, progressCallback, token, transId, autoRename);
     }
 
+    // ★ Win 11 兆底：如果 blocks 产生不了有用内容（无文本、无已下载媒体），回退为纯文本
+    const hasUsableText = blocks.some(b => b.type === "text" && b.text && b.text.trim());
+    const hasUsableMedia = blocks.some(b => b.type === "media" && b.path);
+    if (!hasUsableText && !hasUsableMedia) {
+        const fallbackText = await vscode.env.clipboard.readText();
+        if (fallbackText && fallbackText.trim()) {
+            log("[handleClipboardUnified] Blocks empty, falling back to clipboard text", "WARN");
+            return { type: "text", text: fallbackText };
+        }
+    }
+
+    const finalMediaCount = blocks.filter(b => b.type === 'media' && b.path).length;
+    const finalTextCount = blocks.filter(b => b.type === 'text' && b.text && b.text.trim()).length;
+    log(`[handleClipboardUnified] Returning html_blocks: ${blocks.length} blocks (${finalTextCount} text, ${finalMediaCount} downloaded media)`, "INFO");
     return { type: "html_blocks", blocks, baseUrl };
 }
 
