@@ -2907,8 +2907,10 @@ async function executeClipboardCommand() {
 	}
 
 	if (mode === 'q') {
-		// ★ 对于 whitelist（纯文本或无媒体HTML），直接调用原生粘贴（更快，保留空行）
-		if (snapshot.type === 'whitelist' && (snapshot.subType === 'text' || snapshot.subType === 'html_text')) {
+		// ★ 对于 whitelist/text（纯文本），直接调用原生粘贴（更快，保留空行）
+		// ★ html_text 不再走原生粘贴，因为 Win 11 上浏览器复制 HTML 常不含 Bitmap 格式，
+		//   导致被错误归类为 html_text，应走 autoDetectAndPaste 保留富文本结构
+		if (snapshot.type === 'whitelist' && snapshot.subType === 'text') {
 			await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
 			return;
 		}

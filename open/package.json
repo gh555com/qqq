@@ -1,0 +1,22 @@
+{
+  "name": "Paste-Image",
+  "displayName": "Paste image",
+  "description": "Paste images into your editor with ease.",
+  "publisher": "KeeleyLednergz",
+  "version": "16.5.12",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onCommand:pasteImage.hello"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "pasteImage.hello",
+        "title": "Paste Image: Hello"
+      }
+    ]
+  },
+  "license": "GPL-3.0"
+}

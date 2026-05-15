@@ -4354,7 +4354,9 @@ async function performQ2Paste(targetDir, refreshCallback) {
   // ★ If clipboard is whitelist type (plain text), check if it's actually file paths
   // This handles the case where our own copyFilesToClipboard wrote file paths
   // but the clipboard detection only sees text (common on Linux without proper MIME support)
-  if (snapshot.type === 'whitelist') {
+  // ★ html_text 不再拦截：Win 11 上浏览器复制 HTML 常不含 Bitmap 格式，被错误归类为 html_text，
+  //   应让其继续走 autoDetectAndPaste 以保留富文本结构
+  if (snapshot.type === 'whitelist' && snapshot.subType !== 'html_text') {
     try {
       const clipText = await vscode.env.clipboard.readText();
       if (clipText) {
