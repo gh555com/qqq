@@ -52,7 +52,18 @@
 </p>
 
 
- Full source code transparency, security, and auditability are guaranteed. [Feedback & Issues](https://github.com/gh555com/qqq/issues)
+# qqq (IDE)
+
+**Make everything pasteable. Orchestrate ideas. Turn the IDE into an operating system.**
+
+qqq IDE lets you paste images, files, folders, HTML pages, videos, and media directly into VS Code / Code-OSS / VSCodium — with **WYSIWYG** preview.
+
+## Links
+
+- Project discussion and roadmap: https://github.com/gh555com/qqq/discussions/6
+- Official download: https://www.gh555.com/gaea/d/qqq
+- Source code: https://github.com/gh555com/qqq
+
 
 
  Original **name**: qqq [![GitHub stars](https://img.shields.io/github/stars/gh555com/qqq?style=social)](https://github.com/gh555com/qqq)
@@ -62,10 +73,10 @@
 
  You need not have opened a note-taking application specially.
 
- **√**  VS Code (Cursor, Antigravity, etc.) can also serve as an all-media paste-friendly notebook. How? Enable qqq.
+ **√**  VS Code (Cursor, Antigravity, etc.) can also serve as an all-media paste-friendly notebook. How? viaa qqq.
 
 
-## ✦q✦ Enhanced Ctrl+V: Without changing any original features, Paste everything  anywhere in any document
+## ✦q✦ Ctrl+V: Paste Everything, Anywhere in any document
 <p align="left">
   <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/YBZ5FHDRYKQF2.gif" width="100%" alt="Paste Screenshot">
 </p>
