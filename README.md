@@ -3,7 +3,7 @@
   © 2005 <a href="https://www.gh555.com">gh555.com</a> All Rights Reserved.
 </p>
 
-# qqq IDE
+# qqq IDE: Paste Everything into VS Code / Code-OSS / VSCodium
 
 **Make everything pasteable. Orchestrate ideas. Turn the IDE into an operating system.**
 
@@ -14,7 +14,7 @@ qqq turns VS Code, Cursor, Antigravity, Code-OSS, and VSCodium into an all-media
 ## Links
 
 - Project discussion and roadmap: https://github.com/gh555com/qqq/discussions/6
-- Official download: https://www.gh555.com/gaea/d/qqq
+- Official download: https://www.gh555.com/qqq
 - Source code: https://github.com/gh555com/qqq
 
 Original **name**: qqq [![GitHub stars](https://img.shields.io/github/stars/gh555com/qqq?style=social)](https://github.com/gh555com/qqq)
@@ -41,7 +41,7 @@ qqq IDE extends paste beyond plain text.
 
 You can paste screenshots, image files, folders, videos, HTML pages, documents, and media resources directly into the editor.
 
-This works in Markdown, plain text files, custom file extensions, and even files with no extension.
+This works in plain text files, custom file extensions, and even files with no extension.
 
 ### Paste screenshots directly into VS Code / Code-OSS / VSCodium
 
@@ -49,7 +49,7 @@ This works in Markdown, plain text files, custom file extensions, and even files
   <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/YBZ5FHDRYKQF2.gif" width="100%" alt="Paste screenshots directly into VS Code with qqq IDE">
 </p>
 
-qqq IDE lets you paste screenshots directly into any document, including `.txt`, `.1`, custom file extensions, or files with no extension.
+qqq IDE lets you paste screenshots directly into any document, including `.txt`, `.1`, custom file extensions, or files with no extension, and preview them with WYSIWYG rendering.
 
 ### Paste image files directly into VS Code / Code-OSS / VSCodium
 
@@ -65,7 +65,7 @@ qqq IDE lets you paste image files directly into the editor and preview them in 
   <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/E2ULPGMCYGGFE.gif" width="100%" alt="Paste files folders videos PSD MP3 and media directly into VS Code with qqq IDE">
 </p>
 
-Via qqq, you can paste `txt`, `exe`, `psd`, `mp3`, folders, `mp4` videos, and many other file types directly into VS Code / Code-OSS / VSCodium.
+Via qqq, you can paste `txt`, `exe`, `psd`, `mp3`, folders, `mp4` videos, and many other file types directly into VS Code / Code-OSS / VSCodium with WYSIWYG preview.
 
 Use:
 
@@ -150,98 +150,16 @@ Useful Roam shortcuts:
 - Press `Space` on a selected item to request its size.
 - Press `1` to scroll to the top of the list.
 - Press `2` to scroll to the bottom of the list.
-- Press `Q` to open projects or documents.
-- Press `W` to open music, videos, games, or media folders.
+- Press `Q` to open selected projects or documents in IDE.
+- Press `W` to open selected music, videos, games, folders, or media resources.
 - Press `Space + Q` to invoke Roam.
 
-qqq Roam can also serve as the default start page for blank windows.
-
-## ✦q✦ Premium vs Free
-
-All core features mentioned above are available in the free version.
-
-The free version includes:
-
-- paste screenshots
-- paste images
-- paste files
-- paste folders
-- WYSIWYG preview
-- Roam file explorer
-- all-media organization workflows
-
-qqq also includes premium capabilities, such as:
-
-- HTML pasting
-- DOC export
-- DOCX export
-- ZIP export
-- streaming video pasting
-- clipboard history cards
-- orphaned file cleanup
-
-qqq uses a simple billing model:
-
-**One-time purchase, permanent ownership.**
-
-More importantly, all advanced features of qqq are permanently free and unlimited.
-
-**This means the most powerful version of qqq is available in the free edition.**
-
-The genuine version mainly provides:
-
-1. Watermark removal
-2. Cloud storage for preferences
-
-## How to Get a Genuine License
-
-Sponsor **GH Health** to receive `ge` as a gift.
-
-qqq can be purchased with **100 ge**, approximately equivalent to **100 RMB / 15 USD**.
-
-- Register: https://www.gh555.com/login
-- Buy License: https://www.gh555.com/gaea/d/qqq#price
-- Save Preferences: https://www.gh555.com/gaea/d/qqq#profile
-
-### Method 1: Earn It in 100 Days
-
-Register as part of **GH Health** to automatically receive **1 ge per day**.
-
-No login, no check-in, and no task is required.
-
-Since qqq is priced at 100 ge:
-
-**Sign up → Wait 100 days → Get qqq for free**
-
-### Method 2: Contribute a Video
-
-Independently produce and publish an introductory video for qqq.
-
-Depending on video quality, you can earn:
-
-| Video Quality | Rewards |
-|---------------|---------|
-| ★ | 3 Premium license keys, or the equivalent of 300 ge |
-| ★★ | 10 Premium license keys, or the equivalent of 1,000 ge |
-| ★★★ | 30 Premium license keys, or the equivalent of 3,000 ge |
-| ★★★★ | 100 Premium license keys, or the equivalent of 10,000 ge |
-| ★★★★★ | 300 Premium license keys, or the equivalent of 30,000 ge |
-
-Send the video link to:
-
-info@gh555.com
-
-### Method 3: Submit Bugs
-
-Submit bugs or feedback here:
-
-https://github.com/gh555com/qqq/issues
 
 ## ✦q✦ Premium Features: Out of the Box
 
 ### Paste HTML directly into VS Code / Code-OSS / VSCodium
 
-qqq IDE supports pasting HTML pages into the editor.
+qqq IDE supports sniffing & pasting HTML(Rich Text) into the editor.
 
 Compatibility is best with Chromium-based browsers.
 
@@ -319,26 +237,10 @@ No installation options or complex choices are required.
 
 One package works for everything.
 
-Linux and macOS versions have received relatively limited testing. If you encounter issues on Linux or macOS, please contact:
-
-ky@gh555.com
 
 ### Switch languages after installation
 
-After installation, qqq supports multiple UI languages:
-
-- zh
-- zh-tw
-- en
-- ja
-- de
-- ko
-- ru
-- ar
-- es
-- fr
-- pt-BR
-
+qqq supports multiple UI languages: zh、zh-tw、en、ja、de、ko、ru、ar、es、fr、pt-BR
 <p align="left">
   <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/2JTYBVFI3CWBS.png" alt="Switch qqq IDE language settings in VS Code">
 </p>
@@ -361,49 +263,11 @@ For architecture details:
 
 https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md
 
-## Security
-
-The qqq source code is open source and available for public review and self-compilation:
-
-https://github.com/gh555com/qqq
-
-Windows 7 is supported.
-
-Key compilation notes:
-
-https://github.com/gh555com/qqq/blob/qq/docs/Rust%20win7.md
-
-GH Health undertakes never to collect clipboard content or sensitive user information and welcomes public supervision.
-
-### Business License
-
-<p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/MSNRJ5YUR7YY6.jpg" width="100%" alt="GH Health business license for qqq IDE">
-</p>
-
-### Domain Registration Certificate
-
-<p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/ZAVTVRFVTJ6ME.png" width="60%" alt="GH Health domain registration certificate">
-</p>
-
-### Virus detection or submission
-
-Avira submission:
-
-https://www.avira.com/en/analysis/submit
-
-Detection result based on qqq v16.4.0:
-
-<p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/OZ27TZQMB6KIG.jpg" width="60%" alt="Avira virus detection result for qqq IDE">
-</p>
-
 ## Contact
 
 - Repository: https://github.com/gh555com/qqq
 - Issues: https://github.com/gh555com/qqq/issues
-- Official download: https://www.gh555.com/gaea/d/qqq
-- Premium care: ky@gh555.com
+- Official download: https://www.gh555.com/qqq
+- Reply on the same day: ky@gh555.com
 
 <a href="https://www.gh555.com">GH Health</a> All Rights Reserved.
