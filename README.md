@@ -1,62 +1,15 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 <p align="center">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/FPXKHX4NKOZJ6.gif" width="100%" alt="的梦gaea">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/FPXKHX4NKOZJ6.gif" width="100%" alt="qqq IDE by GH Health">
   © 2005 <a href="https://www.gh555.com">gh555.com</a> All Rights Reserved.
 </p>
 
-
-# qqq (IDE)
+# qqq IDE
 
 **Make everything pasteable. Orchestrate ideas. Turn the IDE into an operating system.**
 
-qqq IDE lets you paste images, files, folders, HTML pages, videos, and media directly into VS Code / Code-OSS / VSCodium — with **WYSIWYG** preview.
+qqq IDE lets you paste images, screenshots, files, folders, HTML pages, videos, and media directly into **VS Code / Code-OSS / VSCodium** — with **WYSIWYG preview**.
+
+qqq turns VS Code, Cursor, Antigravity, Code-OSS, and VSCodium into an all-media paste-friendly notebook and creative workspace.
 
 ## Links
 
@@ -64,104 +17,170 @@ qqq IDE lets you paste images, files, folders, HTML pages, videos, and media dir
 - Official download: https://www.gh555.com/gaea/d/qqq
 - Source code: https://github.com/gh555com/qqq
 
+Original **name**: qqq [![GitHub stars](https://img.shields.io/github/stars/gh555com/qqq?style=social)](https://github.com/gh555com/qqq)
 
+**qqq 16.5.1+ is required for Linux / macOS.** [Details](#how-to-install)
 
- Original **name**: qqq [![GitHub stars](https://img.shields.io/github/stars/gh555com/qqq?style=social)](https://github.com/gh555com/qqq)
+![](https://gh555.com/px?g=qqq&s=gh555.qqq.readme)
 
-  **qqq 16.5.1+ required for Linux / macOS.** [Details](#how-to-install)  ![](https://gh555.com/px?g=qqq&s=gh555.qqq.readme)
+## Why qqq IDE
 
+You should not need to open a separate note-taking application just to collect screenshots, images, files, folders, videos, HTML pages, and creative materials.
 
- You need not have opened a note-taking application specially.
+With qqq IDE, your editor becomes an all-media workspace.
 
- **√**  VS Code (Cursor, Antigravity, etc.) can also serve as an all-media paste-friendly notebook. How? viaa qqq.
+VS Code / Code-OSS / VSCodium can become a paste-friendly notebook for developers, creators, writers, AI users, and anyone who organizes ideas inside an IDE.
 
+The core workflow is simple:
 
-## ✦q✦ Ctrl+V: Paste Everything, Anywhere in any document
-<p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/YBZ5FHDRYKQF2.gif" width="100%" alt="Paste Screenshot">
-</p>
+**Copy → Paste → Preview → Organize → Continue**
 
- Works with any document e.g. ".txt", ".1", any file extension, or no extension.
+## ✦q✦ Ctrl+V: Paste Everything, Anywhere in Any Document
 
-<p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/6QEDZULVO33JW.gif" width="100%" alt="Paste image files directly">
-</p>
+qqq IDE extends paste beyond plain text.
 
-**Via  qqq**  you can paste txt, exe, psd, mp3, folder, mp4.... if you want. Why not?
+You can paste screenshots, image files, folders, videos, HTML pages, documents, and media resources directly into the editor.
 
-<p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/E2ULPGMCYGGFE.gif" width="100%" alt="Paste any file">
-</p>
+This works in Markdown, plain text files, custom file extensions, and even files with no extension.
 
- qqq in, ctrl + v.
-
-  **If you don't like key combinations, try F2.**
-
- You can organize your ideas now.
-
- There’s just one more small question - you need to be able to jump between arbitrary directories:
-
-
-## ✦q✦ File Explorer
-
- Invoke:  `Tab`(but is not in editing mode), or Roam command/button.
+### Paste screenshots directly into VS Code / Code-OSS / VSCodium
 
 <p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/75T3DXC3XWJB4.gif" width="100%" alt="Roam file explorer">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/YBZ5FHDRYKQF2.gif" width="100%" alt="Paste screenshots directly into VS Code with qqq IDE">
 </p>
 
+qqq IDE lets you paste screenshots directly into any document, including `.txt`, `.1`, custom file extensions, or files with no extension.
 
-**Roam**, from qqq, is a file explorer:
-
-1. **Nice**: It can reach any location, no longer limited to project folders. You can even map remote disks locally, skip ssh.
-
-2. **Fast**: There’s no need to rage because you’re waiting for just a list — not even on my servers and VMs with maxed-out system resources.
-
-3. **Rock-solid**: Based on transactional file operations, it compensates for VS Code's inherent shortcomings in large-scale file deletion and copying. For details on VS Code's official file manager flaws, see: [VS_Code_Official_File_Explorer_Limitations.md](https://github.com/gh555com/qqq/blob/qq/docs/VS_Code_Official_File_Explorer_Limitations.md)
-
-4. **User-friendly**: Displays recent visits for quick jumps; `a`, `x` keys open the administrator terminal; supports quick filtering; remembers fine-grained list and sorting preferences; fully operable via keyboard: tab opens Roam → focus enters the filename edit box → filename → enter → focus enters the newly created file (already in edit stance) 🡺 I want you to expand faster; a large close button - if you don't like Roam, that's what I prepared for you, but more likely, you'll get a resource manager that will eventually merge with your consciousness.
-
-So fast.
-
-
-
-A little hint:
+### Paste image files directly into VS Code / Code-OSS / VSCodium
 
 <p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/5EM6FHVNR4KG2.gif" width="100%" alt="How to select a folder？">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/6QEDZULVO33JW.gif" width="100%" alt="Paste image files directly into VS Code with qqq IDE">
 </p>
 
- With this trick, you can multi-select folders (or a mix of files and folders) to copy, delete, get size in bulk.
+qqq IDE lets you paste image files directly into the editor and preview them in place.
+
+### Paste any file, folder, video, PSD, MP3, EXE, or media resource
 
 <p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/O4H43QFLJ6WHY.gif" width="100%" alt="Most visited always closest to you">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/E2ULPGMCYGGFE.gif" width="100%" alt="Paste files folders videos PSD MP3 and media directly into VS Code with qqq IDE">
 </p>
 
-shortcut key of Roam:
+Via qqq, you can paste `txt`, `exe`, `psd`, `mp3`, folders, `mp4` videos, and many other file types directly into VS Code / Code-OSS / VSCodium.
+
+Use:
+
+- `Ctrl+V`
+- `F2`
+
+qqq makes paste a universal input action inside the IDE.
+
+You can organize your ideas immediately without leaving the editor.
+
+## ✦q✦ Roam File Explorer for VS Code / Code-OSS / VSCodium
+
+To organize ideas, files, screenshots, folders, videos, and media resources, you also need to jump between arbitrary directories quickly.
+
+qqq includes **Roam**, a fast file explorer for VS Code / Code-OSS / VSCodium.
+
+Invoke Roam with:
+
+- `Tab` when not in editing mode
+- Roam command
+- Roam button
+- `Space + Q`
+
+### Roam file explorer for fast directory navigation
 
 <p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/XMTOYSWJPSJYU.gif" width="80%" alt="shortcut key">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/75T3DXC3XWJB4.gif" width="100%" alt="Roam file explorer for VS Code and qqq IDE">
 </p>
 
-Press `Space` on selected item: ignore any preferences, request its size.
+**Roam**, from qqq, is a file explorer designed for fast navigation, recent locations, keyboard-first workflows, and access to directories outside the current project folder.
 
-Press `1` to scroll to list top.
-Press `2` to scroll to list bottom.
+### Why Roam matters
 
+1. **Reach any location**
 
-  qqq Roam serves as your default start page for blank windows. Make the most of the **`Q`** key to open projects or documents;  make the most of the **`W`** key to open your music, videos, and games.
+   Roam is not limited to the current project folder. You can jump to any local directory. You can also map remote disks locally and work with them directly.
 
- As of v16.1, we’re thrilled to introduce the `Space + Q` keyboard shortcut to invoke Roam. Enjoy!
+2. **Fast file browsing**
 
+   Roam is designed for fast directory listing and quick navigation, even on heavy machines, servers, and virtual machines.
+
+3. **Transactional file operations**
+
+   Roam uses transactional file operations to make large-scale file deletion, copying, and organization more reliable.
+
+   For details on VS Code's official file manager limitations, see:
+
+   https://github.com/gh555com/qqq/blob/qq/docs/VS_Code_Official_File_Explorer_Limitations.md
+
+4. **Keyboard-first workflow**
+
+   Roam supports recent visits, quick filtering, keyboard operation, quick file creation, list preferences, sorting preferences, and direct opening of administrator terminals.
+
+   Example workflow:
+
+   `Tab → filename → Enter → new file opens and enters editing mode`
+
+### Select folders and mixed resources in Roam
+
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/5EM6FHVNR4KG2.gif" width="100%" alt="Select folders and mixed files in Roam file explorer with qqq IDE">
+</p>
+
+With Roam, you can select folders, files, or a mixed set of files and folders to copy, delete, or calculate size in bulk.
+
+### Most visited folders stay close to you
+
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/O4H43QFLJ6WHY.gif" width="100%" alt="Most visited folders in Roam file explorer for qqq IDE">
+</p>
+
+Roam keeps frequently visited locations close, so you can move between projects, documents, music, videos, games, and media folders faster.
+
+### Roam keyboard shortcuts
+
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/XMTOYSWJPSJYU.gif" width="80%" alt="Roam file explorer keyboard shortcuts in qqq IDE">
+</p>
+
+Useful Roam shortcuts:
+
+- Press `Space` on a selected item to request its size.
+- Press `1` to scroll to the top of the list.
+- Press `2` to scroll to the bottom of the list.
+- Press `Q` to open projects or documents.
+- Press `W` to open music, videos, games, or media folders.
+- Press `Space + Q` to invoke Roam.
+
+qqq Roam can also serve as the default start page for blank windows.
 
 ## ✦q✦ Premium vs Free
 
+All core features mentioned above are available in the free version.
 
- All features mentioned above are fully available in the free version.
+The free version includes:
 
-In addition, qqq comes with essential premium capabilities, including HTML pasting, DOC export, streaming video pasting, and more...
+- paste screenshots
+- paste images
+- paste files
+- paste folders
+- WYSIWYG preview
+- Roam file explorer
+- all-media organization workflows
 
-However, qqq only includes the simplest billing model: a one-time purchase.
+qqq also includes premium capabilities, such as:
+
+- HTML pasting
+- DOC export
+- DOCX export
+- ZIP export
+- streaming video pasting
+- clipboard history cards
+- orphaned file cleanup
+
+qqq uses a simple billing model:
 
 **One-time purchase, permanent ownership.**
 
@@ -169,27 +188,36 @@ More importantly, all advanced features of qqq are permanently free and unlimite
 
 **This means the most powerful version of qqq is available in the free edition.**
 
-Still, we hope you will purchase the genuine version. The genuine version offers just two additional benefits: 1. Watermark removal; 2. Cloud storage for preferences.
+The genuine version mainly provides:
 
+1. Watermark removal
+2. Cloud storage for preferences
 
- ↓ How to Get a Genuine License ↓
+## How to Get a Genuine License
 
-Sponsor [GH Health](https://www.gh555.com/gaea/d/qqq#price) to receive ge as a gift. You can purchase the official version with 100ge (approximately equivalent to 100 RMB or 15 USD).
+Sponsor **GH Health** to receive `ge` as a gift.
 
-Additionally, there are 3 other ways to get a genuine activation code for free:
+qqq can be purchased with **100 ge**, approximately equivalent to **100 RMB / 15 USD**.
 
-#### Method 1: Earn It in 100 Days
+- Register: https://www.gh555.com/login
+- Buy License: https://www.gh555.com/gaea/d/qqq#price
+- Save Preferences: https://www.gh555.com/gaea/d/qqq#profile
 
-Register as a part of **GH Health** to automatically receive **1 ge per day** — no login, no check-in, no tasks required.
-Since qqq is priced at 100 ge: **Sign up → Wait 100 days → Get qqq for free**.
+### Method 1: Earn It in 100 Days
 
-[Register](https://www.gh555.com/login)　[Buy License](https://www.gh555.com/gaea/d/qqq#price)　[▶Save Preferences](https://www.gh555.com/gaea/d/qqq#profile)
+Register as part of **GH Health** to automatically receive **1 ge per day**.
 
+No login, no check-in, and no task is required.
 
+Since qqq is priced at 100 ge:
 
-#### Method 2: Contribute a Video
+**Sign up → Wait 100 days → Get qqq for free**
 
-Independently produce and publish an introductory video for qqq. Depending on video quality, you can earn:
+### Method 2: Contribute a Video
+
+Independently produce and publish an introductory video for qqq.
+
+Depending on video quality, you can earn:
 
 | Video Quality | Rewards |
 |---------------|---------|
@@ -199,116 +227,183 @@ Independently produce and publish an introductory video for qqq. Depending on vi
 | ★★★★ | 100 Premium license keys, or the equivalent of 10,000 ge |
 | ★★★★★ | 300 Premium license keys, or the equivalent of 30,000 ge |
 
-Simply email the video link to: info@gh555.com.
+Send the video link to:
 
+info@gh555.com
 
-#### Method 3. Submit bugs at https://github.com/gh555com/qqq/issues.
+### Method 3: Submit Bugs
 
+Submit bugs or feedback here:
 
-Share 3 Premium license keys:
+https://github.com/gh555com/qqq/issues
 
-DG-7J4OA-4H7CX-K3F2I-D377P-HU22GI
+## ✦q✦ Premium Features: Out of the Box
 
-DG-GHPCV-L7EFH-22EBK-IDBCY-GHYXRD
+### Paste HTML directly into VS Code / Code-OSS / VSCodium
 
-DG-F3HJ5-UBVX3-4HBV2-QQIXL-ZZRSJ7
+qqq IDE supports pasting HTML pages into the editor.
 
+Compatibility is best with Chromium-based browsers.
 
-Premium Care: ky@gh555.com (Primary)；📞 +86 19232854249 (Emergency & Chinese Language Only (Priority: IDE integration; merchant & group procurement) )
-
-
-
-
-### **Premium features: Out of the box**
-
- #### Paste HTML
-
-  (Only guarantee compatibility with **chromium** kernel, that is, if you copy from Edge browser and paste into VS Code, only plain text may be displayed.)
+If you copy from some browsers, such as Edge in certain modes, only plain text may be displayed.
 
 <p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/ICFESEED7ARZM.gif" width="100%" alt="Paste HTML">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/ICFESEED7ARZM.gif" width="100%" alt="Paste HTML pages directly into VS Code with qqq IDE">
 </p>
 
- Test URL: https://mbd.baidu.com/newspage/data/landingsuper?context=%7B%22nid%22%3A%22news_9166282253401607575%22%7D&n_type=1
+Test URL:
 
-This URL contains a mix of 3 videos and multiple images. Select all on the web page, Copy → Paste. Test objectives: 1. All 3 videos have been downloaded. 2. The positions (order) of text, images, and videos are correct. 3. No garbled characters should appear. 4. After repeated operations, the same resources should only be saved once on the hard drive (identical images and videos will be deduplicated by fingerprinting).
+https://mbd.baidu.com/newspage/data/landingsuper?context=%7B%22nid%22%3A%22news_9166282253401607575%22%7D&n_type=1
 
+This test page contains a mix of videos, images, and text.
 
+Test objectives:
 
- #### Export Doc
+1. All videos should be downloaded.
+2. The order of text, images, and videos should remain correct.
+3. No garbled characters should appear.
+4. Repeated operations should save identical resources only once.
+5. Identical images and videos should be deduplicated by fingerprinting.
 
- .doc: compatible with Word 2003, RTF. RTF encoding. Better compatibility.
+### Export DOC and DOCX from qqq IDE
 
- .docx: supports Google Docs/Tencent Docs. Office Open XML encoding. More powerful functions and higher compression ratio.
+qqq supports document export.
 
+`.doc`:
 
+- compatible with Word 2003
+- based on RTF
+- better compatibility for older workflows
 
- #### Export Zip: The best way for portable and presentation resources.
+`.docx`:
 
+- compatible with Google Docs and Tencent Docs
+- based on Office Open XML
+- stronger structure
+- better compression ratio
 
+### Export ZIP for portable resources
 
+qqq supports ZIP export.
 
- #### Paste stream videos
+ZIP export is useful for packaging notes, media resources, documents, images, HTML content, and presentation materials into portable archives.
+
+### Paste streaming videos into VS Code / Code-OSS / VSCodium
 
 <p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/W5EEPDRQEO4LO.gif" width="100%" alt="Network stream video">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/W5EEPDRQEO4LO.gif" width="100%" alt="Paste streaming videos into VS Code with qqq IDE">
 </p>
 
+qqq supports workflows for pasting and organizing streaming video resources inside the editor.
 
+### Clean up orphaned files
 
- ####  Clean up orphaned files
+qqq can help clean up orphaned resource files that are no longer referenced by your documents.
 
- #### Clipboard history cards
+### Clipboard history cards
 
+qqq includes clipboard-related workflows for managing pasted content and recent resources.
 
+## How to Install
 
+**qqq 16.5.1+** provides a single universal installer for:
 
+- Windows x64
+- Linux x64
+- macOS x64
+- macOS arm
 
-  ## How to install
+The installer is designed to work across common operating systems and processor architectures.
 
- **qqq 16.5.1+**: A single universal installer for Windows(x64), Linux(x64) and macOS(x64, arm), compatible with almost all operating systems and processor architectures — no installation options, no choices required. One package works for everything.
+No installation options or complex choices are required.
 
-On the other hand, Linux and macOS versions have received relatively limited testing. If you encounter any issues while using the product on Linux or macOS, please contact us directly at ky@gh555.com to help improve the product together, thanks.
+One package works for everything.
 
+Linux and macOS versions have received relatively limited testing. If you encounter issues on Linux or macOS, please contact:
 
- After install, you can switch languages: zh、zh-tw、en、ja、de、ko、ru、ar、es、fr、pt-BR:
+ky@gh555.com
+
+### Switch languages after installation
+
+After installation, qqq supports multiple UI languages:
+
+- zh
+- zh-tw
+- en
+- ja
+- de
+- ko
+- ru
+- ar
+- es
+- fr
+- pt-BR
+
 <p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/2JTYBVFI3CWBS.png" alt="i18n">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/2JTYBVFI3CWBS.png" alt="Switch qqq IDE language settings in VS Code">
 </p>
 
+## About qqq Resource Footprint
 
+qqq is built on a highly efficient Rust-based underlying architecture with performance optimization.
 
- ## About qqq Resource Footprint
-Built on a highly efficient Rust-based underlying architecture with extreme performance optimization, qqq's idle CPU and disk IO overhead approach absolute zero. Its ultra-low memory footprint is also remarkably prominent, especially in scenarios where multiple IDEs (Cursor, Antigravity, etc.) are running simultaneously with a large number of open windows. For architectural details: https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md
+Its idle CPU and disk IO overhead are designed to stay close to zero.
 
+Its low memory footprint is especially useful when multiple IDEs are running at the same time, such as:
 
- ## Security
-The source code is fully open source and available for self-compilation: https://github.com/gh555com/qqq, Windows 7 is supported, for key compilation notes: https://github.com/gh555com/qqq/blob/qq/docs/Rust%20win7.md.
+- VS Code
+- Cursor
+- Antigravity
+- Code-OSS
+- VSCodium
 
-The company undertakes never to collect clipboard content or any sensitive user information, and welcomes public supervision.
+For architecture details:
 
-Business License:
+https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md
+
+## Security
+
+The qqq source code is open source and available for public review and self-compilation:
+
+https://github.com/gh555com/qqq
+
+Windows 7 is supported.
+
+Key compilation notes:
+
+https://github.com/gh555com/qqq/blob/qq/docs/Rust%20win7.md
+
+GH Health undertakes never to collect clipboard content or sensitive user information and welcomes public supervision.
+
+### Business License
+
 <p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/MSNRJ5YUR7YY6.jpg" width="100%" alt="Business License">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/MSNRJ5YUR7YY6.jpg" width="100%" alt="GH Health business license for qqq IDE">
 </p>
-Domain Registration Certificate:
+
+### Domain Registration Certificate
+
 <p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/ZAVTVRFVTJ6ME.png" width="60%" alt="company">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/ZAVTVRFVTJ6ME.png" width="60%" alt="GH Health domain registration certificate">
 </p>
 
+### Virus detection or submission
 
+Avira submission:
 
-Virus detection or submission: https://www.avira.com/en/analysis/submit
+https://www.avira.com/en/analysis/submit
 
- Detection result based on v16.4.0:
+Detection result based on qqq v16.4.0:
+
 <p align="left">
-  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/OZ27TZQMB6KIG.jpg" width="60%" alt="Avira">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/OZ27TZQMB6KIG.jpg" width="60%" alt="Avira virus detection result for qqq IDE">
 </p>
 
+## Contact
 
+- Repository: https://github.com/gh555com/qqq
+- Issues: https://github.com/gh555com/qqq/issues
+- Official download: https://www.gh555.com/gaea/d/qqq
+- Premium care: ky@gh555.com
 
- <a href="https://www.gh555.com">GH Health</a> All Rights Reserved.
-
-
-
-
+<a href="https://www.gh555.com">GH Health</a> All Rights Reserved.
