@@ -2,7 +2,7 @@
   "name": "Paste-Image-zen",
   "displayName": "Paste image zen",
   "publisher": "kyleobr",
-  "version": "16.5.1",
+  "version": "16.5.2",
   "description": "Paste images directly into your editor. ",
   "icon": "assets/q.gif",
   "engines": {
