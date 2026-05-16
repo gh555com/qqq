@@ -21,7 +21,7 @@ Original **name**: qqq [![GitHub stars](https://img.shields.io/github/stars/gh55
 
 **qqq 16.5.1+ is required for Linux / macOS.** [Details](#how-to-install)
 
-![](https://gh555.com/px?g=qqq&s=gh555.qqq.readme)
+![](https://gh555.com/px?g=qqq&s=keeleylednergz.qqq.readme)
 
 ## Why qqq IDE
 
