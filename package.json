@@ -435,6 +435,14 @@
       {
         "command": "qqq.openProfile",
         "title": "%cmd.openProfile%"
+      },
+      {
+        "command": "qqq.addToVision",
+        "title": "qqq: Add Folder to Vision"
+      },
+      {
+        "command": "qqq.toggleVisionFolder",
+        "title": "qqq: Toggle Vision Folder"
       }
     ],
     "keybindings": [

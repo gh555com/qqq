@@ -10,6 +10,7 @@ const global = require("./global");
 const h = require("./h");
 const q1 = require("./q1");
 const q4 = require("./q4");
+const scopeManager = require("./scope-manager");
 const { q, init: initI18n } = require("./i18n");
 
 // Reference core objects from global.js
@@ -1566,6 +1567,10 @@ async function activate(context) {
 
 	// ★ Register commands immediately (no delay) to ensure user can use them right away
 	_registerCommands(context);
+
+	// ★ Initialize Scope Manager (qqq Vision)
+	scopeManager.init();
+	context.subscriptions.push({ dispose: () => scopeManager.dispose() });
 }
 
 // ★ Delayed initialization logic (runs after onStartupFinished + 3 seconds)
@@ -1823,6 +1828,65 @@ function _registerCommands(context) {
 		// ★ Cloud user data sync commands (upload/pull roam config + clipboard history)
 		safeRegisterCommand('qqq.uploadUserData', global.withReady(() => global.uploadUserData())),
 		safeRegisterCommand('qqq.pullUserData', global.withReady(() => global.pullUserData())),
+
+		// ★ qqq Vision commands
+		safeRegisterCommand('qqq.addToVision', async () => {
+			const picked = await vscode.window.showOpenDialog({
+				canSelectFolders: true,
+				canSelectFiles: false,
+				canSelectMany: false,
+				openLabel: 'Add to Vision'
+			});
+			if (picked && picked[0]) {
+				scopeManager.addFolder(picked[0].fsPath);
+			}
+		}),
+		safeRegisterCommand('qqq.toggleVisionFolder', async () => {
+			const all = scopeManager.getAllFolders();
+			if (all.length === 0) {
+				vscode.window.showInformationMessage('No workspace folders.');
+				return;
+			}
+			if (all.length === 1) {
+				vscode.window.showWarningMessage('Cannot remove the last workspace folder.');
+				return;
+			}
+			const items = all.map(f => ({
+				label: `\u{1F4C1} ${f.name}`,
+				description: f.path,
+				folderPath: f.path
+			}));
+			const sel = await vscode.window.showQuickPick(items, {
+				title: 'Remove Folder from AI Vision',
+				placeHolder: 'Select a folder to remove (AI will no longer see it)'
+			});
+			if (!sel) return;
+
+			// Check for unsaved files
+			const dirty = scopeManager.getDirtyFiles(sel.folderPath);
+			if (dirty.length > 0) {
+				const names = dirty.slice(0, 5).map(p => path.basename(p)).join(', ');
+				const extra = dirty.length > 5 ? ` (+${dirty.length - 5} more)` : '';
+				const action = await vscode.window.showWarningMessage(
+					`"${sel.label.slice(3)}" has ${dirty.length} unsaved file(s): ${names}${extra}`,
+					{ modal: true },
+					'Save All & Remove',
+					'Cancel'
+				);
+				if (action !== 'Save All & Remove') return;
+				// Save all dirty files in that folder
+				for (const doc of vscode.workspace.textDocuments) {
+					if (doc.isDirty && !doc.isUntitled && doc.uri.fsPath.toLowerCase().startsWith(sel.folderPath.toLowerCase())) {
+						await doc.save();
+					}
+				}
+			}
+
+			const ok = scopeManager.removeFolder(sel.folderPath);
+			if (ok) {
+				vscode.window.showInformationMessage(`Removed "${path.basename(sel.folderPath)}" from workspace & AI vision.`);
+			}
+		}),
 
 
 
@@ -2129,6 +2193,15 @@ const exported = {
 
 	// ★ Call when Python environment changes
 	resetPythonAudioCache,
+
+	// ★ qqq Vision (Scope Manager) — 原子模型：加入=可见，移除=不可见
+	getScopeAPI: () => ({
+		getVisibleFolders: scopeManager.getVisibleFolders,
+		getAllFolders: scopeManager.getAllFolders,
+		addFolder: scopeManager.addFolder,
+		removeFolder: scopeManager.removeFolder,
+		getDirtyFiles: scopeManager.getDirtyFiles,
+	}),
 };
 
 Object.assign(module.exports, exported);

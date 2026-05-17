@@ -1,210 +1,2417 @@
-+08:00][INFO] qqq extension activating (central control mode)...
-[2026-05-15T16:45:58.414+08:00][INFO] Q2: File manager activated (using geq().js 4-level fallback + size scheduling/cache + latest IO path logic)
-[2026-05-15T16:45:58.415+08:00][INFO] qqq extension activation complete
-[2026-05-15T16:45:58.417+08:00][INFO] [PythonCheck] L1 imperfect: no_interpreter
-[2026-05-15T16:45:58.417+08:00][INFO] [PythonCheck] L1 imperfect and not in cooldown, triggering L4 download in 20 seconds [attempt 1/3, 3 chance(s) left]
-[2026-05-15T16:45:58.418+08:00][INFO] [Broker] Python L1 imperfect, waiting for download...
-[2026-05-15T16:45:58.430+08:00][INFO] [CfgEvent] ns="Ri7" affectsNs=false affectsGuide=false
-[2026-05-15T16:45:58.435+08:00][INFO] FFmpeg not found locally, attempting runtime download...
-[2026-05-15T16:45:58.459+08:00][INFO] Integrity: PASSED
-[2026-05-15T16:45:58.459+08:00][INFO] FFmpeg Path: ffmpeg.exe
-[2026-05-15T16:45:58.460+08:00][INFO] Q2 Integrity: PASSED
-[2026-05-15T16:45:58.467+08:00][INFO] [FFmpeg] Trying npm: https://registry.npmmirror.com/@ffmpeg-installer/win32-x64/-/win32-x64-4.1.0.tgz
-[2026-05-15T16:45:59.807+08:00][INFO] Empty window auto-opened q2 rover
-[2026-05-15T16:45:59.862+08:00][INFO] [CfgEvent] ns="Ri7" affectsNs=true affectsGuide=false
-[2026-05-15T16:46:01.395+08:00][INFO] qqq delayed initialization starting...
-[2026-05-15T16:46:01.413+08:00][INFO] [wq] Reporter started, initial ping in 110s
-[2026-05-15T16:46:01.592+08:00][INFO] [CfgEvent] ns="Ri7" affectsNs=false affectsGuide=false
-[2026-05-15T16:46:01.768+08:00][INFO] [CfgEvent] ns="Ri7" affectsNs=false affectsGuide=false
-[2026-05-15T16:46:02.481+08:00][INFO] Line height measured: 17.00px
-[2026-05-15T16:46:03.624+08:00][INFO] [tryOneByOne] No engines available, waiting up to 3s...
-[2026-05-15T16:46:04.430+08:00][INFO] qqq startDaemons starting (6s delay)
-[2026-05-15T16:46:04.479+08:00][INFO] ====================================================
-[2026-05-15T16:46:04.479+08:00][INFO] 🚀 Q-ENGINE STARTING | VERSION: 16.5.1 | 5/15/2026, 4:46:04 PM
-[2026-05-15T16:46:04.479+08:00][INFO] 🎯 ACTIVE FFmpeg: ffmpeg.exe (NOT_FOUND)
-[2026-05-15T16:46:04.479+08:00][INFO] ====================================================
-[2026-05-15T16:46:04.480+08:00][INFO] Starting daemons, user selected engine: auto
-[2026-05-15T16:46:04.480+08:00][INFO] [Daemon] User preference: auto, but Rust always starts first
-[2026-05-15T16:46:04.480+08:00][INFO] Starting Rust bridge...
-[2026-05-15T16:46:04.507+08:00][INFO] Rust Bridge trying to start: "c:\Users\coolr\.vscode\extensions\keeleylednergznl.ri7-16.5.1\assets\q_win_x64.exe" --daemon
-[2026-05-15T16:46:07.115+08:00][INFO] Starting Python bridge...
-[2026-05-15T16:46:07.166+08:00][WARN] [Broker] Python not ready: python_not_downloaded
-[2026-05-15T16:46:07.207+08:00][WARN] Rust stderr: Daemon started (multi-threaded). PID=13852
-Watchdog started, monitoring parent PID=1388
+# qqq IDE — Make everything pasteable. Orchestrate ideas. Turn the IDE into an operating system.
 
-[2026-05-15T16:46:07.227+08:00][INFO] Rust bridge started and handshaked
-[2026-05-15T16:46:07.227+08:00][INFO] Rust Bridge started successfully
-[2026-05-15T16:46:07.227+08:00][INFO] Rust Bridge OK
-[2026-05-15T16:46:07.649+08:00][INFO] [tryOneByOne] Engine(s) ready after 1500ms: [rust]
-[2026-05-15T16:46:08.417+08:00][INFO] qqq dow.js warmup starting (10s delay)
-[2026-05-15T16:46:08.417+08:00][WARN] [yt-dlp] Trying to download from proxy...
-[2026-05-15T16:46:18.992+08:00][INFO] [FFmpeg] Downloaded from npm (61.5 MB)
-[2026-05-15T16:46:18.993+08:00][INFO] FFmpeg downloaded to: c:\Users\coolr\AppData\Roaming\Code\User\globalStorage\keeleylednergznl.ri7\ffmpeg.exe
-[2026-05-15T16:46:18.994+08:00][INFO] [PythonCheck] Starting L4 download and install flow...
-[2026-05-15T16:46:18.999+08:00][INFO] [Python] platform=win32, arch=x64, URL=https://www.python.org/ftp/python/3.8.10/python-3.8.10-embed-amd64.zip
-[2026-05-15T16:46:18.999+08:00][INFO] [PythonInstall] === Round 1 (download fails: 0/3) ===
-[2026-05-15T16:46:19.000+08:00][INFO] [Python] Trying npm...
-[2026-05-15T16:46:21.279+08:00][INFO] [Python] npm download successful
-[2026-05-15T16:46:21.279+08:00][INFO] [PythonInstall] ✓ Zip validated: 7.8MB (source: npm)
-[2026-05-15T16:46:24.691+08:00][INFO] [PythonInstall] ✓ Extraction + interpreter OK
-[2026-05-15T16:46:24.692+08:00][INFO] [Python] Installing pip...
-[2026-05-15T16:46:24.699+08:00][WARN] Python Bridge start failed: Broker connect failed after spawn+retries
-[2026-05-15T16:47:05.357+08:00][INFO] [Python] Installing dependencies: miniaudio==1.61, Pillow==10.4.0, cffi==1.16.0, pycparser==2.22, psutil==5.9.8, pynput==1.7.7, pywin32==311
-[2026-05-15T16:47:45.461+08:00][INFO] [Python] Starting slim...
-[2026-05-15T16:47:49.875+08:00][INFO] [Slim] Complete: freed 41.2MB
-[2026-05-15T16:47:49.892+08:00][INFO] [Python] pywin32 configuration complete
-[2026-05-15T16:47:49.932+08:00][INFO] [Python] Copy VC++ DLL: msvcp140.dll, msvcp140_1.dll, msvcp140_2.dll, concrt140.dll, vccorlib140.dll
-[2026-05-15T16:47:52.299+08:00][INFO] [PythonInstall] ✓ Install complete after 1 round(s)
-[2026-05-15T16:47:52.300+08:00][INFO] [PythonCheck] L4 download and install successful: c:\Users\coolr\AppData\Roaming\Code\User\globalStorage\keeleylednergznl.ri7\python_engine\python.exe
-[2026-05-15T16:47:52.300+08:00][INFO] [PythonCheck] Triggering "from scratch" callback, hot-starting daemon...
-[2026-05-15T16:47:52.300+08:00][INFO] [Broker] Python ready callback triggered: c:\Users\coolr\AppData\Roaming\Code\User\globalStorage\keeleylednergznl.ri7\python_engine\python.exe
-[2026-05-15T16:47:52.300+08:00][INFO] [Broker] Audio cache reset (qqq)
-[2026-05-15T16:47:52.300+08:00][INFO] [Q4] Audio source state has been reset
-[2026-05-15T16:47:52.300+08:00][INFO] [Broker] Audio cache reset (q4)
-[2026-05-15T16:47:52.300+08:00][INFO] [Broker] Attempting to start Broker after Python ready...
-[2026-05-15T16:47:52.304+08:00][WARN] [yt-dlp] proxy download failed: Timeout
-[2026-05-15T16:47:52.306+08:00][WARN] [yt-dlp] Trying to download from gh...
-[2026-05-15T16:47:52.312+08:00][INFO] [wq] Generated new device_id: 47ecf402-b40c-4495-a0a9-4e995e5e1e5e
-[2026-05-15T16:47:53.285+08:00][INFO] [wq] Ping ok, delta=120s, accepted=120, server_now=1778834873
-[2026-05-15T16:47:53.285+08:00][INFO] [wq] Next ping scheduled in 900s
-[2026-05-15T16:48:02.002+08:00][INFO] [Broker] Connected successfully
-[2026-05-15T16:48:02.002+08:00][INFO] [Q4] Audio source state has been reset
-[2026-05-15T16:48:02.003+08:00][INFO] [Broker] Broker hot-started successfully
-[2026-05-15T16:48:06.169+08:00][WARN] [yt-dlp] gh download successful
-[2026-05-15T16:48:06.203+08:00][ERROR] [yt-dlp] Spawn error: spawnSync c:\Users\coolr\AppData\Roaming\Code\User\globalStorage\keeleylednergznl.ri7\yt-dlp.exe EBUSY, fileSize=18448981
-[2026-05-15T16:48:06.212+08:00][ERROR] yt-dlp installation failed: Download completed but verification failed
-[2026-05-15T16:48:45.080+08:00][INFO] [RustDaemon] Successfully dumped 117515 bytes
-[2026-05-15T16:49:05.970+08:00][INFO] [RustDaemon] Successfully dumped 117515 bytes
-[2026-05-15T16:49:21.791+08:00][INFO] [AutoDetect] Starting detection, snapshot=true, handled=true
-[2026-05-15T16:49:21.791+08:00][INFO] [AutoDetect] Final status: hasFile=false, hasHtml=true, hasImage=true, hasText=false
-[2026-05-15T16:49:21.791+08:00][INFO] [AutoDetect] Entering HTML processing flow
-[2026-05-15T16:49:21.796+08:00][INFO] [RustDaemon] Successfully dumped 311 bytes
-[2026-05-15T16:49:21.806+08:00][INFO] [SmartPaste] conf=1.00, integrity=1.00, plainTextOk=false
-[2026-05-15T16:49:34.627+08:00][INFO] [RustDaemon] Successfully dumped 3931 bytes
-[2026-05-15T16:49:40.206+08:00][INFO] [CfgEvent] ns="Ri7" affectsNs=false affectsGuide=false
+qqq IDE is an open-source VS Code / Code-OSS / VSCodium based project.
 
-workbench.desktop.main.js:sourcemap:414  WARN Creation of workbench contribution 'workbench.contrib.dynamicWorkbenchSecurityConfiguration' took 185ms.
-warn @ workbench.desktop.main.js:sourcemap:414
-workbench.desktop.main.js:sourcemap:414  INFO [AccountPolicyGate] apply: state=inactive, reason=undefined, isRestricted=false
-workbench.desktop.main.js:sourcemap:414  INFO Started local extension host with pid 1388.
-workbench.desktop.main.js:sourcemap:414  INFO Started initializing default profile extensions in extensions installation folder. file:///c%3A/Users/coolr/.vscode/extensions
-workbench.desktop.main.js:sourcemap:414  WARN Creation of workbench contribution 'workbench.contrib.startupPageRunner' took 291ms.
-warn @ workbench.desktop.main.js:sourcemap:414
-workbench.desktop.main.js:sourcemap:414  INFO [AccountPolicyGate] apply: state=inactive, reason=undefined, isRestricted=false
-workbench.desktop.main.js:sourcemap:414  INFO Completed initializing default profile extensions in extensions installation folder. file:///c%3A/Users/coolr/.vscode/extensions
-workbench.desktop.main.js:sourcemap:414  INFO Settings Sync: Account status changed from uninitialized to unavailable
-workbench.desktop.main.js:sourcemap:414  INFO [perf] Render performance baseline is 74ms
-workbench.desktop.main.js:sourcemap:1000 [Extension Host] Git installation not found.
-kro @ workbench.desktop.main.js:sourcemap:1000
-default.exp-tas.com/vscode/ab:1  Failed to load resource: net::ERR_CONNECTION_TIMED_OUT
-workbench.desktop.main.js:sourcemap:5225 Unrecognized feature: 'local-network-access'.
-_createElement @ workbench.desktop.main.js:sourcemap:5225
-workbench.desktop.main.js:sourcemap:5225 An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
-mountTo @ workbench.desktop.main.js:sourcemap:5225
-workbench.desktop.main.js:sourcemap:1000 [Extension Host] [i18n] First-time auto-detected: VS Code en → en, persisted to settings
-workbench.desktop.main.js:sourcemap:1000 [Extension Host] [Q2] i18n test: q('q2.ui.pin') = "Pin "
-workbench.desktop.main.js:sourcemap:5225 An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
-mountTo @ workbench.desktop.main.js:sourcemap:5225
-workbench.desktop.main.js:sourcemap:1000 [Extension Host] [q2] showSaveAsDialog called, activePanel=false, activePanelAlive=false
-workbench.desktop.main.js:sourcemap:5225 An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
-mountTo @ workbench.desktop.main.js:sourcemap:5225
-workbench.desktop.main.js:sourcemap:1000 [Extension Host] [Q2] Language changed, refreshing webview...
-workbench.desktop.main.js:sourcemap:1000 [Extension Host] [i18n] First-time init: persisted language to settings: English
-workbench.desktop.main.js:sourcemap:1000 [Extension Host] [Q4] QQQ Clipboard History (fusion-final) activating...
-workbench.desktop.main.js:sourcemap:1000 [Extension Host] [Q4] QQQ Clipboard History (fusion-final) activated.
-workbench.desktop.main.js:sourcemap:414   ERR [Extension Host] (node:1388) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
-(Use `Code --trace-deprecation ...` to show where the warning was created)
-error @ workbench.desktop.main.js:sourcemap:414
-workbench.desktop.main.js:sourcemap:1000 [Extension Host] (node:1388) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
-(Use `Code --trace-deprecation ...` to show where the warning was created)
-kro @ workbench.desktop.main.js:sourcemap:1000
-index.html?id=7137248c-4eca-4cdc-b5c0-b3b967d3e5ea&parentId=1&origin=310e48c1-63d7-4c2d-afa0-6cb4959b1dd9&swVersion=5&extensionId=KeeleyLednergznl.Ri7&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1032 Unrecognized feature: 'local-network-access'.
-(anonymous) @ index.html?id=7137248c-4eca-4cdc-b5c0-b3b967d3e5ea&parentId=1&origin=310e48c1-63d7-4c2d-afa0-6cb4959b1dd9&swVersion=5&extensionId=KeeleyLednergznl.Ri7&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1032
-workbench.desktop.main.js:sourcemap:414  INFO Extension host (LocalProcess pid: 1388) is unresponsive.
-workbench.desktop.main.js:sourcemap:414  INFO Extension host (LocalProcess pid: 1388) is responsive.
-languageDetectionWebWorkerMain.js:402 ReferenceError: require is not defined
-    at r.f.require (index.js:2:702403)
-    at index.js:2:702071
-    at Array.reduce (<anonymous>)
-    at r.e (index.js:2:702049)
-    at n.loadModel (index.js:2:705059)
-    at n.runModel (index.js:2:705351)
-    at n.detectLanguagesImpl (languageDetectionWebWorkerMain.js:402:113497)
-    at async u (languageDetectionWebWorkerMain.js:402:111254)
-    at async n.$detectLanguage (languageDetectionWebWorkerMain.js:402:111724)
-detectLanguagesImpl @ languageDetectionWebWorkerMain.js:402
-workbench.desktop.main.js:sourcemap:414  INFO Extension host (LocalProcess pid: 1388) is unresponsive.
-workbench.desktop.main.js:sourcemap:4981 Extension Host
-workbench.desktop.main.js:sourcemap:4981 Debugger attached.
-workbench.desktop.main.js:sourcemap:414  INFO Extension host (LocalProcess pid: 1388) is responsive.
-workbench.desktop.main.js:sourcemap:414  INFO UNRESPONSIVE extension host: received responsive event and cancelling profiling session
-workbench.desktop.main.js:sourcemap:414  INFO UNRESPONSIVE extension host: starting to profile NOW
-workbench.desktop.main.js:sourcemap:414  WARN UNRESPONSIVE extension host: 'keeleylednergznl.ri7' took 49.19868876343107% of 5.403ms, saved PROFILE here: 'file:///c%3A/Users/coolr/AppData/Local/Temp/exthost-d04fbd.cpuprofile'
-warn @ workbench.desktop.main.js:sourcemap:414
-workbench.desktop.main.js:sourcemap:1000 [Extension Host] [q2] showSaveAsDialog called, activePanel=false, activePanelAlive=false
-workbench.desktop.main.js:sourcemap:5225 An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
-mountTo @ workbench.desktop.main.js:sourcemap:5225
-index.html?id=40289f54-7d44-451f-9de6-5f64d94fa60f&parentId=1&origin=cf372ca6-ce49-435b-84ce-4bbba1db107e&swVersion=5&extensionId=KeeleyLednergznl.Ri7&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1032 Unrecognized feature: 'local-network-access'.
-(anonymous) @ index.html?id=40289f54-7d44-451f-9de6-5f64d94fa60f&parentId=1&origin=cf372ca6-ce49-435b-84ce-4bbba1db107e&swVersion=5&extensionId=KeeleyLednergznl.Ri7&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1032
- [Color Scheme] Dark/Bronze: bg=#4a3520, text=#e8d8c0
-languageDetectionWebWorkerMain.js:402 ReferenceError: require is not defined
-    at r.f.require (index.js:2:702403)
-    at index.js:2:702071
-    at Array.reduce (<anonymous>)
-    at r.e (index.js:2:702049)
-    at n.loadModel (index.js:2:705059)
-    at n.runModel (index.js:2:705351)
-    at n.detectLanguagesImpl (languageDetectionWebWorkerMain.js:402:113497)
-    at async u (languageDetectionWebWorkerMain.js:402:111254)
-    at async n.$detectLanguage (languageDetectionWebWorkerMain.js:402:111724)
-detectLanguagesImpl @ languageDetectionWebWorkerMain.js:402
-languageDetectionWebWorkerMain.js:402 ReferenceError: require is not defined
-    at r.f.require (index.js:2:702403)
-    at index.js:2:702071
-    at Array.reduce (<anonymous>)
-    at r.e (index.js:2:702049)
-    at n.loadModel (index.js:2:705059)
-    at n.runModel (index.js:2:705351)
-    at n.detectLanguagesImpl (languageDetectionWebWorkerMain.js:402:113497)
-    at async u (languageDetectionWebWorkerMain.js:402:111254)
-    at async n.$detectLanguage (languageDetectionWebWorkerMain.js:402:111724)
-detectLanguagesImpl @ languageDetectionWebWorkerMain.js:402
-languageDetectionWebWorkerMain.js:402 ReferenceError: require is not defined
-    at r.f.require (index.js:2:702403)
-    at index.js:2:702071
-    at Array.reduce (<anonymous>)
-    at r.e (index.js:2:702049)
-    at n.loadModel (index.js:2:705059)
-    at n.runModel (index.js:2:705351)
-    at n.detectLanguagesImpl (languageDetectionWebWorkerMain.js:402:113497)
-    at async u (languageDetectionWebWorkerMain.js:402:111254)
-    at async n.$detectLanguage (languageDetectionWebWorkerMain.js:402:111724)
-detectLanguagesImpl @ languageDetectionWebWorkerMain.js:402
-languageDetectionWebWorkerMain.js:402 ReferenceError: require is not defined
-    at r.f.require (index.js:2:702403)
-    at index.js:2:702071
-    at Array.reduce (<anonymous>)
-    at r.e (index.js:2:702049)
-    at n.loadModel (index.js:2:705059)
-    at n.runModel (index.js:2:705351)
-    at n.detectLanguagesImpl (languageDetectionWebWorkerMain.js:402:113497)
-    at async u (languageDetectionWebWorkerMain.js:402:111254)
-    at async n.$detectLanguage (languageDetectionWebWorkerMain.js:402:111724)
-detectLanguagesImpl @ languageDetectionWebWorkerMain.js:402
-languageDetectionWebWorkerMain.js:402 ReferenceError: require is not defined
-    at r.f.require (index.js:2:702403)
-    at index.js:2:702071
-    at Array.reduce (<anonymous>)
-    at r.e (index.js:2:702049)
-    at n.loadModel (index.js:2:705059)
-    at n.runModel (index.js:2:705351)
-    at n.detectLanguagesImpl (languageDetectionWebWorkerMain.js:402:113497)
-    at async u (languageDetectionWebWorkerMain.js:402:111254)
-    at async n.$detectLanguage (languageDetectionWebWorkerMain.js:402:111724)
-detectLanguagesImpl @ languageDetectionWebWorkerMain.js:402
-workbench.html:1 [GroupMarkerNotSet(crbug.com/242999)!:A8A02C00EC7C0000]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader (about:flags#enable-unsafe-swiftshader) flag to opt in to lower security guarantees for trusted content.
-workbench.html:1 [.WebGL-0x72c40ad18d00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels
-workbench.html:1 [.WebGL-0x72c40ad18d00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels
+Its core idea is simple:
+
+> Make everything pasteable.
+
+qqq lets you paste images, files, folders, HTML pages, videos, and media directly into the editor — with WYSIWYG preview.
+
+But qqq is not only about paste.
+
+Paste is just the entry point.
+
+The real goal is to create a new way to orchestrate ideas inside the IDE.
+
+## Why qqq exists
+
+Modern IDEs are becoming more than code editors.
+
+For many developers, writers, creators, and AI tool users, the IDE is already the main workspace.
+
+It is where we write code, collect references, manage files, talk to AI, read documentation, organize projects, and build ideas.
+
+But one basic action is still too limited:
+
+> Paste.
+
+Most editors treat paste mainly as text.
+
+qqq extends paste into a universal action.
+
+With qqq, the IDE can receive real materials directly:
+
+* images
+* screenshots
+* files
+* folders
+* HTML pages
+* web images
+* videos
+* media resources
+* documents
+* mixed creative materials
+
+The goal is to reduce the distance between seeing something, capturing it, organizing it, and using it.
+
+## What qqq does
+
+qqq makes many kinds of content pasteable and previewable inside the editor.
+
+You can paste images, files, folders, HTML, videos, and media directly into VS Code / Code-OSS / VSCodium.
+
+This works not only in Markdown.
+
+qqq is designed to support plain text files, custom file extensions, and even files without extensions.
+
+The workflow is simple:
+
+> Copy. Paste. Preview. Organize. Continue.
+
+## Why this matters
+
+When an idea appears, the tool should not interrupt the idea.
+
+You should not need to open another app, upload files somewhere, convert formats, manually move resources, or rebuild context before continuing.
+
+qqq tries to make the IDE behave more like an operating environment for ideas.
+
+That is why the direction of qqq is:
+
+> Make everything pasteable.
+> Create a new way to orchestrate ideas.
+> Turn the IDE into an operating system.
+
+## Core features
+
+### Paste Everything
+
+Paste images, files, folders, HTML pages, videos, and media directly into the editor.
+
+### WYSIWYG Preview
+
+qqq makes pasted content visible and usable inside the editor, instead of leaving everything as invisible paths or plain text references.
+
+### Roam File Explorer
+
+qqq includes a built-in file explorer called Roam.
+
+Roam is designed for fast navigation, recent locations, keyboard-first workflows, quick file creation, and access to directories outside the current project folder.
+
+### Media and document workflow
+
+qqq supports workflows around:
+
+* image rendering
+* HTML paste
+* video resource handling
+* media preview
+* resource organization
+* DOC / DOCX export
+* ZIP export
+
+### Open source
+
+The source code is public and auditable.
+
+Repository:
+
+https://github.com/gh555com/qqq
+
+Official download:
+
+https://www.gh555.com/qqq
+
+## Current direction
+
+qqq is currently an extension, but the long-term direction is qqq IDE.
+
+qqq IDE is a Code-OSS / VSCodium based IDE direction focused on:
+
+* paste-anything workflows
+* all-media notes
+* creative organization
+* file and folder orchestration
+* WYSIWYG editor experiences
+* AI-era IDE workflows
+
+## Roadmap
+
+Planned areas include:
+
+* qqq IDE based on Code-OSS / VSCodium
+* better WYSIWYG preview
+* better all-media notebook experience
+* stronger file and folder organization
+* improved HTML and video paste workflows
+* more reliable DOC / DOCX / ZIP export
+* better cross-platform installers
+* clearer documentation
+* short demo videos for global users
+
+## Feedback
+
+Feedback is welcome, especially from people interested in:
+
+* VS Code workflows
+* Code-OSS / VSCodium
+* AI IDEs
+* all-media notes
+* paste image workflows
+* paste file workflows
+* WYSIWYG editing
+* creative organization inside the editor
+
+Issues:
+
+https://github.com/gh555com/qqq/issues
+
+Repository:
+
+https://github.com/gh555com/qqq
+
+Official download:
+
+https://www.gh555.com/qqq
+
+Since 2025 · GH Health
 
 
+<p align="center">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/FPXKHX4NKOZJ6.gif" width="100%" alt="qqq IDE by GH Health">
+  © 2005 <a href="https://www.gh555.com">gh555.com</a> All Rights Reserved.
+</p>
+
+# qqq IDE: Paste Everything into VS Code / Code-OSS / VSCodium
+
+**Make everything pasteable. Orchestrate ideas. Turn the IDE into an operating system.**
+
+qqq IDE lets you paste images, screenshots, files, folders, HTML pages, videos, and media directly into **VS Code / Code-OSS / VSCodium** — with **WYSIWYG preview**.
+
+qqq turns VS Code, Cursor, Antigravity, Code-OSS, and VSCodium into an all-media paste-friendly notebook and creative workspace.
+
+## Links
+
+- Project discussion and roadmap: https://github.com/gh555com/qqq/discussions/6
+- Official download: https://www.gh555.com/qqq
+- Source code: https://github.com/gh555com/qqq
+
+Original **name**: qqq [![GitHub stars](https://img.shields.io/github/stars/gh555com/qqq?style=social)](https://github.com/gh555com/qqq)
+
+**qqq 16.5.1+ is required for Linux / macOS.** [Details](#how-to-install)
+
+![](https://gh555.com/px?g=qqq&s=keeleylednergz.qqq.readme)
+
+## Why qqq IDE
+
+You should not need to open a separate note-taking application just to collect screenshots, images, files, folders, videos, HTML pages, and creative materials.
+
+With qqq IDE, your editor becomes an all-media workspace.
+
+VS Code / Code-OSS / VSCodium can become a paste-friendly notebook for developers, creators, writers, AI users, and anyone who organizes ideas inside an IDE.
+
+The core workflow is simple:
+
+**Copy → Paste → Preview → Organize → Continue**
+
+## ✦q✦ Ctrl+V: Paste Everything, Anywhere in Any Document
+
+qqq IDE extends paste beyond plain text.
+
+You can paste screenshots, image files, folders, videos, HTML pages, documents, and media resources directly into the editor.
+
+This works in plain text files, custom file extensions, and even files with no extension.
+
+### Paste screenshots directly into VS Code / Code-OSS / VSCodium
+
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/YBZ5FHDRYKQF2.gif" width="100%" alt="Paste screenshots directly into VS Code with qqq IDE">
+</p>
+
+qqq IDE lets you paste screenshots directly into any document, including `.txt`, `.1`, custom file extensions, or files with no extension, and preview them with WYSIWYG rendering.
+
+### Paste image files directly into VS Code / Code-OSS / VSCodium
+
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/6QEDZULVO33JW.gif" width="100%" alt="Paste image files directly into VS Code with qqq IDE">
+</p>
+
+qqq IDE lets you paste image files directly into the editor and preview them in place.
+
+### Paste any file, folder, video, PSD, MP3, EXE, or media resource
+
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/E2ULPGMCYGGFE.gif" width="100%" alt="Paste files folders videos PSD MP3 and media directly into VS Code with qqq IDE">
+</p>
+
+Via qqq, you can paste `txt`, `exe`, `psd`, `mp3`, folders, `mp4` videos, and many other file types directly into VS Code / Code-OSS / VSCodium with WYSIWYG preview.
+
+Use:
+
+- `Ctrl+V`
+- `F2`
+
+qqq makes paste a universal input action inside the IDE.
+
+You can organize your ideas immediately without leaving the editor.
+
+## ✦q✦ Roam File Explorer for VS Code / Code-OSS / VSCodium
+
+To organize ideas, files, screenshots, folders, videos, and media resources, you also need to jump between arbitrary directories quickly.
+
+qqq includes **Roam**, a fast file explorer for VS Code / Code-OSS / VSCodium.
+
+Invoke Roam with:
+
+- `Tab` when not in editing mode
+- Roam command
+- Roam button
+- `Space + Q`
+
+### Roam file explorer for fast directory navigation
+
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/75T3DXC3XWJB4.gif" width="100%" alt="Roam file explorer for VS Code and qqq IDE">
+</p>
+
+**Roam**, from qqq, is a file explorer designed for fast navigation, recent locations, keyboard-first workflows, and access to directories outside the current project folder.
+
+### Why Roam matters
+
+1. **Reach any location**
+
+   Roam is not limited to the current project folder. You can jump to any local directory. You can also map remote disks locally and work with them directly.
+
+2. **Fast file browsing**
+
+   Roam is designed for fast directory listing and quick navigation, even on heavy machines, servers, and virtual machines.
+
+3. **Transactional file operations**
+
+   Roam uses transactional file operations to make large-scale file deletion, copying, and organization more reliable.
+
+   For details on VS Code's official file manager limitations, see:
+
+   https://github.com/gh555com/qqq/blob/qq/docs/VS_Code_Official_File_Explorer_Limitations.md
+
+4. **Keyboard-first workflow**
+
+   Roam supports recent visits, quick filtering, keyboard operation, quick file creation, list preferences, sorting preferences, and direct opening of administrator terminals.
+
+   Example workflow:
+
+   `Tab → filename → Enter → new file opens and enters editing mode`
+
+### Select folders and mixed resources in Roam
+
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/5EM6FHVNR4KG2.gif" width="100%" alt="Select folders and mixed files in Roam file explorer with qqq IDE">
+</p>
+
+With Roam, you can select folders, files, or a mixed set of files and folders to copy, delete, or calculate size in bulk.
+
+### Most visited folders stay close to you
+
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/O4H43QFLJ6WHY.gif" width="100%" alt="Most visited folders in Roam file explorer for qqq IDE">
+</p>
+
+Roam keeps frequently visited locations close, so you can move between projects, documents, music, videos, games, and media folders faster.
+
+### Roam keyboard shortcuts
+
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/XMTOYSWJPSJYU.gif" width="80%" alt="Roam file explorer keyboard shortcuts in qqq IDE">
+</p>
+
+Useful Roam shortcuts:
+
+- Press `Space` on a selected item to request its size.
+- Press `1` to scroll to the top of the list.
+- Press `2` to scroll to the bottom of the list.
+- Press `Q` to open selected projects or documents in IDE.
+- Press `W` to open selected music, videos, games, folders, or media resources.
+- Press `Space + Q` to invoke Roam.
+
+
+## ✦q✦ Premium Features: Out of the Box
+
+### Paste HTML directly into VS Code / Code-OSS / VSCodium
+
+qqq IDE supports sniffing & pasting HTML(Rich Text) into the editor.
+
+Compatibility is best with Chromium-based browsers.
+
+If you copy from some browsers, such as Edge in certain modes, only plain text may be displayed.
+
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/ICFESEED7ARZM.gif" width="100%" alt="Paste HTML pages directly into VS Code with qqq IDE">
+</p>
+
+Test URL:
+
+https://mbd.baidu.com/newspage/data/landingsuper?context=%7B%22nid%22%3A%22news_9166282253401607575%22%7D&n_type=1
+
+This test page contains a mix of videos, images, and text.
+
+Test objectives:
+
+1. All videos should be downloaded.
+2. The order of text, images, and videos should remain correct.
+3. No garbled characters should appear.
+4. Repeated operations should save identical resources only once.
+5. Identical images and videos should be deduplicated by fingerprinting.
+
+### Export DOC and DOCX from qqq IDE
+
+qqq supports document export.
+
+`.doc`:
+
+- compatible with Word 2003
+- based on RTF
+- better compatibility for older workflows
+
+`.docx`:
+
+- compatible with Google Docs and Tencent Docs
+- based on Office Open XML
+- stronger structure
+- better compression ratio
+
+### Export ZIP for portable resources
+
+qqq supports ZIP export.
+
+ZIP export is useful for packaging notes, media resources, documents, images, HTML content, and presentation materials into portable archives.
+
+### Paste streaming videos into VS Code / Code-OSS / VSCodium
+
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/W5EEPDRQEO4LO.gif" width="100%" alt="Paste streaming videos into VS Code with qqq IDE">
+</p>
+
+qqq supports workflows for pasting and organizing streaming video resources inside the editor.
+
+### Clean up orphaned files
+
+qqq can help clean up orphaned resource files that are no longer referenced by your documents.
+
+### Clipboard history cards
+
+qqq includes clipboard-related workflows for managing pasted content and recent resources.
+
+## How to Install
+
+**qqq 16.5.1+** provides a single universal installer for:
+
+- Windows x64
+- Linux x64
+- macOS x64
+- macOS arm
+
+The installer is designed to work across common operating systems and processor architectures.
+
+No installation options or complex choices are required.
+
+One package works for everything.
+
+
+### Switch languages after installation
+
+qqq supports multiple UI languages: zh、zh-tw、en、ja、de、ko、ru、ar、es、fr、pt-BR
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/2JTYBVFI3CWBS.png" alt="Switch qqq IDE language settings in VS Code">
+</p>
+
+## About qqq Resource Footprint
+
+qqq is built on a highly efficient Rust-based underlying architecture with performance optimization.
+
+Its idle CPU and disk IO overhead are designed to stay close to zero.
+
+Its low memory footprint is especially useful when multiple IDEs are running at the same time, such as:
+
+- VS Code
+- Cursor
+- Antigravity
+- Code-OSS
+- VSCodium
+
+For architecture details:
+
+https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md
+
+## Contact
+ q
+- Repository: https://github.com/gh555com/qqq
+- Issues: https://github.com/gh555com/qqq/issues
+- Official download: https://www.gh555.com/qqq
+- Reply on the same day: ky@gh555.com
+
+<a href="https://www.gh555.com">GH Health</a> All Rights Reserved.
+
+
+你说：
+我现在有两 最重要滴问题：1、 你还记得我要做 dgs，现在后端都百分百做完了 g o 加 pg 加 redi is 已经完美了 ， 但前端根本还没做， 之前架构是 p yqt  桌面程序 带浏览器 大多只是框架， 旋染是从服务器直接拉， 也就是用户安装一次包， 几乎我们无论怎样升级 用户都不用再安装第二次 ， 大致方向：  “
+这是一个非常好的架构思考。你遇到的痛点本质是：**客户端逻辑硬编码 → 每次改动都要发版 → 审核周期拖慢迭代**。
+---
+## 终极架构：Server-Driven UI + 热规则引擎
+核心思想：**客户端只是一个"渲染器+执行器"，所有业务逻辑、UI 结构、过滤规则全由服务端下发。**
+---
+### 第一层：你现在的弹窗系统已经在做了（但只做了一半）
+你的 PopupManager 本质上就是 Server-Driven：服务端下发 JSON → 客户端渲染。但问题是 **conditions 过滤逻辑是硬编码的**——新增一个 langs 字段就要发版。
+### 第二层：通用规则引擎（不用发版的终极方案）
+服务端下发:
+{
+"conditions": {
+"expr": "platform == 'win32' && lang.startsWith('zh') && hours > 5 && !hasUsed('radio')"
+}
+}
+客户端不再用 if/else 逐个字段判断，而是内置一个**轻量表达式求值器**，把本地上下文变量注入后 eval 这个表达式。
+这样服务端想加任何新维度——只要客户端**暴露了变量**，过滤逻辑就能随意组合，零发版。
+**实现方式**：
+js
+// 客户端暴露的上下文变量（一次性注册，以后加变量才需要发版）
+function buildConditionContext() {
+return {
+platform: process.platform,
+lang: vscode.env.language,
+ver: getClientVersion(),
+hours: getTotalHours(),
+days: getInstallDays(),
+logged_in: !!getCurrentDoerId(),
+ide: vscode.env.appName,
+hasUsed: (feature) => featureSet.has(feature),
+// 未来想加什么变量直接往这里塞
+};
+}
+// 通用求值（安全沙箱，不用 eval）
+function evaluateExpr(expr, ctx) {
+// 用 https://github.com/nicolewhite/algebra.js 或自写 mini parser
+// 或者更简单：JSON 描述的 AND/OR 树
+}
+---
+### 第三层：终极完美架构（下一个项目）
+┌─────────────────────────────────────────────────┐
+│                    服务端                          │
+│                                                   │
+│  ┌─────────┐  ┌──────────┐  ┌───────────────┐   │
+│  │ 弹窗投放 │  │ UI Schema│  │ 规则/条件引擎  │   │
+│  └─────────┘  └──────────┘  └───────────────┘   │
+│         │           │              │              │
+│         └───────────┼──────────────┘              │
+│                     ▼                             │
+│            统一下发 JSON 配置                       │
+└─────────────────────┬───────────────────────────┘
+│
+▼
+┌─────────────────────────────────────────────────┐
+│                   客户端                          │
+│                                                   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────┐   │
+│  │ 变量收集器│  │ 规则求值器│  │ UI 渲染器     │   │
+│  │(暴露上下文)│  │(表达式引擎)│  │(按schema渲染) │   │
+│  └──────────┘  └──────────┘  └──────────────┘   │
+└─────────────────────────────────────────────────┘
+**三大支柱**：
+| 支柱 | 职责 | 发版频率 |
+|------|------|---------|
+| **变量收集器** | 暴露 platform/lang/hours/days 等本地状态 | 极少（只有加新变量才发版） |
+| **规则求值器** | 通用表达式引擎，服务端下发任意条件组合 | **永不发版** |
+| **UI 渲染器** | 按服务端 schema 渲染弹窗/卡片/引导流 | **永不发版**（新 UI 类型才发版） |
+---
+### 具体到你当前项目的渐进路径
+不需要推翻重来，只需**两步改造**：
+**Step 1（本次可做）**：把 _matchConditions 改成**声明式 + 白名单变量**模式
+js
+// 服务端下发（向后兼容当前格式）
+"conditions": {
+"rules": [
+{ "var": "platform", "op": "in", "val": ["win32"] },
+{ "var": "lang", "op": "startsWith", "val": "zh" },
+{ "var": "hours", "op": ">=", "val": 5 },
+{ "var": "logged_in", "op": "==", "val": true }
+]
+}
+客户端用一个通用的 evaluateRules(rules, context) 函数：只要本地变量表里有这个 var，就能求值。**服务端想加新的过滤维度，只需要客户端注册了对应变量即可，过滤逻辑本身零改动。**
+**Step 2（未来）**：扩展为完整的 Server-Driven UI
+弹窗只是起点。未来可以把引导流程、功能开关、A/B 测试全走同一套通道：
+json
+{
+"type": "popup",        // 弹窗
+"type": "feature_flag", // 功能开关
+"type": "onboarding",   // 引导流程
+"type": "ab_test",      // A/B 实验
+}
+---
+### 总结
+| 方案 | 每次改动需发版？ | 复杂度 |
+|------|:---:|:---:|
+| 当前（硬编码 if/else） | 是 | 低 |
+| **通用规则引擎**（推荐本次做） | 加变量才需要 | 中 |
+| 完整 SDUI + 表达式 | 几乎不需要 | 高 |
+**我的建议**：本次实现 langs、logged_in、min_days、max_days、ide_type 时，顺便把 _matchConditions 重构为**通用规则求值模式**。这样以后加 has_used、或者任何新维度，客户端只需注册一个变量，不需要改过滤逻辑。一劳永逸。
+要开始实现吗？我建议这次先把规划中的 6 个 condition 全部实现（用通用规则引擎的方式），同时更新文档。
+”     但我现在又想站回原点，  基于 pyqt 滴 dgs 其内核是我们自己去拉取 新滴 py 脚本 就等于我们去拉取应用  ， 拉取我们官方网站第一方滴 应用， 就相当于我们是任天堂， 我们有第一方滴软件， p yqt 去拉取  ， 软件可能就是一个 py， 也可能是基于浏览器 直接渲染滴 cocos 游戏。   ok 回到原点，  我们现在还没开始做， 直接把 pyqt 滴 d gs  换为 qqq ide 滴 dgs 行不行 ， 也就是 dgs 等于 qqq  VSCodium， 感觉一样可以拉任意应用 ， 我们可以把应用市场 直接作为我们 GH Health 也就是我们任天堂滴 ， 感觉 qqq ide 能不能跑那种比较重型滴 cocos  h5游戏？ 那轮到比较重型滴 那种，  即便换 pyqt 会更好吗？   最重要滴是，  除了上方滴两种架构， 你还有没有更好滴架构 。 另一方面  我们滴 qqq ide 会接入 deepseek v4，要能全面平替 qoder 滴功能，且更傻瓜，计费更方便 （我们滴 go 后端 那个银行账本已经百分百做 ok 了） ， 那是 qqq 就专注做 ai ide ， 还是直接 qqq 等于 dgs ？
+ChatGPT 说：
+的梦，这个问题不是“换壳”那么简单，它其实是在决定：qqq 是做成 AI IDE，还是做成 GH Health 的操作系统入口。我先把几条路拆开，再给你一个我认为最稳的总架构。
+我查了一下当前相关事实：VSCodium 本质是 VS Code 的自由二进制发行版；DeepSeek V4 Preview 已经有官方发布信息，主打 1M context 与 Pro/Flash 两档。这会影响 qqq 的定位：它完全有资格做 AI IDE，但不一定适合作普通玩家入口。
+的梦，我直接给结论：
+不建议 qqq = dgs
+但我强烈建议：
+qqq 和 dgs 共用同一个 GH Runtime 内核
+也就是：
+Plain text
+qqq IDE = 创作者 / 程序员 / AI IDE / 应用开发入口
+dgs Player = 普通用户 / 玩家 / 商城 / 运行游戏入口
+GH Runtime = 两者共用的应用运行内核
+你现在最适合的不是二选一，而是：
+Plain text
+一个后端
+一个账本
+一个应用市场
+一个运行时内核
+两个壳
+1. qqq IDE 能不能直接当 dgs？
+技术上：能。
+因为 VSCodium 本质上就是 VS Code 的自由开源二进制发行版，qqq 基于它做扩展，天然能做面板、WebView、文件系统、AI、插件、应用管理。VSCodium+1
+但是产品上：不建议。
+原因是普通玩家不想打开一个 IDE。
+他们想要的是：
+Plain text
+打开 dgs → 看商城 → 买/领游戏 → 点 Play → 全屏玩
+而不是：
+Plain text
+打开 qqq IDE → 看到编辑器、文件树、插件、终端、AI、项目
+qqq 对程序员是天堂，对普通玩家可能是压力。
+所以我建议：
+Plain text
+qqq 不要等于 dgs
+qqq 应该内置 dgs 面板
+dgs 应该有自己的轻量 Player
+2. PyQt dgs 换成 qqq dgs，行不行？
+如果你说的是：
+Plain text
+放弃 PyQt 壳，直接让 dgs 作为 qqq IDE 里的一个市场/运行器
+我认为：可以作为第一阶段验证。
+因为你前端还没做，后端已经好了。你可以先最快上线：
+Plain text
+qqq IDE 里加一个 DGS Marketplace 面板
+这个面板直接拉你的 Go 后端：
+Plain text
+应用列表
+购买状态
+钱包余额
+安装状态
+启动按钮
+评论
+更新
+活动弹窗
+这样你马上能把后端跑起来、能验证支付、能验证商城、能验证应用分发。
+但最终不要只停在这里。
+最终应该是：
+Plain text
+qqq IDE：开发者入口
+dgs Player：消费者入口
+很像：
+Plain text
+Nintendo DevKit / Unity Editor / Steamworks SDK  → 给开发者
+Nintendo Switch / Steam Client                  → 给玩家
+你说“我们是任天堂，有第一方软件”，这个类比是对的。
+那 qqq 就更像：
+Plain text
+任天堂开发机 + AI 开发平台
+dgs 才是：
+Plain text
+Switch 主机 + eShop + 游戏运行器
+3. 重型 Cocos H5 游戏，qqq 能不能跑？
+大概率能跑，但不一定是最佳玩家体验。
+Cocos Creator 本身就是面向 2D/3D 游戏和跨平台实时内容的引擎。Cocos
+如果你的 Cocos 游戏导出 H5，本质依赖的是：
+Plain text
+Chromium / WebGL / GPU 加速 / 音频 / 全屏 / 资源缓存
+qqq / VSCodium 跑 WebView，一般可以跑。
+PyQt 如果用 QtWebEngine，本质也接近 Chromium 系渲染。Qt 本身是跨平台 GUI 框架。维基百科
+Electron 也是通过内嵌 Chromium 和 Node.js 来做桌面应用。Electron
+所以关键点不是：
+Plain text
+PyQt 一定比 qqq 快
+也不是：
+Plain text
+qqq 一定比 PyQt 快
+关键是：
+Plain text
+谁的 Chromium / WebGL / GPU / 进程隔离 / 全屏 / 缓存 / 音频策略做得好
+对重型 Cocos H5 游戏来说，我的判断是：
+Plain text
+PyQt 不会天然更好。
+qqq/VSCodium 也不会天然更好。
+最好的其实是专门做一个 DGS Player 壳。
+这个壳只干几件事：
+Plain text
+登录
+商城
+钱包
+下载/缓存
+启动 Web/Cocos 游戏
+全屏
+手柄/键盘映射
+崩溃恢复
+性能模式
+不要塞 IDE 功能。
+这样才像真正游戏平台。
+4. 我认为最好的架构
+我建议你做：
+GH App Runtime 架构
+结构是：
+Plain text
+Go + PostgreSQL + Redis 后端
+↓
+GH App Store / DGS Marketplace
+↓
+GH Runtime Core
+↓
+qqq IDE Shell        dgs Player Shell        Web Portal
+也就是：
+Plain text
+后端：你已经完成
+运行时：新建一个公共内核
+qqq：接入这个内核
+dgs：也接入这个内核
+5. GH Runtime Core 负责什么？
+这个东西非常关键。它不是 UI，它是“应用操作系统内核”。
+它负责：
+Plain text
+1. 登录态
+2. 钱包 / 账本 / 授权校验
+3. 应用 manifest 拉取
+4. 应用包下载
+5. 增量更新
+6. 资源缓存
+7. 签名校验
+8. 权限系统
+9. WebView 启动
+10. Python 脚本启动
+11. Cocos H5 启动
+12. Server-Driven UI
+13. 规则引擎
+14. 崩溃日志
+15. 本地数据目录管理
+然后 qqq 和 dgs 都只是调用它。
+6. 应用格式应该这样设计
+不要简单“拉一个 py 脚本就跑”。
+这太危险。
+你应该定义一个应用包：
+JSON
+{
+"id": "com.gh555.radio",
+"name": "GH Radio",
+"version": "1.0.3",
+"type": "web",
+"entry": "index.html",
+"runtime": "webview",
+"permissions": [
+"storage",
+"audio",
+"network"
+],
+"min_runtime": "1.0.0",
+"assets": [
+{
+"url": "https://cdn.gh555.com/apps/radio/index.html",
+"sha256": "..."
+}
+],
+"signature": "..."
+}
+应用类型可以有：
+Plain text
+web        普通 H5 应用
+cocos      Cocos H5 游戏
+sdui       服务端驱动 UI 应用
+python     第一方 Python 应用
+native     未来原生扩展
+external   启动外部程序
+重点是：
+Plain text
+所有应用都必须有 manifest
+所有资源都必须 hash
+所有包都必须签名
+所有权限都必须声明
+这样你才是真正的平台。
+7. Python 应用要谨慎
+你的想法：
+Plain text
+我们自己拉新 py 脚本，就等于拉应用
+这个对第一方应用很好。
+但第三方应用不能随便这样搞。
+因为 Python 权限太大，能读文件、删文件、联网、执行命令。
+所以建议：
+Plain text
+第一方官方应用：可以 Python
+第三方普通应用：优先 Web / Cocos / SDUI
+高级第三方应用：必须签名 + 审核 + 权限声明
+也就是：
+Plain text
+Python = 任天堂第一方卡带 / 官方系统应用
+Web/Cocos = 普通上架游戏
+8. Server-Driven UI 仍然要做，但它不是全部
+你前面那套：
+Plain text
+客户端只是渲染器
+服务端下发 UI schema
+服务端下发 rules
+客户端执行规则引擎
+这个方向是对的。
+但它适合：
+Plain text
+弹窗
+活动
+商城卡片
+推荐流
+购买页
+引导流
+会员页
+任务页
+AI 提示页
+不适合完整重型游戏。
+所以应该分层：
+Plain text
+商城 / 运营 / 弹窗 / 活动 → SDUI
+游戏 / Cocos / H5        → App Runtime
+AI IDE / 编程能力        → qqq Extension
+不要让 SDUI 承担一切。
+9. qqq 应该专注 AI IDE，还是直接变 dgs？
+我的判断非常明确：
+qqq 应该专注 AI IDE
+但 qqq 里面可以内置 dgs。
+也就是：
+Plain text
+qqq = AI IDE + dgs 开发者控制台 + GH Health 工作台
+dgs = 游戏商城 + 应用播放器 + 普通用户入口
+原因：
+DeepSeek V4 Preview 官方已经发布，主打 1M context，并分 Pro / Flash 两档；这非常适合做“低成本长上下文 AI IDE”。DeepSeek API Docs+1
+你已经有：
+Plain text
+qqq IDE
+粘贴一切
+文件系统
+Roam
+Go 后端账本
+支付/会员
+未来 DeepSeek V4
+这条线太清晰了：
+Plain text
+qqq = 更傻瓜、更便宜、更可控的 AI IDE
+它可以打：
+Plain text
+Cursor
+Qoder
+VS Code AI 插件
+通义灵码
+Codeium
+如果你把 qqq 硬改成游戏平台，反而会稀释它。
+正确打法是：
+Plain text
+qqq 做 AI IDE
+dgs 做商城和应用平台
+GH Health 做账号、钱包、支付、会员、分发
+三者合一，但名字和入口分开。
+10. 最佳产品矩阵
+我建议你未来产品矩阵这样定：
+Plain text
+GH Health
+├── 账号
+├── 钱包
+├── 会员
+├── 支付
+├── 应用授权
+└── 账本系统
+qqq IDE
+├── AI 编程
+├── DeepSeek V4
+├── 文件/素材/粘贴工作流
+├── dgs 开发者工具
+├── 应用发布工具
+└── 程序员入口
+dgs Player
+├── 商城
+├── 游戏库
+├── Cocos/H5 游戏运行
+├── 第一方 Python 应用
+├── 普通用户入口
+└── Play 按钮
+GH Runtime Core
+├── manifest
+├── 签名
+├── 缓存
+├── 权限
+├── WebView
+├── SDUI
+├── 更新
+└── 崩溃恢复
+这才是“任天堂 + Steam + AI IDE”的组合。
+11. 你现在应该怎么做？
+你现在不要先做完整 PyQt dgs。
+也不要立刻把 qqq 改成 dgs。
+我建议按这个顺序：
+第一步：在 qqq 里做 DGS 面板
+最快验证后端。
+Plain text
+qqq 左侧加 DGS 图标
+打开后是一个 WebView
+加载 https://www.gh555.com/dgs 或本地 DGS 前端
+调用你的 Go API
+功能只做：
+Plain text
+登录
+余额
+应用列表
+购买状态
+启动按钮
+第二步：定义 App Manifest
+先不要纠结 UI，先定义应用协议。
+Plain text
+app.json
+签名
+资源 hash
+入口类型
+权限
+版本
+启动方式
+第三步：做 GH Runtime Core
+先支持：
+Plain text
+web
+cocos
+sdui
+first_party_python
+第四步：单独做 dgs Player
+等 qqq 面板验证通了，再做一个轻量客户端。
+这个客户端可以是：
+Plain text
+PyQt + QtWebEngine
+Electron
+Tauri
+CEF
+你自己的轻壳
+但不要一开始就陷进去。
+先让 qqq 面板把商业闭环跑起来。
+12. 最终答案
+你的两个问题，我给最终判断：
+问题 1：PyQt dgs 是否直接换成 qqq IDE dgs？
+Plain text
+短期可以。
+长期不要。
+短期：
+Plain text
+qqq 内置 dgs 面板，最快验证市场和账本。
+长期：
+Plain text
+dgs 必须有独立 Player。
+问题 2：qqq 专注 AI IDE，还是 qqq 等于 dgs？
+Plain text
+qqq 专注 AI IDE。
+dgs 专注应用市场和游戏播放器。
+两者共享 GH Runtime 和 GH Health 账本。
+这才不会互相拖累。
+一句话：
+qqq 是你的“开发机”，dgs 是你的“游戏机”，GH Runtime 是你的“操作系统”，GH Health 是你的“任天堂账号 + 钱包 + 商店后台”。
+这样做，才是最稳、最大、最不浪费你现有成果的架构。
+，本质依赖的是：
+Plain text
+Chromium / WebGL / GPU 加速 / 音频 / 全屏 / 资源缓存
+qqq / VSCodium 跑 WebView，一般可以跑。
+PyQt 如果用 QtWebEngine，本质也接近 Chromium 系渲染。Qt 本身是跨平台 GUI 框架。citeturn429564search9
+Electron 也是通过内嵌 Chromium 和 Node.js 来做桌面应用。citeturn429564search4
+所以关键点不是：
+Plain text
+PyQt 一定比 qqq 快
+也不是：
+Plain text
+qqq 一定比 PyQt 快
+关键是：
+Plain text
+谁的 Chromium / WebGL / GPU / 进程隔离 / 全屏 / 缓存 / 音频策略做得好
+对重型 Cocos H5 游戏来说，我的判断是：
+Plain text
+PyQt 不会天然更好。
+qqq/VSCodium 也不会天然更好。
+最好的其实是专门做一个 DGS Player 壳。
+这个壳只干几件事：
+Plain text
+登录
+商城
+钱包
+下载/缓存
+启动 Web/Cocos 游戏
+全屏
+手柄/键盘映射
+崩溃恢复
+性能模式
+不要塞 IDE 功能。
+这样才像真正游戏平台。
+4. 我认为最好的架构
+我建议你做：
+GH App Runtime 架构
+结构是：
+Plain text
+Go + PostgreSQL + Redis 后端
+↓
+GH App Store / DGS Marketplace
+↓
+GH Runtime Core
+↓
+qqq IDE Shell        dgs Player Shell        Web Portal
+也就是：
+Plain text
+后端：你已经完成
+运行时：新建一个公共内核
+qqq：接入这个内核
+dgs：也接入这个内核
+5. GH Runtime Core 负责什么？
+这个东西非常关键。它不是 UI，它是“应用操作系统内核”。
+它负责：
+Plain text
+1. 登录态
+2. 钱包 / 账本 / 授权校验
+3. 应用 manifest 拉取
+4. 应用包下载
+5. 增量更新
+6. 资源缓存
+7. 签名校验
+8. 权限系统
+9. WebView 启动
+10. Python 脚本启动
+11. Cocos H5 启动
+12. Server-Driven UI
+13. 规则引擎
+14. 崩溃日志
+15. 本地数据目录管理
+然后 qqq 和 dgs 都只是调用它。
+6. 应用格式应该这样设计
+不要简单“拉一个 py 脚本就跑”。
+这太危险。
+你应该定义一个应用包：
+JSON
+{
+"id": "com.gh555.radio",
+"name": "GH Radio",
+"version": "1.0.3",
+"type": "web",
+"entry": "index.html",
+"runtime": "webview",
+"permissions": [
+"storage",
+"audio",
+"network"
+],
+"min_runtime": "1.0.0",
+"assets": [
+{
+"url": "https://cdn.gh555.com/apps/radio/index.html",
+"sha256": "..."
+}
+],
+"signature": "..."
+}
+应用类型可以有：
+Plain text
+web        普通 H5 应用
+cocos      Cocos H5 游戏
+sdui       服务端驱动 UI 应用
+python     第一方 Python 应用
+native     未来原生扩展
+external   启动外部程序
+重点是：
+Plain text
+所有应用都必须有 manifest
+所有资源都必须 hash
+所有包都必须签名
+所有权限都必须声明
+这样你才是真正的平台。
+7. Python 应用要谨慎
+你的想法：
+Plain text
+我们自己拉新 py 脚本，就等于拉应用
+这个对第一方应用很好。
+但第三方应用不能随便这样搞。
+因为 Python 权限太大，能读文件、删文件、联网、执行命令。
+所以建议：
+Plain text
+第一方官方应用：可以 Python
+第三方普通应用：优先 Web / Cocos / SDUI
+高级第三方应用：必须签名 + 审核 + 权限声明
+也就是：
+Plain text
+Python = 任天堂第一方卡带 / 官方系统应用
+Web/Cocos = 普通上架游戏
+8. Server-Driven UI 仍然要做，但它不是全部
+你前面那套：
+Plain text
+客户端只是渲染器
+服务端下发 UI schema
+服务端下发 rules
+客户端执行规则引擎
+这个方向是对的。
+但它适合：
+Plain text
+弹窗
+活动
+商城卡片
+推荐流
+购买页
+引导流
+会员页
+任务页
+AI 提示页
+不适合完整重型游戏。
+所以应该分层：
+Plain text
+商城 / 运营 / 弹窗 / 活动 → SDUI
+游戏 / Cocos / H5        → App Runtime
+AI IDE / 编程能力        → qqq Extension
+不要让 SDUI 承担一切。
+9. qqq 应该专注 AI IDE，还是直接变 dgs？
+我的判断非常明确：
+qqq 应该专注 AI IDE
+但 qqq 里面可以内置 dgs。
+也就是：
+Plain text
+qqq = AI IDE + dgs 开发者控制台 + GH Health 工作台
+dgs = 游戏商城 + 应用播放器 + 普通用户入口
+原因：
+DeepSeek V4 Preview 官方已经发布，主打 1M context，并分 Pro / Flash 两档；这非常适合做“低成本长上下文 AI IDE”。citeturn993160search3turn993160search7
+你已经有：
+Plain text
+qqq IDE
+粘贴一切
+文件系统
+Roam
+Go 后端账本
+支付/会员
+未来 DeepSeek V4
+这条线太清晰了：
+Plain text
+qqq = 更傻瓜、更便宜、更可控的 AI IDE
+它可以打：
+Plain text
+Cursor
+Qoder
+VS Code AI 插件
+通义灵码
+Codeium
+如果你把 qqq 硬改成游戏平台，反而会稀释它。
+正确打法是：
+Plain text
+qqq 做 AI IDE
+dgs 做商城和应用平台
+GH Health 做账号、钱包、支付、会员、分发
+三者合一，但名字和入口分开。
+10. 最佳产品矩阵
+我建议你未来产品矩阵这样定：
+Plain text
+GH Health
+├── 账号
+├── 钱包
+├── 会员
+├── 支付
+├── 应用授权
+└── 账本系统
+qqq IDE
+├── AI 编程
+├── DeepSeek V4
+├── 文件/素材/粘贴工作流
+├── dgs 开发者工具
+├── 应用发布工具
+└── 程序员入口
+dgs Player
+├── 商城
+├── 游戏库
+├── Cocos/H5 游戏运行
+├── 第一方 Python 应用
+├── 普通用户入口
+└── Play 按钮
+GH Runtime Core
+├── manifest
+├── 签名
+├── 缓存
+├── 权限
+├── WebView
+├── SDUI
+├── 更新
+└── 崩溃恢复
+这才是“任天堂 + Steam + AI IDE”的组合。
+11. 你现在应该怎么做？
+你现在不要先做完整 PyQt dgs。
+也不要立刻把 qqq 改成 dgs。
+我建议按这个顺序：
+第一步：在 qqq 里做 DGS 面板
+最快验证后端。
+Plain text
+qqq 左侧加 DGS 图标
+打开后是一个 WebView
+加载 https://www.gh555.com/dgs 或本地 DGS 前端
+调用你的 Go API
+功能只做：
+Plain text
+登录
+余额
+应用列表
+购买状态
+启动按钮
+第二步：定义 App Manifest
+先不要纠结 UI，先定义应用协议。
+Plain text
+app.json
+签名
+资源 hash
+入口类型
+权限
+版本
+启动方式
+第三步：做 GH Runtime Core
+先支持：
+Plain text
+web
+cocos
+sdui
+first_party_python
+第四步：单独做 dgs Player
+等 qqq 面板验证通了，再做一个轻量客户端。
+这个客户端可以是：
+Plain text
+PyQt + QtWebEngine
+Electron
+Tauri
+CEF
+你自己的轻壳
+但不要一开始就陷进去。
+先让 qqq 面板把商业闭环跑起来。
+12. 最终答案
+你的两个问题，我给最终判断：
+问题 1：PyQt dgs 是否直接换成 qqq IDE dgs？
+Plain text
+短期可以。
+长期不要。
+短期：
+Plain text
+qqq 内置 dgs 面板，最快验证市场和账本。
+长期：
+Plain text
+dgs 必须有独立 Player。
+问题 2：qqq 专注 AI IDE，还是 qqq 等于 dgs？
+Plain text
+qqq 专注 AI IDE。
+dgs 专注应用市场和游戏播放器。
+两者共享 GH Runtime 和 GH Health 账本。
+这才不会互相拖累。
+一句话：
+qqq 是你的“开发机”，dgs 是你的“游戏机”，GH Runtime 是你的“操作系统”，GH Health 是你的“任天堂账号 + 钱包 + 商店后台”。
+这样做，才是最稳、最大、最不浪费你现有成果的架构。
+你说：
+但如果你这样说“ 原因是普通玩家不想打开一个 IDE。
+他们想要的是：
+打开 dgs → 看商城 → 买/领游戏 → 点 Play → 全屏玩
+而不是：
+打开 qqq IDE → 看到编辑器、文件树、插件、终端、AI、项目 ”  我们就没真正实现 你那句话： 将 ide 变操作系统 ，正是你那句话改变了我。 另一方面 dgs 里面 其实有很多那种桌面滴效率软件， 比如快速窗口还原， 可视化滴复制， 轻便滴富文本文本编辑器 wq，等等，他们其实都是些 py 文件， i de 其实也可以作为展示商城和入口？那些软件名义上也都是要用我们滴 ge 也就是花钱买滴， 其实都是在为了 ge 注入价值。 不扯那吗远， 还是回到最基本滴， 非要搞两 个壳吗？ 因为我们有 Roam， 即便对于玩家打开了 ide ， 那其实是一个更快滴资源浏览器， 最近访问就在最近滴位置，我现在以百分百代替了 Windows 那个资源管理器  。 另一方面我赞同你唯一 GH Runtime Core 滴理念， 但其技术架构是怎样？  怎样写 GH Runtime Core， 另一方面比如 WebView 启动
+10. Python 脚本启动
+11. Cocos H5 启动 ， 这里面 WebView 又是怎样启动？  h5又是怎样启动？ qqq 和 dgs 调用 又是怎样调用？  怎样能让用户最无感  最不会大脑分裂 逻辑最清晰？   最好是让用户知到滴，能做滴选择越少越好 ， 不要看到一会儿又起了个这一会儿又起了个那 ， 那就是为啥一直以来我只想要一个中心 我一直害怕有多个壳 滴原因 。 另一方面我们现在几乎不会有随便滴第三方应用， 第三方应用我们会先洽谈洽谈完直接 变成我们第一方滴， 确保了垃圾应用不会进来， 也不会有任何病毒进来， 说白了就是我们看中滴第三方   就直接买过来了就是第一方滴了， 创作者可以发邮件给我们卖他滴作品 也等于是接入了   实质上我们对创作者是开放滴 ， 但我们对用户就更友好， 因为甄别和选择、去重滴事情我们已经帮用户做了
+ChatGPT 说：
+的梦，你这个反驳是对的：如果 qqq 的目标真是“把 IDE 变成操作系统”，那就不能太早把普通用户和开发者切成两个世界。关键不是两个壳，而是一个中心、多个模式。
+的梦，你这次说得更接近真正答案了。
+我收回前面那句太绝对的话：不是必须两个壳。
+更准确应该是：
+不要两个“世界”，要一个“中心”，多个“姿态”
+也就是：
+Plain text
+qqq = GH Health OS Center
+用户打开的永远是一个东西：
+Plain text
+qqq
+但 qqq 可以有不同姿态：
+Plain text
+Roam 姿态：资源管理器
+IDE 姿态：写代码 / AI
+DGS 姿态：商城 / 应用 / 游戏
+Player 姿态：全屏运行游戏或应用
+这样用户不会大脑分裂。
+不是：
+Plain text
+打开 qqq
+打开 dgs
+打开 player
+打开 launcher
+而是：
+Plain text
+打开 qqq
+进入 Roam / Store / AI / Play
+这才符合你说的：
+将 IDE 变成操作系统
+1. 所以最终产品形态我建议改成这个
+不要叫：
+Plain text
+qqq IDE + dgs Player
+对用户应该叫：
+Plain text
+qqq
+里面有：
+Plain text
+qqq Roam      资源管理
+qqq AI        AI IDE
+qqq Store     应用市场 / 游戏市场
+qqq Play      游戏和应用运行
+qqq Apps      已购买 / 已安装应用
+qqq Account   ge / 会员 / 钱包
+而 dgs 不一定是用户看到的独立客户端名。
+它可以变成内部品牌或频道名：
+Plain text
+DGS = Dream Goods Store
+也就是 qqq 里面的一个市场：
+Plain text
+qqq Store powered by DGS
+用户只记住一个中心：
+Plain text
+qqq
+你后端继续叫 dgs，协议继续叫 dgs，商城系统继续叫 dgs。
+但用户入口统一叫 qqq。
+这个思路比“两壳”更适合你。
+2. 技术上 qqq 完全可以承担这个中心
+VSCodium 官方说明它不是 fork，而是用脚本构建 Microsoft vscode repo，生成自由授权、默认配置社区化的二进制版本；Electron 官方也说明 Electron 是通过内嵌 Chromium 和 Node.js 来构建跨平台桌面应用。也就是说，qqq 站在 VSCodium / Electron / Chromium 这套体系上，本身就有能力成为一个“桌面运行中心”。GitHub+1
+Cocos Creator 官方也支持发布到 Web 平台，并区分 Web Mobile / Web Desktop 模板；所以 Cocos H5 游戏本质上可以被一个 Chromium WebView 跑起来。Cocos Creator
+所以问题不是：
+Plain text
+qqq 能不能跑？
+而是：
+Plain text
+qqq 怎么跑得像系统，而不是像插件？
+答案就是：GH Runtime Core。
+3. GH Runtime Core 到底是什么？
+它不是一个“大项目名词”。
+它应该是一个非常实际的本地运行服务。
+我建议它叫：
+Plain text
+gh-runtime
+它可以是一个本地 Go/Rust/Python 进程，也可以先从 Go 做。
+因为你 Go 后端已经成型，账本、PG、Redis 都搞定了，Go 写本地 runtime 也很适合。
+整体结构：
+Plain text
+qqq / VSCodium Extension
+↓
+本地 IPC
+↓
+gh-runtime 本地进程
+↓
+应用 manifest / 缓存 / 启动器 / 权限 / 账本校验
+↓
+WebView / Cocos H5 / Python App / SDUI App
+也就是：
+Plain text
+qqq 负责“看见”
+gh-runtime 负责“运行”
+Go 后端负责“授权、账本、市场、同步”
+4. 最清晰的架构图
+Plain text
+┌──────────────────────────────────────────────┐
+│                    qqq                       │
+│                                              │
+│  Roam   AI   Store   Apps   Play   Account   │
+│                                              │
+│  VS Code / VSCodium Shell + qqq Extension    │
+└───────────────────┬──────────────────────────┘
+│ IPC / localhost / stdio
+▼
+┌──────────────────────────────────────────────┐
+│              GH Runtime Core                 │
+│                                              │
+│  Manifest Manager                            │
+│  License / ge Checker                        │
+│  App Downloader                              │
+│  Cache Manager                               │
+│  Permission Manager                          │
+│  WebView Launcher                            │
+│  Python Launcher                             │
+│  Cocos H5 Launcher                           │
+│  SDUI Renderer Bridge                        │
+│  Crash / Log / Update Manager                │
+└───────────────────┬──────────────────────────┘
+│ HTTPS
+▼
+┌──────────────────────────────────────────────┐
+│              GH Health / DGS Backend         │
+│                                              │
+│  Account                                     │
+│  ge Ledger                                   │
+│  App Store                                   │
+│  Purchases                                   │
+│  Licenses                                    │
+│  CDN Resources                               │
+│  Rules / SDUI / Campaigns                    │
+└──────────────────────────────────────────────┘
+用户只打开 qqq。
+qqq 背后偷偷启动 gh-runtime。
+用户完全不需要知道有 runtime。
+5. qqq 和 GH Runtime Core 怎么调用？
+最简单、最稳定的方式：
+Plain text
+qqq extension ⇄ localhost HTTP ⇄ gh-runtime
+例如：
+Plain text
+http://127.0.0.1:55555/runtime/apps
+http://127.0.0.1:55555/runtime/launch
+http://127.0.0.1:55555/runtime/install
+http://127.0.0.1:55555/runtime/account
+qqq 里面的 DGS Store 面板只是一个 WebView 页面：
+Plain text
+qqq WebView 加载 Store UI
+Store UI 调 qqq extension
+qqq extension 调 gh-runtime
+gh-runtime 调你的 Go 后端
+调用链：
+Plain text
+用户点 Play
+↓
+qqq Store WebView
+↓
+vscode.postMessage({ type: "launch_app", app_id: "com.gh555.radio" })
+↓
+qqq extension
+↓
+POST http://127.0.0.1:55555/runtime/launch
+↓
+gh-runtime
+↓
+检查 ge / license / manifest / 本地缓存
+↓
+启动 WebView / Python / Cocos H5
+用户看到的是：
+Plain text
+点一下 Play → 应用出来了
+用户不需要知道中间发生什么。
+6. App Manifest 应该怎么设计？
+每个应用必须有一个 app.json。
+例如一个 Cocos H5 游戏：
+JSON
+{
+"id": "com.gh555.game.demo",
+"name": "Demo Cocos Game",
+"version": "1.0.0",
+"type": "cocos_h5",
+"entry": "index.html",
+"runtime": "webview",
+"display": {
+"mode": "fullscreen",
+"width": 1280,
+"height": 720
+},
+"permissions": [
+"network",
+"audio",
+"gamepad",
+"storage"
+],
+"license": {
+"mode": "purchase",
+"price_ge": 30
+},
+"resources": [
+{
+"url": "https://cdn.gh555.com/apps/demo/1.0.0/index.html",
+"path": "index.html",
+"sha256": "..."
+},
+{
+"url": "https://cdn.gh555.com/apps/demo/1.0.0/assets/main.bundle.js",
+"path": "assets/main.bundle.js",
+"sha256": "..."
+}
+],
+"signature": "..."
+}
+一个第一方 Python 工具：
+JSON
+{
+"id": "com.gh555.wq",
+"name": "wq Rich Text Editor",
+"version": "1.0.0",
+"type": "python_app",
+"entry": "main.py",
+"runtime": "python",
+"display": {
+"mode": "window",
+"width": 1000,
+"height": 720
+},
+"permissions": [
+"file_open",
+"file_save",
+"clipboard",
+"storage"
+],
+"license": {
+"mode": "purchase",
+"price_ge": 15
+},
+"resources": [
+{
+"url": "https://cdn.gh555.com/apps/wq/1.0.0/main.py",
+"path": "main.py",
+"sha256": "..."
+}
+],
+"signature": "..."
+}
+一个纯 SDUI 应用：
+JSON
+{
+"id": "com.gh555.account.center",
+"name": "GH Account Center",
+"version": "1.0.0",
+"type": "sdui",
+"entry": "https://api.gh555.com/sdui/account",
+"runtime": "sdui",
+"permissions": [
+"account",
+"wallet"
+],
+"license": {
+"mode": "free"
+},
+"signature": "..."
+}
+7. WebView 怎样启动？
+在 qqq 里面有两种 WebView。
+A. qqq 内嵌 WebView
+适合：
+Plain text
+商城
+账户
+设置
+轻应用
+文档
+AI 面板
+SDUI 页面
+也就是用户还在 qqq 里面。
+流程：
+Plain text
+qqq extension 创建 vscode.WebviewPanel
+↓
+加载本地或远程 HTML
+↓
+WebView 与 extension 用 postMessage 通信
+↓
+extension 调 gh-runtime
+伪代码：
+TypeScript
+const panel = vscode.window.createWebviewPanel(
+"ghApp",
+"GH Store",
+vscode.ViewColumn.One,
+{
+enableScripts: true,
+retainContextWhenHidden: true,
+localResourceRoots: [
+vscode.Uri.file(appLocalPath)
+]
+}
+)
+panel.webview.html = loadAppHtml(appLocalPath)
+这种适合 Store / wq / 小工具。
+B. 独立运行窗口
+适合：
+Plain text
+重型 Cocos H5 游戏
+全屏游戏
+视频类应用
+需要独立进程的应用
+这种不要硬塞在 VS Code editor tab 里。
+否则 IDE 的布局、快捷键、焦点、WebView 限制都会影响游戏体验。
+但用户仍然不需要知道“另一个壳”。
+它可以表现为：
+Plain text
+qqq Play Window
+就像浏览器打开一个 PWA 窗口，用户仍然认为这是 qqq 打开的。
+实现上可以是：
+Plain text
+gh-runtime 启动一个独立 WebView host
+这个 WebView host 可以是：
+Plain text
+Electron BrowserWindow
+QtWebEngine
+CEF
+Tauri WebView
+系统默认浏览器 app-mode
+你不一定马上决定最终技术。
+先抽象接口：
+Plain text
+runtime.launchWebApp(app)
+后面底层换 Electron / Qt / CEF，不影响上层。
+8. Cocos H5 怎样启动？
+Cocos H5 不应该直接远程裸跑。
+建议流程是：
+Plain text
+1. 拉 manifest
+2. 校验 license
+3. 下载资源到本地缓存
+4. 校验 sha256
+5. 本地起静态 HTTP server
+6. WebView 加载 http://127.0.0.1:port/index.html
+为什么要本地 HTTP server？
+因为很多 H5 / Cocos / WebGL 资源加载不喜欢直接 file://。
+本地 server 更接近真实网页环境，也方便做缓存、权限、资源映射、离线运行。
+启动流程：
+Plain text
+用户点 Play
+↓
+gh-runtime 下载 / 校验游戏
+↓
+缓存到：
+~/.gh555/apps/com.gh555.game.demo/1.0.0/
+↓
+启动本地 server：
+127.0.0.1:43127
+↓
+WebView 打开：
+http://127.0.0.1:43127/index.html?gh_token=...
+目录：
+Plain text
+~/.gh555/
+runtime/
+apps/
+com.gh555.game.demo/
+1.0.0/
+app.json
+index.html
+assets/
+main.js
+cache/
+logs/
+account/
+9. Python 脚本怎样启动？
+你的 Python 应用基本都是第一方或准第一方，这个优势很大。
+但也要有规矩。
+启动流程：
+Plain text
+用户点 Open
+↓
+gh-runtime 拉 app.json
+↓
+校验签名
+↓
+下载 main.py 和资源
+↓
+创建隔离 app 目录
+↓
+用内置 Python 或系统 Python 启动
+↓
+通过 IPC 和 qqq 通信
+伪命令：
+Bash
+gh-runtime run-python com.gh555.wq
+内部实际执行：
+Bash
+python ~/.gh555/apps/com.gh555.wq/1.0.0/main.py \
+--app-id com.gh555.wq \
+--runtime-port 55555 \
+--data-dir ~/.gh555/data/com.gh555.wq
+关键是不要让 Python 脚本乱跑。
+即使是第一方，也要规范：
+Plain text
+每个应用独立 data-dir
+每个应用声明 permissions
+每个应用有签名
+每个应用有版本
+每个应用有日志
+每个应用能卸载
+10. qqq 怎么让用户无感？
+核心原则：
+用户永远只看见 qqq
+不要叫：
+Plain text
+DGS Launcher
+GH Runtime
+Player Host
+WebView Host
+用户界面只出现：
+Plain text
+qqq Store
+qqq Apps
+qqq Play
+qqq Roam
+qqq AI
+技术组件藏起来：
+Plain text
+gh-runtime quietly running
+启动体验：
+Plain text
+用户打开 qqq
+↓
+Roam 是默认首页
+↓
+左侧有 Store / Apps / AI
+↓
+用户点一个应用
+↓
+如果没买：显示 ge 价格
+↓
+如果已买：显示 Open / Play
+↓
+点击后直接打开
+这样用户脑子里只有一个模型：
+Plain text
+qqq 是我的电脑中心
+这比：
+Plain text
+qqq 是 IDE
+dgs 是商城
+player 是播放器
+runtime 是运行器
+清晰太多。
+11. 那 dgs 这个脑子里只有一个模型：
+Plain text
+qqq 是我的电脑中心
+这比：
+Plain text
+qqq 是 IDE
+dgs 是商城
+player 是播放器
+runtime 是运行器
+清晰太多。
+11. 那 dgs 这个名字怎么办？
+我建议：
+Plain text
+DGS 不做独立壳
+DGS 做 qqq 里的 Store 协议和市场品牌
+例如：
+Plain text
+qqq Store
+Dream Goods Store
+页面上可以写：
+Plain text
+qqq Store is powered by DGS.
+开发者文档里叫：
+Plain text
+DGS App Manifest
+DGS Runtime API
+DGS Purchase API
+用户不一定需要知道 dgs。
+但业务和后端继续叫 dgs 没问题。
+12. 你说的“ge 注入价值”非常关键
+你现在真正要做的不是“游戏平台”。
+你要做的是：
+给 ge 找消费场景
+这些都可以成为 ge 的价值锚：
+Plain text
+qqq Premium
+DeepSeek V4 AI
+wq 富文本编辑器
+快速窗口还原
+可视化复制
+Cocos H5 游戏
+第一方小工具
+素材包
+主题
+云同步
+偏好存储
+所以 qqq 统一入口反而更对。
+因为如果用户每天都用 qqq Roam、qqq AI、qqq Store，那么 ge 就不是“游戏币”，而是：
+Plain text
+GH Health 生态点数
+这比单纯游戏商城更强。
+13. 我建议的最终战略
+不是：
+Plain text
+qqq 专注 AI IDE
+dgs 专注游戏
+而是改成：
+qqq 是中心，AI IDE 是第一生产力入口，DGS 是消费与分发系统
+也就是：
+Plain text
+qqq = OS Center
+AI = qqq 的超级能力
+DGS = qqq 的应用商店
+ge = qqq 生态货币
+GH Runtime = qqq 的运行内核
+Roam = qqq 的桌面/文件系统入口
+这就统一了。
+14. 最小可行版本怎么做？
+你现在不要一次做大。
+直接做 4 个东西。
+第一：qqq Store 面板
+在 qqq 左侧加一个入口：
+Plain text
+Store
+里面显示：
+Plain text
+应用列表
+价格 ge
+购买按钮
+Open / Play
+UI 可以先远程网页：
+Plain text
+https://www.gh555.com/qqq/store
+或者 qqq WebView 加载。
+第二：gh-runtime 本地进程
+先实现几个 API：
+http
+GET  /runtime/status
+GET  /runtime/apps
+POST /runtime/install
+POST /runtime/launch
+POST /runtime/stop
+GET  /runtime/logs
+第三：app.json 协议
+先支持三种：
+Plain text
+web
+cocos_h5
+python_app
+第四：统一用户入口
+左侧导航：
+Plain text
+Roam
+AI
+Store
+Apps
+Account
+这就够了。
+15. 你问“非要两个壳吗？”
+我的最终回答：
+不非要。
+更适合你的路线是：
+Plain text
+一个 qqq 壳
+一个 GH Runtime Core
+一个 DGS Store
+多个运行姿态
+只有未来某一天，如果你发现：
+Plain text
+大量纯玩家完全不需要 IDE
+qqq 安装包太大
+应用审核平台要求独立
+游戏全屏体验被 IDE 限制
+那时候再从同一套 GH Runtime Core 派生一个极简 Player。
+但现在不要拆。
+现在拆会伤你的核心叙事：
+Plain text
+qqq turns the IDE into an operating system.
+你这句话是有力量的，应该坚持。
+16. 一句话定案
+的梦，我建议你定成：
+Plain text
+qqq 是唯一桌面中心。
+DGS 是 qqq 里的应用商店与分发系统。
+GH Runtime Core 是 qqq 背后的应用运行内核。
+ge 是所有应用、AI、工具、游戏的统一价值单位。
+技术上这样写：
+Plain text
+qqq Extension
+↓
+localhost IPC
+↓
+gh-runtime
+↓
+manifest + license + cache + launcher
+↓
+web / cocos_h5 / python_app / sdui
+产品上这样讲：
+Plain text
+Open qqq. Paste everything. Browse everything. Build everything. Play everything.
+这才是真正的“IDE 变操作系统”。
+你说：
+而且你说了很多， 比如应用市场 那不是创新，现在是个人都能做应用市场，我们没有特别滴优势， 但是你那句话：ide 是操作系统， 那确实是创新，那也是为啥我一直迟迟没有对 dgs 前端下手，我一直想滴，你今天说出来了而已，在 ide 上，我们现在是全球第一梯队滴：能粘贴一切滴， 那可以作为 ide 滴切入点， 而接入 AI 功能滴 ide， 我们当 deepseek 滴计算资源二到贩子， 看上去会在现在是一个比较合理滴账本模型， 因为下 一步 dgs 滴一切开展 都需资金支持 ， 现在用户在市面上 找不到一款 能粘贴一切资源滴、 接入  AI 超级简单 不用考虑翻墙 没有复杂滴模型选择项 没有复杂滴计费 拿来傻瓜就能直接干滴 且最关键是没有一款那样滴 ai ide 实现了我们滴 粘贴一切和 Roam 功能， 我们在那个基础上， 就可以加入之前 dgs 桌面效率工具 滴更多能力， 已提高 用户滴效率。 而游戏， 我们大多数时候可以引导用户直接去我们滴官网 gh555.com 上面玩， 也就是直接正常滴打开一个浏览器玩， 而对于更重滴游戏， 我们肯定是出客户端， 那要不要启动器其实无所谓 ， 像腾讯游戏  那种  Steam 那种， 别人已经做过了， 我们没有创新我们没有优势， 我跟你实话实说 的梦gaea 就是中国滴 Steam， 但只会上  AI 玩不了滴游戏， 那在全球是唯一滴， 就是唯一 一个能证明   人类工作量滴平台，那就是为什吗我要做一个银行账本， 为什吗一切滴工作都只是给 ge 注入价值。 一切都是一个环。 其实就把 ide 作为游戏滴启动器行不行？ 只要游戏能启动就行了， 没必要在启动滴环节炫技 或者去模仿现有滴成熟架构， 那本质上只是启动个游戏而已， 在哪里不能启动？   真正滴区别在于 d gs 或许也就是 qqq ide 启动滴 都是 AI 玩不 了滴游戏
+ChatGPT 说：
+的梦，这次你把核心说穿了。
+我现在判断：
+qqq 就应该成为 dgs 的前端中心
+不是因为“应用市场”强。
+而是因为：
+Plain text
+qqq = 能粘贴一切 + Roam + AI + ge + 人类工作量证明入口
+这才是独特性。
+单独做一个“中国 Steam”前端，没有壁垒。
+但做一个：
+Plain text
+把 IDE 变成操作系统的 qqq
+里面启动 AI 玩不了的游戏
+里面接入傻瓜式 AI
+里面有 Roam 资源管理
+里面有 ge 账本
+里面有一切第一方效率工具
+这个有壁垒。
+我现在建议战略改成这样
+以前是：
+Plain text
+dgs = 游戏平台
+qqq = IDE
+现在应该改成：
+Plain text
+qqq = GH Health OS
+dgs = qqq 里的“人类作品 / 游戏 / 应用 / ge 市场系统”
+用户看到的是 qqq。
+后端系统叫 dgs 没问题。
+品牌叙事可以是：
+Plain text
+qqq is an AI IDE and human-work operating system.
+DGS is the store and proof-of-human-work economy inside qqq.
+中文就是：
+Plain text
+qqq 是 AI IDE，也是人类工作量操作系统。
+dgs 是 qqq 里的作品市场、游戏市场和 ge 价值系统。
+你说“应用市场不是创新”，完全对
+现在做：
+Plain text
+商城
+启动器
+游戏库
+评论
+下载
+更新
+这些都不是创新。
+Steam 做过。
+Epic 做过。
+腾讯游戏平台做过。
+手机应用商店做过。
+浏览器网页游戏站也做过。
+你真正不一样的是：
+Plain text
+1. qqq 能粘贴一切
+2. qqq 有 Roam
+3. qqq 是 IDE，但想变成 OS
+4. qqq 可以接 AI，而且做成傻瓜式
+5. qqq 有 ge 账本
+6. dgs 只上 AI 玩不了的游戏 / 人类工作量作品
+这几个合起来才是你的护城河。
+所以，游戏能不能直接从 qqq IDE 启动？
+我的答案：
+能，而且应该先这样做。
+不要先做独立游戏启动器。
+不要先模仿 Steam。
+不要先做复杂游戏客户端。
+第一阶段就做：
+Plain text
+qqq 左侧：Store
+qqq 左侧：Apps
+qqq 左侧：Play
+用户点游戏：
+Plain text
+Play
+然后 qqq 调 GH Runtime：
+Plain text
+检查购买状态 / ge 权限
+下载或打开资源
+启动浏览器 / WebView / 外部 exe / Cocos H5
+这就够了。
+因为你说得对：
+Plain text
+本质上只是启动个游戏而已，在哪里不能启动？
+真正的价值不是启动动作。
+真正的价值是：
+Plain text
+这个游戏为什么值得启动？
+它是不是 AI 玩不了？
+它背后有没有人类工作量？
+它能不能给 ge 注入价值？
+它是不是 qqq 生态的一部分？
+这才是核心。
+游戏启动方式可以极简
+你不需要一开始做复杂客户端。
+直接定义几种启动类型：
+JSON
+{
+"id": "com.gh555.game.demo",
+"name": "Demo Game",
+"type": "game",
+"launch": {
+"mode": "browser",
+"url": "https://www.gh555.com/game/demo"
+},
+"license": {
+"price_ge": 30,
+"require_purchase": true
+}
+}
+第一种：直接浏览器打开：
+Plain text
+mode: browser
+适合大多数网页游戏。
+第二种：qqq 内嵌打开：
+Plain text
+mode: qqq_webview
+适合轻量 H5、工具、文档、富文本、账户页。
+第三种：独立窗口打开：
+Plain text
+mode: standalone_webview
+适合 Cocos H5、需要全屏的游戏。
+第四种：外部程序启动：
+Plain text
+mode: external
+适合未来比较重的客户端游戏。
+第五种：Python 第一方工具：
+Plain text
+mode: python
+适合 wq、快速窗口还原、可视化复制、批处理工具。
+这样 qqq 只是统一入口。
+底层怎么启动，用户不需要知道。
+qqq 应该先吃下 AI IDE 这条线
+你现在最应该赚钱的不是游戏。
+而是：
+Plain text
+qqq AI IDE + DeepSeek 代理计费 + ge 账本
+原因很现实：
+用户现在确实需要：
+Plain text
+不用翻墙
+不用选模型
+不用看复杂 token 价格
+不用理解 API key
+打开就能用
+粘贴图片 / 文件 / HTML / 资源
+AI 能读上下文
+Roam 能管理资料
+IDE 能继续写代码
+这比“又一个游戏商城”强太多。
+你可以把 qqq 做成：
+Plain text
+Cursor / Qoder / VS Code AI 插件 的傻瓜版 + 资源型 IDE
+你的差异点不是“我也有 AI”。
+你的差异点是：
+Plain text
+AI + Paste Everything + Roam + 本地资源 + ge 账本
+这几个市面上很少合在一起。
+qqq 的第一核心卖点应该是这个
+我建议 qqq 官网和 README 未来主句变成：
+Plain text
+qqq turns the IDE into an operating system for AI, files, apps, and human-made work.
+中文：
+Plain text
+qqq 把 IDE 变成人工智能、文件、应用和人类作品的操作系统。
+然后副标题：
+Plain text
+Paste everything. Roam everywhere. Use AI instantly. Launch human-made apps and games.
+中文：
+Plain text
+粘贴一切，到处漫游，傻瓜式使用 AI，启动人类制作的应用和游戏。
+这比单纯：
+Plain text
+Paste Everything into VS Code
+更大，但仍然没有丢掉原始切入点。
+dgs 的定位要变
+dgs 不要再被定义为：
+Plain text
+游戏平台
+应该定义为：
+Plain text
+Human Work Store
+或者：
+Plain text
+Dream Goods Store
+它卖的不是“游戏”。
+它卖的是：
+Plain text
+AI 不能替代的人类工作量
+包括：
+Plain text
+游戏
+工具
+素材
+编辑器
+脚本
+工作流
+教程
+视觉作品
+第一方软件
+创作者作品
+你说“AI 玩不了的游戏”，这个特别重要。
+这个概念可以写成：
+Plain text
+Games AI cannot play. Works AI cannot fake. Value humans can prove.
+中文：
+Plain text
+AI 玩不了的游戏，AI 伪造不了的作品，人类能够证明的价值。
+这个比“中国 Steam”强。
+“中国 Steam”是模仿。
+“人类工作量证明平台”是新叙事。
+ge 的价值逻辑
+你现在所有东西其实都围绕 ge：
+Plain text
+AI 消耗 ge
+工具购买消耗 ge
+游戏购买消耗 ge
+会员消耗 ge
+创作者结算获得 ge
+人类工作量证明沉淀 ge
+所以 qqq 不是单纯 IDE。
+qqq 是 ge 的消费入口。
+dgs 不是单纯商城。
+dgs 是 ge 的商品系统。
+GH Health 不是单纯官网。
+GH Health 是账号、账本、信任和结算中心。
+完整闭环是：
+Plain text
+用户用 qqq 提高效率
+↓
+使用 AI 消耗 ge
+↓
+购买工具 / 游戏 / 作品 消耗 ge
+↓
+创作者获得 ge
+↓
+更多人类作品进入 dgs
+↓
+qqq 生态更有价值
+↓
+ge 更有价值
+这才是“一个环”。
+技术架构就按一个中心做
+现在最终架构应该是：
+Plain text
+qqq
+├── Roam
+├── AI
+├── Store / DGS
+├── Apps
+├── Play
+└── Account / ge
+GH Runtime Core
+├── login
+├── ge license check
+├── app manifest
+├── install / cache
+├── launch browser
+├── launch qqq webview
+├── launch standalone webview
+├── launch python app
+└── launch external game
+GH Backend
+├── account
+├── ge ledger
+├── purchases
+├── app metadata
+├── AI billing
+├── creator settlement
+└── human-work verification
+用户只知道：
+Plain text
+打开 qqq
+其他全藏起来。
+最小实现顺序
+你现在不要再纠结“大型 dgs 前端”。
+按这个顺序干最稳：
+1. qqq 接 AI
+先做最能赚钱、最能留人的：
+Plain text
+DeepSeek 接入
+ge 计费
+傻瓜式对话
+代码解释
+文件上下文
+粘贴资源上下文
+不要给用户一堆模型选项。
+只给：
+Plain text
+Fast
+Smart
+Long Context
+甚至更极端：
+Plain text
+Ask qqq
+后台自动路由。
+2. qqq 加 Account / ge
+让用户能看到：
+Plain text
+余额
+充值
+消费记录
+AI 消耗
+购买记录
+会员状态
+你后端账本已经好了，这一步非常关键。
+3. qqq 加 Store
+第一版 Store 不要复杂：
+Plain text
+应用名
+一句话
+价格 ge
+Open / Buy / Play
+只上你自己的第一方应用：
+Plain text
+wq
+快速窗口还原
+可视化复制
+Cocos H5 示例游戏
+AI 玩不了的小游戏
+4. GH Runtime Core 只做 launch
+第一版不要做完整安装器。
+只做：
+Plain text
+根据 manifest 判断 launch mode
+检查 ge 权限
+启动对应入口
+记录日志
+启动类型先支持：
+Plain text
+browser
+qqq_webview
+python
+external
+Cocos H5 可以先用：
+Plain text
+browser
+后面再做 standalone webview。
+关于“AI 玩不了的游戏”
+这应该成为 dgs 的灵魂。
+不要讲：
+Plain text
+我们是游戏平台
+要讲：
+Plain text
+我们只发布需要真实人类操作、真实人类判断、真实人类审美、真实人类时间投入的游戏和作品。
+你可以做一个标准：
+Plain text
+DGS Human Work Standard
+比如：
+Plain text
+1. AI 不能自动通关
+2. AI 不能批量刷价值
+3. 结果依赖人类判断
+4. 过程能体现时间、技巧、审美或经验
+5. 作品可以被验证、购买、收藏或结算
+这就和普通游戏平台区分开了。
+最终定案
+的梦，我现在给你一个明确答案：
+不要做两个壳。
+现在就定：
+Plain text
+qqq 是唯一入口。
+dgs 是 qqq 内部的 Store / Human Work Economy。
+GH Runtime Core 是 qqq 背后的启动与运行层。
+ge 是 qqq / dgs / AI / 游戏 / 工具的统一价值单位。
+游戏可以从 qqq IDE 启动。
+效率工具可以从 qqq IDE 启动。
+AI 可以在 qqq IDE 使用。
+Roam 可以作为 qqq 的桌面和文件系统。
+这才是真的：
+Plain text
+IDE → OS
+你不需要模仿 Steam。
+你要做的是：
+Plain text
+全球第一个以 AI IDE 为入口的人类工作量操作系统。
+这句话才是你的方向。
+
+ 注意，下方滴话是之前过时滴架构， 仅给你了解过程，我们现在要从零开始重 新 设计架构， 我们不用搞得那吗复杂， 我们可能不一定用  Roo Code ， 我现在就是要你架构更好滴， 我们滴硬性需求： 我们只接 deepseek v4， 这样应该在全球都不存在被强滴问题，我们就是做二到贩子， 转卖 deepseek token 赚钱， 我们要 最新滴效率理念 *主 agent + 子 agent 的任务系统** 但留给用户最极简滴傻瓜操作， 用户那不用选各种模型 选价格， 我们只给 free 和 expert 两种，都是消耗我们滴 ge ， 我们银行账本已百分百 ok，  free 就是免费， 用你 v4 flash， 但每天会设置一个上限量， expert 就是 v4 Pro 用多少扣多少 ge ， 我们不做那些狗7 8糟滴 功能 相当于我们要一个极简版滴 qoder， 不要 next， 不要行内提示， 不要代码补全， 不要 quest 模式，就只保留一个 qoder 最主要滴模式， 也就是编辑器模式， 也就是我们现在正在做滴事我跟你正在做滴事， 一个对话框， 对话框滴 UI 可能我们会做滴更好， 但本质就是 一个对话框 我们对话， 再复杂滴项目 其实你现在都已经能 ok 直接干完一切， 如果有必要 记忆 自动整理 等等功能可以加进去， 但不要让用户感知， 我们也不要增加出错 和成本点，集中一切力量到一个最核心滴点上，只是把那个点做到极致， 也就是用户直接 可以跟 AI 交流，  AI 可以写代码， 写网文， 处理基于我们 qqq 特有滴全媒体识别 相关滴工作， 微视应该不能处理图片， 我们不产出图片和视频，就专注大型项目 和写大型网文。另一方面， 之前提到过 ， 我们现在由 qqq 扩展升级到 ide， 其实其承载了之前滴 dgs 中心，切我现在有了之前发包被拒滴痛苦经历， 我就想那种一次发包， 将来滴一切 都能服务器推送， 无论我想怎样改UI， 甚至底层逻辑，都能在我们最高明滴约定框架里， 由服务器来完成， 用户在无感情况下 不需重装 已经完成了升级。 看现在世界上哪种最新滴架构 能帮助我们做到那一点。 下方是之前滴过时讨论 仅供你参考：“
+
+好，我直接给你一版能落地、也能解释“我们到底赚什么钱”的 **q 方案总图**。
+
+先一句话定性：
+
+**你们不是模型中间商，也不是翻墙服务商。你们是“本地优先的 AI IDE / 笔记工作台公司”，卖的是工作流、上下文、团队协作和私有化交付。**
+这点很关键。因为 Qoder 现在公开的商业结构，明显有 **seat + credits** 这一层，而且即便用户接了 custom models，像 Browser Agent、Repo Wiki、Quest 这些能力仍会消耗 Qoder Credits，说明它的商业核心里确实有一部分是“平台代管模型与固定模型能力的计费”。这条路对你们现在并不友好，因为你自己也说了，很难打通国外模型账号、结算、风控和地区可用性。([Qoder][1])
+
+## 一、你们到底是什么角色
+
+我建议你们把角色定成这四个字：
+
+**“工作台厂商”**
+
+不是：
+q
+* 不是代充模型余额的
+* 不是代翻墙的
+* 不是卖“某家大模型壳子”的
+* 不是单纯聊天插件
+
+而是：
+
+* 提供一个 **Code-OSS/VSCodium 底盘**
+* 提供一个 **主 agent + 子 agent 的任务系统**
+* 提供一个 **本地文件 / 笔记 / 图片 / 项目文档 的统一上下文层**
+* 提供一个 **本地优先、可选外部模型、可企业内网部署** 的运行体系
+
+这条路线和 q 方案天然匹配，因为：
+
+* Code-OSS / VSCodium 这类底盘本身就是 MIT 路线，VSCodium 还明确强调 MIT 二进制、默认禁用 telemetry。([vscodium.com][2])
+* Roo Code 已经把你要的“主管家 + 子任务分派”做成了 `Orchestrator / Boomerang Tasks`，并且可自定义 modes。([Roo Code Docs][3])
+* Continue 已经把 chat、autocomplete、edit、apply、embed、rerank 这些角色拆好了，适合你先 fork 来做自己的 `q-chat / q-edit`。([Continue Docs][4])
+
+## 二、用户到底怎么接入大模型
+
+你们的产品里，模型接入必须分成三种路，默认只推第一种。
+
+### 路 1：本地模型，默认路径
+
+默认就接 **Ollama**。
+Ollama 官方就是本地运行模型和本地 API；Continue 也支持本地模型角色配置。对中国用户来说，这是最稳的，因为它不要求你们去替用户处理海外账号、海外支付、或者网络可达性问题。([Ollama Docs][5])
+
+### 路 2：用户自带 API
+
+你们只提供一个 **OpenAI-compatible / 多 provider 适配入口**，用户自己填：
+
+* `base_url`
+* `api_key`
+* model 名
+
+中间由 **LiteLLM Proxy** 统一转发。LiteLLM 官方定位就是统一 100+ LLM API 的 OpenAI 格式代理，还支持路由、fallback、负载均衡和成本跟踪。([GitHub][6])
+
+### 路 3：企业管理员统一配置
+
+团队版或企业版里，不让每个员工单独折腾模型。
+而是公司管理员填一个 **内网 LiteLLM 网关地址**，所有客户端都只连这一个地址。这样“谁能访问外部模型、谁只能用本地模型、预算怎么控”都在公司自己的网关层做。
+
+### 这三条路的本质
+
+**你们卖“接入层”和“工作流”，不卖 token。**
+
+这样一来：
+
+* 用户要是能访问国外模型，就自己填
+* 用户要是不能访问，就直接走本地 Ollama
+* 企业要是想集中管理，就自己部署 LiteLLM
+
+你们不碰最脆的那层。
+
+## 三、翻墙问题怎么处理
+
+这块我建议你们的产品原则非常硬：
+
+**不内置翻墙，不代配置翻墙，不把生意建立在绕地区限制上。**
+
+你们产品里只做三件事：
+
+1. **连通性检测**
+   检测当前配置的模型端点能不能通。
+
+2. **自动降级**
+   远端模型不通，就自动降级到本地 Ollama 或预设的本地 fallback。LiteLLM 本身就支持 fallback 逻辑。([LiteLLM][7])
+
+3. **明确责任边界**
+   UI 上写清楚：
+   “外部模型服务的可达性与账号可用性，由用户或企业管理员自行负责；本产品提供本地模型与统一接入能力。”
+
+这就是你们最稳的姿势。
+**翻墙不是你们的产品能力，‘离线可用、本地优先、用户自带模型’才是。**
+
+## 四、你们的核心到底是什么
+
+不是 Roo，不是 Continue，不是 Tabby，不是 LiteLLM。
+
+你们真正的核心是这三层：
+
+### 1）上下文层
+
+把这些揉成一个统一上下文：
+
+* 代码仓库
+* 本地笔记
+* 文档
+* 截图/图片
+* 你自己的 qqq 结构化内容
+* Git 历史
+* 任务记录
+
+这层才是护城河。
+Qoder 官方也一直强调“上下文工程、代码库理解、索引、Repo Wiki”这一类能力，而不是只有补全。([Qoder][8])
+
+### 2）agent 工作流层
+
+也就是“主管家 + 子 agent”的任务编排。
+Roo 的 Orchestrator 只是现成起点；你真正的价值，是把它改造成更懂你产品的工作流，比如：
+
+* 先索引笔记
+* 再查设计文档
+* 再生成 patch
+* 再写变更摘要
+* 再回填到 qqq 里
+
+
+## 六、q 方案产品架构图
+
+```text
+[q-ide / Code-OSS fork]
+ ├─ q-agent        (Roo fork，主管家 + 子任务 agent)
+ ├─ q-chat         (Continue fork，聊天/编辑/apply)
+ ├─ q-next         (Tabby 接入层，补全 / NEXT)
+ ├─ qqq            (你的本地文件/笔记/图文插件)
+ └─ q-ui           (你自己的面板、设置、项目视图)
+
+          │
+          │ local RPC / HTTP / WebSocket
+          ▼
+
+[q-daemon 本地服务层]
+ ├─ q-context      上下文拼装
+ ├─ q-indexer      索引/切块/增量更新
+ ├─ q-memory       SQLite + Qdrant 检索
+ ├─ q-files        本地文件/图片/附件处理
+ ├─ q-git          Git 历史/差异/快照
+ ├─ q-runner       命令执行/沙箱
+ ├─ q-mcp-client   MCP 客户端
+ └─ q-router       模型路由客户端
+
+          │
+          ├──────────────► [Ollama / llama.cpp]      本地模型
+          │
+          ├──────────────► [LiteLLM Proxy]           企业或用户网关
+          │                         │
+          │                         ├─ OpenAI-compatible providers
+          │                         ├─ 企业自建 vLLM
+          │                         └─ 其他可达 provider
+          │
+          └──────────────► [Qdrant]                  向:contentReference[oaicite:17]{index=17}:contentReference[oaicite:18]{index=18}:contentReference[oaicite:9]{index=9}
+- Roo Code 做主 agent；它本身是 Apache-2.0，且有 Orchestrator / Boomerang Tasks。:contentReference[oaicite:10]{index=10}:contentReference[oaicite:19]{index=19}:contentReference[oaicite:11]{index=11}
+- Tabby 做 self-hosted 补全服务；官方明确说它是 self-hosted AI coding assistant、无需 DBMS 或云服务:contentReference[oaicite:12]{index=12}
+- LiteLLM 做统一网关；官方明确支持 100+ LLM API、Proxy、routing、fallback。:contentReference[oaicite:13]{index=13}
+::contentReference[oaicite:21]{index=21}
+turn430687search16
+- Open VSX 做扩展市场；它是 Eclipse 的开源、vendor-neutral 替代市场，也可自由部署更多实例。:contentReference[oaicite:14]{index=14}
+- Qdrant 做向量检索；它是开源向量数据库/检索引擎。:contentReference[oaicite:15]{index=15}
+- MCP 做工具协议；官方把它定义为连接 LLM 应用与外部数据/工具的开放协议。:contentReference[oaicite:16]{index=16}/配额/策略
+ ├─ q-sync            团队知识同步
+ ├─ q-jobs            异步 agent 任务队列
+ ├─ q-openvsx         私有扩展市场
+ └─ q-updater         版本/渠道/灰度更新
+```
+
+这套里，开源部件最关键的是：
+
+* VSCodium/Code-OSS 做底盘；VSCodium 明确是 MIT 二进制并默认处理 telemetry。citeturn171718search1turn171718search3
+* Roo Code 做主 agent；它本身是 Apache-2.0，且有 Orchestrator / Boomerang Tasks。citeturn844930search0turn405433search2
+* Continue 做聊天/编辑基座；其仓库公开为 Apache-2.0，文档里有完整的 model roles。citeturn896983search0turn896983search3turn405433search3
+* Tabby 做 self-hosted 补全服务；官方明确说它是 self-hosted AI coding assistant、无需 DBMS 或云服务，并有 OpenAPI 接口。citeturn430687search1turn430687search5
+* LiteLLM 做统一网关；官方明确支持 100+ LLM API、Proxy、routing、fallback。citeturn430687search4turn430687search8turn430687search16
+* Open VSX 做扩展市场；它是 Eclipse 的开源、vendor-neutral 替代市场，也可自由部署更多实例。citeturn430687search2turn430687search6turn430687search10
+* Qdrant 做向量检索；它是开源向量数据库/检索引擎。citeturn611764search0turn611764search2
+* MCP 做工具协议；官方把它定义为连接 LLM 应用与外部数据/工具的开放协议。citeturn611764search1turn611764search3
+
+## 七、仓库拆分清单
+
+我不建议全塞一个 monorepo。
+**最适合你的是“上游 fork 独立仓库 + 自家核心服务 monorepo”**** citeturn499664search3turn727302search7
+
+### 你要“长期做自己的品牌 IDE 平台”
+
+**看 Theia + Theia AI。**
+但这条不是“VS Code 内核”，而是“IDE 平台级重建”。 citeturn727302search2turn165832search2
+
+---
+
+## 如果换成我给你拍板
+
+我会这么选：
+
+**短期商业化落地：**
+`VSCodium / code-oss → Roo Code → LiteLLM/OpenRouter → 你的扩展`
+
+这套能满足你最在意的 4 个点：
+
+1. VS Code 系基座
+2. 主 agent / 子 agent 逻辑能做
+3. GPT 等主流模型能打通
+4. 你自家功能和扩展能快速塞进去商用  citeturn282275search0turn941854search5turn382514search4turn382514search13
+
+再提醒你一个很现实的坑：
+**“基座开源可商用”不等于“你装进去的每个扩展、每个模型服务、每个市场分发方式都自动可商用”。** 真要卖产品，最后还得把你要捆绑的扩展、模型 API、图标品牌、扩展市场来源逐个过一遍。这个层面尤其是 code-server / OpenVSX / 微软市场兼容问题要提前设计。 citeturn592944search2turn165832search9
+
+你要的话，我下一条可以直接给你出一版：
+
+**“最适合你商用的 AI IDE 基座技术选型图”**
+我会按这 3 套给你画清楚：
+
+* **最快落地版**
+* **最像 Trae/Qoder 版**
+* **长期自研平台版**
+”
 

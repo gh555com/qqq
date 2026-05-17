@@ -1,0 +1,62 @@
+{
+  "name": "qqq-ai",
+  "displayName": "qqq AI",
+  "publisher": "gh555",
+  "version": "0.1.0",
+  "description": "qqq AI Agent — Ask qqq, get things done.",
+  "icon": "res/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "qqqAiView",
+          "title": "qqq AI",
+          "icon": "res/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "qqqAiView": [
+        {
+          "id": "qqq-ai.chatPanel",
+          "name": "Ask qqq",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "qqq-ai.ask",
+        "title": "Ask qqq"
+      },
+      {
+        "command": "qqq-ai.clear",
+        "title": "qqq AI: Clear Conversation"
+      },
+      {
+        "command": "qqq-ai.setToken",
+        "title": "qqq AI: Set Token"
+      },
+      {
+        "command": "qqq-ai.switchPlan",
+        "title": "qqq AI: Switch Model (Flash/Pro)"
+      }
+    ]
+  },
+  "scripts": {
+    "bundle": "node esbuild.config.js",
+    "package": "npm run bundle && npx @vscode/vsce package -o dist/qqq-ai.vsix"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "@vscode/vsce": "^3.6.2"
+  }
+}

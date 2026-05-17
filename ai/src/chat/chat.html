@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: var(--vscode-font-family, system-ui);
+            font-size: var(--vscode-font-size, 13px);
+            color: var(--vscode-foreground);
+            background: var(--vscode-sideBar-background);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #status-bar {
+            padding: 4px 10px;
+            font-size: 10px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .bar-wrap {
+            flex: 1;
+            height: 6px;
+            background: var(--vscode-input-background);
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+        }
+        .bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+        #hp-fill { background: #4ec9b0; width: 0%; }
+        #rage-fill { background: #f14c4c; width: 0%; }
+        .bar-label {
+            font-size: 9px;
+            opacity: 0.7;
+            white-space: nowrap;
+            min-width: 50px;
+        }
+
+        #messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+
+        .msg {
+            margin-bottom: 12px;
+            line-height: 1.5;
+        }
+        .msg-user {
+            background: var(--vscode-input-background);
+            border-radius: 8px;
+            padding: 8px 12px;
+        }
+        .msg-ai {
+            padding: 8px 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .msg-tool {
+            font-size: 11px;
+            opacity: 0.6;
+            padding: 4px 0;
+            font-style: italic;
+        }
+        .msg-error {
+            color: var(--vscode-errorForeground, #f44);
+            padding: 4px 0;
+        }
+
+        #input-area {
+            border-top: 1px solid var(--vscode-panel-border);
+            padding: 8px;
+            display: flex;
+            gap: 6px;
+        }
+
+        #input {
+            flex: 1;
+            background: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border: 1px solid var(--vscode-input-border, transparent);
+            border-radius: 4px;
+            padding: 8px 10px;
+            font-size: 13px;
+            font-family: inherit;
+            resize: none;
+            min-height: 36px;
+            max-height: 120px;
+        }
+        #input:focus { outline: 1px solid var(--vscode-focusBorder); }
+
+        #send-btn {
+            background: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border: none;
+            border-radius: 4px;
+            padding: 0 14px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        #send-btn:hover { background: var(--vscode-button-hoverBackground); }
+        #send-btn:disabled { opacity: 0.5; cursor: default; }
+    </style>
+</head>
+<body>
+    <div id="status-bar">
+        <span class="bar-label" id="hp-label">💡 0%</span>
+        <div class="bar-wrap"><div class="bar-fill" id="hp-fill"></div></div>
+        <span class="bar-label" id="rage-label">🔥 0</span>
+        <div class="bar-wrap"><div class="bar-fill" id="rage-fill"></div></div>
+    </div>
+    <div id="messages"></div>
+    <div id="input-area">
+        <textarea id="input" placeholder="Ask qqq..." rows="1"></textarea>
+        <button id="send-btn">Send</button>
+    </div>
+
+    <script>
+        const vscode = acquireVsCodeApi();
+        const messagesEl = document.getElementById('messages');
+        const inputEl = document.getElementById('input');
+        const sendBtn = document.getElementById('send-btn');
+
+        let isGenerating = false;
+        let currentAiMsg = null;
+        let toolCounter = 0;
+        let toolIndicator = null;
+
+        // 发送消息
+        function send() {
+            const text = inputEl.value.trim();
+            if (!text || isGenerating) return;
+            appendMessage('user', text);
+            vscode.postMessage({ type: 'send', text });
+            inputEl.value = '';
+            inputEl.style.height = 'auto';
+        }
+
+        sendBtn.addEventListener('click', send);
+        inputEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                send();
+            }
+        });
+
+        // 自动调整输入框高度
+        inputEl.addEventListener('input', () => {
+            inputEl.style.height = 'auto';
+            inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+        });
+
+        // 接收来自扩展的消息
+        window.addEventListener('message', (event) => {
+            const msg = event.data;
+            switch (msg.type) {
+                case 'start':
+                    isGenerating = true;
+                    sendBtn.disabled = true;
+                    sendBtn.textContent = '...';
+                    toolCounter = 0;
+                    toolIndicator = null;
+                    currentAiMsg = appendMessage('ai', '');
+                    break;
+
+                case 'token':
+                    if (currentAiMsg) {
+                        currentAiMsg.textContent += msg.content;
+                        scrollToBottom();
+                    }
+                    break;
+
+                case 'tool':
+                    toolCounter++;
+                    if (!toolIndicator) {
+                        toolIndicator = document.createElement('div');
+                        toolIndicator.className = 'msg tool';
+                        toolIndicator.style.cssText = 'font-size:11px;opacity:0.6;padding:2px 8px;';
+                        messagesEl.appendChild(toolIndicator);
+                    }
+                    toolIndicator.textContent = `⚙ thinking... (${toolCounter} tool${toolCounter > 1 ? 's' : ''})`;
+                    scrollToBottom();
+                    break;
+
+                case 'done':
+                    isGenerating = false;
+                    sendBtn.disabled = false;
+                    sendBtn.textContent = 'Send';
+                    currentAiMsg = null;
+                    break;
+
+                case 'error':
+                    appendMessage('error', msg.message);
+                    isGenerating = false;
+                    sendBtn.disabled = false;
+                    sendBtn.textContent = 'Send';
+                    currentAiMsg = null;
+                    break;
+
+                case 'cleared':
+                    messagesEl.innerHTML = '';
+                    break;
+
+                case 'rage':
+                    document.getElementById('rage-fill').style.width = msg.value + '%';
+                    document.getElementById('rage-label').textContent = '🔥 ' + msg.value;
+                    break;
+
+                case 'hp':
+                    document.getElementById('hp-fill').style.width = msg.percent + '%';
+                    document.getElementById('hp-label').textContent = '💡 ' + msg.percent + '%';
+                    // 血条颜色渐变: 绿→黄→红
+                    const hpFill = document.getElementById('hp-fill');
+                    if (msg.percent > 80) hpFill.style.background = '#f14c4c';
+                    else if (msg.percent > 50) hpFill.style.background = '#cca700';
+                    else hpFill.style.background = '#4ec9b0';
+                    break;
+
+                case 'confirm':
+                    {
+                        const box = document.createElement('div');
+                        box.className = 'msg msg-confirm';
+                        box.style.cssText = 'border:1px solid var(--vscode-editorWidget-border,#444);border-radius:4px;padding:8px;margin:4px 0;';
+                        const label = document.createElement('div');
+                        label.textContent = msg.message;
+                        label.style.cssText = 'margin-bottom:6px;font-size:12px;';
+                        box.appendChild(label);
+                        const btnRow = document.createElement('div');
+                        btnRow.style.cssText = 'display:flex;gap:6px;';
+                        for (const action of msg.actions) {
+                            const btn = document.createElement('button');
+                            btn.textContent = action;
+                            btn.style.cssText = 'padding:3px 10px;font-size:11px;cursor:pointer;border:1px solid var(--vscode-button-border,#555);border-radius:3px;background:var(--vscode-button-background,#0e639c);color:var(--vscode-button-foreground,#fff);';
+                            btn.onclick = () => {
+                                vscode.postMessage({ type: 'confirmResponse', id: msg.id, action });
+                                box.remove();
+                            };
+                            btnRow.appendChild(btn);
+                        }
+                        box.appendChild(btnRow);
+                        messagesEl.appendChild(box);
+                        scrollToBottom();
+                    }
+                    break;
+            }
+        });
+
+        function appendMessage(role, text) {
+            const el = document.createElement('div');
+            el.className = `msg msg-${role}`;
+            el.textContent = text;
+            messagesEl.appendChild(el);
+            scrollToBottom();
+            return el;
+        }
+
+        function scrollToBottom() {
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+    </script>
+</body>
+</html>
