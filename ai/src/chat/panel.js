@@ -105,6 +105,9 @@ class ChatPanelProvider {
     }
 
     resolveWebviewView(webviewView) {
+        // P1: 仅首次加载设置 HTML。retainContextWhenHidden 下重新 resolve 时
+        // HTML 仍存活，重置会清空正在流式输出的文本 + 销毁 JS 上下文。
+        const isReconnect = this._view !== null;
         this._view = webviewView;
 
         webviewView.webview.options = {
@@ -112,18 +115,22 @@ class ChatPanelProvider {
             localResourceRoots: [vscode.Uri.file(path.join(this.context.extensionPath, 'src', 'chat'))]
         };
 
-        webviewView.webview.html = this._getHtml(webviewView.webview);
+        if (!isReconnect) {
+            webviewView.webview.html = this._getHtml(webviewView.webview);
+        }
 
         // 处理来自 WebView 的消息
         webviewView.webview.onDidReceiveMessage(async (msg) => {
             this._handleWebviewMessage(msg);
         });
 
-        // 恢复：先发 session list，再恢复当前会话消息
-        setTimeout(() => {
-            this._syncSessionList();
-            this._restoreConversationToUI();
-        }, 300);
+        // 仅首次恢复会话（非重连时 HTML 是新的，需要重建 UI）
+        if (!isReconnect) {
+            setTimeout(() => {
+                this._syncSessionList();
+                this._restoreConversationToUI();
+            }, 300);
+        }
     }
 
     // ═══ 多会话操作 ═══

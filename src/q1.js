@@ -2891,9 +2891,9 @@ async function executeClipboardCommand() {
 
 	const FILE_COUNT_THRESHOLD = 100;
 
-	// ★ html_text 不走 mode='q'：Win 11 上浏览器复制 HTML 常不含 Bitmap，被归类为 whitelist/html_text，
-	//   应走 mode='a'（带 pending 占位符 + 进度条 + 完整事务）以正确处理富文本
-	if (snapshot.type === 'whitelist' && snapshot.subType !== 'html_text') {
+	// ★ html_text 现在走 mode='q'：html_text 已是「无有效媒体的纯文本 HTML」，
+	//   无需下载任何资源，锚点完全多余。mode='q' 内 autoDetectAndPaste 同样能保留富文本格式。
+	if (snapshot.type === 'whitelist') {
 		mode = 'q';
 	} else {
 		if (config === 'half') {
@@ -2909,9 +2909,8 @@ async function executeClipboardCommand() {
 	}
 
 	if (mode === 'q') {
-		// ★ 对于 whitelist/text（纯文本），直接调用原生粘贴（更快，保留空行）
-		// ★ html_text 不再走原生粘贴，因为 Win 11 上浏览器复制 HTML 常不含 Bitmap 格式，
-		//   导致被错误归类为 html_text，应走 autoDetectAndPaste 保留富文本结构
+		// ★ 对于 whitelist/text（纯文本），直接调用原生粘贴（最快，保留空行）
+		// ★ html_text 继续走下面的 autoDetectAndPaste，保留富文本结构（无锚点，无延迟）
 		if (snapshot.type === 'whitelist' && snapshot.subType === 'text') {
 			await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
 			return;

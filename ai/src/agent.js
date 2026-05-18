@@ -39,6 +39,9 @@ CAPABILITIES (what you CAN do):
 - Search files by content (regex) or by name (glob)
 - List directories, view diagnostics, get open files
 - Execute code edits (edit_file) or create new files (create_file)
+- ALWAYS prefer edit_file over search_replace for modifying files — our edit_file has 三级降级匹配 (L1 exact→L2 whitespace-tolerant→L3 line-level) and handles CRLF/LF differences automatically. Qoder's search_replace lacks fallback matching and fails on Windows CRLF files.
+- NEVER use run_command for file editing (no sed/awk/echo redirection to modify files).
+- If edit_file fails (extremely rare after L1→L3 fallback), use a Python one-liner: run_command "python -c \"content = open('path','r',encoding='utf-8').read(); content = content.replace('old','new'); open('path','w',encoding='utf-8').write(content)\"" (escape single quotes as needed).
 - Run terminal commands (run_command)
 - Go to definition, find references, get document symbols (LSP)
 - Analyze images (screenshots, diagrams, UI, code photos) via vision AI
@@ -62,15 +65,36 @@ TOOL STRATEGY (CRITICAL — follow strictly to avoid wasteful loops):
 - STOP searching after 8 tool calls without progress. Synthesize what you have and tell the user what you couldn't find and why.
 - Each tool call costs real money. Be surgical, not exploratory.
 
-TURN SUMMARY (MANDATORY — for billing transparency):
-- At the very end of EVERY response, append on a NEW line: <turn_summary>one-sentence factual summary of what we just did or solved this turn, ≤200 chars</turn_summary>
-- Write the summary in the SAME language the user used (or the system locale).
-- Be concrete: what file/feature/bug, what was done. Examples:
-  * "Fixed null-pointer in agent.js _flushBilling when turnId missing; added guard clause and unit test"
-  * "修复 chat.html 输入框粘贴大段卡顿，改用 requestAnimationFrame 节流合并 token 预估和自动高度"
-- NEVER include passwords, API keys, tokens, credit card numbers, private keys, or any credentials in the summary.
-- The <turn_summary> tag is REQUIRED — even for trivial replies (e.g. greetings → "Greeting exchange").
-- The tag will be hidden from the user; it is consumed only by the billing ledger.`;
+TURN END MARKERS (MANDATORY):
+
+At the end of EVERY response, append these 3 sections in exact order:
+
+[📌] VISIBLE SUMMARY (mandatory, shown to user):
+    Format: a single line starting with "📌 " + one terse sentence summarizing what was done this turn.
+    - Write in user's language. Keep it ≤1 sentence, extremely concise.
+    - Purpose: a checkpoint visible to user AND retained in conversation history so your future turns can see what was just accomplished.
+    - Never wrap this in <turn_summary> — it stays in the chat as plain text.
+    - Examples:
+      * "📌 修复 agent.js _flushBilling turnId 缺失导致的空扣费"
+      * "📌 Deleted gh555/qqq, re-imported from gh555com/qqq with mirror enabled"
+
+[💎] TREASURE (optional, shown to user):
+    Format: a single line starting with "💎 " + key discovery / emerging issue / strategic suggestion.
+    - Throughout the turn, maintain situational awareness: as you work, what changed? what broke? what new opportunity emerged? what should the user know now?
+    - If you genuinely found something valuable → output it here, concisely.
+    - If nothing notable → skip this section entirely. No empty line, no placeholder.
+    - ≤1 sentence, concrete, actionable.
+    - Examples:
+      * "💎 建议验证 gh555/qqq mirror 自动同步是否正常触发"
+      * "💎 浮现 3 个文件仍有 su 命名违规，建议批量修复"
+
+[ ] HIDDEN BILLING TAG (mandatory, NOT visible to user):
+    <turn_summary>one-sentence factual summary, ≤200 chars</turn_summary>
+    - This tag is stripped from UI, consumed only by the billing ledger.
+    - Write in the SAME language the user used.
+    - Be concrete: what file/feature/bug, what was done.
+    - NEVER include passwords, API keys, tokens, credit card numbers, private keys, or any credentials.
+    - REQUIRED — even for trivial replies (e.g. greetings → "Greeting exchange").`;
 
 // 流式 turn_summary 剥离器：从 fullContent 中实时分离 <turn_summary>...</turn_summary>
 // 不让用户看到标签内容，但累积到 stripper.summary 用于 billing 上报
@@ -153,7 +177,8 @@ class Agent {
         this._ctx = {
             facts: [],          // 结构化事实库 [{type, content, turn, relevance_keywords}]
             narrative: '',      // 全局叙事摘要（连贯性）
-            turnSummaries: [],  // 每轮摘要 [{turn, summary}]
+            turnSummaries: [],  // 每轮摘要 [{turn, summary}] — 从 📌 行提取
+            treasures: [],      // 核心财宝 [{turn, content}] — 从 💎 行提取
             totalTurns: 0       // 总轮数
         };
         // 记忆系统
@@ -188,7 +213,7 @@ class Agent {
             this.conversation = saved.conversation;
             this.totalTokens = saved.totalTokens;
             this.currentRage = saved.currentRage;
-            this._ctx = saved.ctx || { facts: [], narrative: '', turnSummaries: [], totalTurns: 0 };
+            this._ctx = saved.ctx || { facts: [], narrative: '', turnSummaries: [], treasures: [], totalTurns: 0 };
             this._log(`memory: restored ${saved.conversation.length} msgs, rage=${saved.currentRage}, facts=${this._ctx.facts.length}, narrative=${this._ctx.narrative.length}c`);
         }
     }
@@ -292,6 +317,37 @@ class Agent {
         this._compressContext();
         // L0: 持久化到磁盘
         if (this.memory) this.memory.saveConversation(this.conversation, this.totalTokens, this.currentRage, this._ctx);
+        // 抽取 📌 回合总结 + 💎 核心财宝 → 结构化持久化
+        if (msg.role === 'assistant' && msg.content) {
+            this._extractTurnMarkers(msg.content);
+        }
+    }
+
+    /**
+     * 从 assistant 消息文本中抽取 📌 回合总结 和 💎 核心财宝
+     * 存入 _ctx.turnSummaries / _ctx.treasures，供 _buildDynamicContext 注入
+     * 这样即使对话被压缩截断，checkpoint 链仍在结构化层存活
+     */
+    _extractTurnMarkers(content) {
+        if (!content) return;
+        // 📌 行格式：“📌 ...”（独立一行）
+        const pinMatch = content.match(/(?:^|\n)📌\s*(.+?)(?:\n|$)/);
+        if (pinMatch) {
+            const summary = pinMatch[1].trim().slice(0, 200);
+            if (summary) {
+                this._ctx.turnSummaries.push({ turn: this._ctx.totalTurns, summary });
+                if (this._ctx.turnSummaries.length > 50) this._ctx.turnSummaries = this._ctx.turnSummaries.slice(-50);
+            }
+        }
+        // 💎 行格式：“💎 ...”（独立一行）
+        const treasureMatch = content.match(/(?:^|\n)💎\s*(.+?)(?:\n|$)/);
+        if (treasureMatch) {
+            const treasure = treasureMatch[1].trim().slice(0, 300);
+            if (treasure) {
+                this._ctx.treasures.push({ turn: this._ctx.totalTurns, content: treasure });
+                if (this._ctx.treasures.length > 30) this._ctx.treasures = this._ctx.treasures.slice(-30);
+            }
+        }
     }
 
     /**
@@ -1139,6 +1195,20 @@ Output ONLY valid JSON:
             ctx += `\n\nRECENT CONTEXT FACTS:\n${factsBlock}`;
         }
 
+        // ━━━ 📌 回合 checkpoint 链（结构化持久化，不受对话截断影响） ━━━
+        if (this._ctx.turnSummaries.length > 0) {
+            const recentSummaries = this._ctx.turnSummaries.slice(-20);
+            const summaryLines = recentSummaries.map(s => `📌 ${s.summary}`).join('\n');
+            ctx += `\n\nTURN CHECKPOINTS (what was accomplished in recent turns):\n${summaryLines}`;
+        }
+
+        // ━━━ 💎 核心财宝（跨轮态势感知） ━━━
+        if (this._ctx.treasures.length > 0) {
+            const recentTreasures = this._ctx.treasures.slice(-15);
+            const treasureLines = recentTreasures.map(t => `💎 ${t.content}`).join('\n');
+            ctx += `\n\nKEY DISCOVERIES (emerging issues / opportunities to watch):\n${treasureLines}`;
+        }
+
         // L1: 注入历史摘要（跨会话）
         if (this.memory) {
             const memorySuffix = this.memory.formatSummariesForPrompt(10);
@@ -1410,7 +1480,11 @@ Rules:
                 if (data === '[DONE]') break;
                 try {
                     const chunk = JSON.parse(data);
-                    if (chunk.type === 'billing') continue;
+                    if (chunk.type === 'billing') {
+                        this._turnCostWge += chunk.ge_cost || 0;
+                        this._lastBillingFreeWindow = !!chunk.free_window;
+                        continue;
+                    }
                     const delta = chunk.choices?.[0]?.delta;
                     if (delta?.content) fullContent += delta.content;
                 } catch (_) {}
@@ -1478,7 +1552,8 @@ Rules:
                     ],
                     stream: true,
                     stream_options: { include_usage: true },
-                    thinking: { type: 'disabled' }
+                    thinking: { type: 'disabled' },
+                    response_format: { type: 'json_object' }
                 })
             });
 
@@ -1505,7 +1580,7 @@ Rules:
         }
         this.conversation = [];
         this.totalTokens = 0;
-        this._ctx = { facts: [], narrative: '', turnSummaries: [], totalTurns: 0 };
+        this._ctx = { facts: [], narrative: '', turnSummaries: [], treasures: [], totalTurns: 0 };
         this._updateRage(0);
         this._updateHp(0);
         if (this.memory) this.memory.clearConversation();
@@ -1525,7 +1600,7 @@ Rules:
             const resp = await fetch(GATEWAY_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ messages: summaryMessages, stream: false, thinking: { type: 'disabled' } })
+                body: JSON.stringify({ messages: summaryMessages, stream: false, thinking: { type: 'disabled' }, turn_id: this._turnId || crypto.randomUUID() })
             });
             if (resp.ok) {
                 const data = await resp.json();

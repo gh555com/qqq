@@ -299,7 +299,9 @@ async function executeTool(name, args) {
 
 function executeReadFile({ path: filePath, start_line, end_line }) {
     try {
-        const content = fs.readFileSync(filePath, 'utf8');
+        let content = fs.readFileSync(filePath, 'utf8');
+        // CRLF→LF 归一化：确保 LLM 始终看到统一换行符，消灭 search/replace 匹配歧义的源头
+        content = content.replace(/\r\n/g, '\n');
         const lines = content.split('\n');
         const total = lines.length;
         const start = Math.max(0, (start_line || 1) - 1);
@@ -337,6 +339,29 @@ function _findMatch(content, find) {
     const idx1 = content.indexOf(find);
     if (idx1 !== -1) {
         return { start: idx1, end: idx1 + find.length, matchLevel: 1 };
+    }
+
+    // L1b: CRLF 归一化重试 — 处理 LLM 用 LF 但文件用 CRLF 的罕见情况
+    // 原理：LLM 可能从记忆重建 find 文本（默认 LF），但 Windows 文件存 CRLF
+    // 归一化后 indexOf 匹配，再通过扫描将归一化偏移映射回原始偏移
+    if (content.includes('\r\n')) {
+        const normContent = content.replace(/\r\n/g, '\n');
+        const normFind = find.replace(/\r\n/g, '\n');
+        if (normContent !== content || normFind !== find) {
+            const idx1b = normContent.indexOf(normFind);
+            if (idx1b !== -1) {
+                // 归一化偏移 → 原始偏移映射
+                let origPos = 0;
+                for (let np = 0; np < idx1b; np++, origPos++) {
+                    if (content[origPos] === '\r' && content[origPos + 1] === '\n') origPos++;
+                }
+                const origStart = origPos;
+                for (let np = idx1b; np < idx1b + normFind.length; np++, origPos++) {
+                    if (content[origPos] === '\r' && content[origPos + 1] === '\n') origPos++;
+                }
+                return { start: origStart, end: origPos, matchLevel: 1 };
+            }
+        }
     }
 
     // L2: 空白归一化匹配
