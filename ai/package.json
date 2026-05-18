@@ -47,6 +47,14 @@
       {
         "command": "qqq-ai.switchPlan",
         "title": "qqq AI: Switch Model (Flash/Pro)"
+      },
+      {
+        "command": "qqq-ai.planAbort",
+        "title": "qqq AI: Abort Plan"
+      },
+      {
+        "command": "qqq-ai.planExecute",
+        "title": "qqq AI: Execute Plan"
       }
     ]
   },

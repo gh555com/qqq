@@ -38,6 +38,105 @@
         }
         #hp-fill { background: #4ec9b0; width: 0%; }
         #rage-fill { background: #f14c4c; width: 0%; }
+
+        /* 底边上下文血条 */
+        #ctx-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            height: 4px;
+            background: #4ec9b0;
+            width: 0%;
+            min-width: 0;
+            z-index: 9998;
+            transition: width 0.3s ease;
+        }
+        #ctx-bar-tooltip {
+            display: none;
+            position: fixed;
+            bottom: 6px;
+            background: rgba(0,0,0,0.85);
+            color: #fff;
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 3px;
+            z-index: 9999;
+            pointer-events: none;
+        }
+        #ctx-bar-hit {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 10px;
+            z-index: 9997;
+            cursor: default;
+        }
+
+        /* Tab 栏 */
+        #tab-bar {
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            overflow-x: auto;
+            scrollbar-width: none;
+            min-height: 26px;
+            flex-shrink: 0;
+        }
+        #tab-bar::-webkit-scrollbar { display: none; }
+        .tab-item {
+            padding: 4px 8px;
+            font-size: 11px;
+            cursor: pointer;
+            white-space: nowrap;
+            border-right: 1px solid var(--vscode-panel-border);
+            opacity: 0.6;
+            position: relative;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex-shrink: 0;
+        }
+        .tab-item:hover { opacity: 0.9; background: var(--vscode-list-hoverBackground); }
+        .tab-item.active { opacity: 1; background: var(--vscode-editor-background); font-weight: bold; }
+        .tab-item .tab-close {
+            display: none;
+            position: absolute;
+            right: 2px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 10px;
+            opacity: 0.6;
+            cursor: pointer;
+            padding: 0 3px;
+            border-radius: 2px;
+        }
+        .tab-item:hover .tab-close { display: inline; }
+        .tab-item .tab-close:hover { opacity: 1; background: rgba(220,50,50,0.7); color: #fff; }
+        #tab-new {
+            padding: 4px 8px;
+            font-size: 13px;
+            cursor: pointer;
+            opacity: 0.5;
+            flex-shrink: 0;
+        }
+        #tab-new:hover { opacity: 1; }
+
+        /* 左上角费用标签 */
+        #cost-label {
+            font-weight: bold;
+            color: var(--vscode-foreground);
+            opacity: 0.9;
+        }
+
+        /* 怒气值 K线图 */
+        #rage-chart {
+            width: 100%;
+            height: 28px;
+            display: block;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            cursor: crosshair;
+        }
         .bar-label {
             font-size: 9px;
             opacity: 0.7;
@@ -45,40 +144,327 @@
             min-width: 50px;
         }
 
+        /* 左侧 ge 进度条容器 */
+        #msg-area {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            position: relative;
+        }
+        #ge-bar-track {
+            width: 6px;
+            min-width: 6px;
+            background: var(--vscode-input-background);
+            position: relative;
+            flex-shrink: 0;
+            cursor: pointer;
+            border-right: 1px solid var(--vscode-panel-border);
+        }
+        #ge-bar-track:hover::after {
+            content: attr(data-tip);
+            position: absolute;
+            left: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: var(--vscode-editorWidget-background);
+            border: 1px solid var(--vscode-editorWidget-border);
+            padding: 2px 6px;
+            font-size: 11px;
+            white-space: nowrap;
+            z-index: 999;
+            border-radius: 3px;
+        }
+        #ge-bar-fill {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: linear-gradient(0deg, #f59e0b, #ef4444);
+            transition: height 0.3s ease;
+            min-height: 2px;
+        }
+        #ge-bar-fill.animating {
+            animation: geBarPulse 2s ease-in-out infinite;
+            transition: none;
+        }
+        @keyframes geBarPulse {
+            0% { height: 0%; }
+            50% { height: 100%; }
+            100% { height: 0%; }
+        }
         #messages {
             flex: 1;
             overflow-y: auto;
             padding: 12px;
+            scrollbar-width: thin;
         }
+        #messages::-webkit-scrollbar { width: 6px; }
+        #messages::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 3px; }
+        #messages::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground); }
 
         .msg {
             margin-bottom: 12px;
             line-height: 1.5;
         }
-        .msg-user {
+        .msg-doer {
             background: var(--vscode-input-background);
             border-radius: 8px;
             padding: 8px 12px;
         }
+        .msg-doer img { max-height: 120px; border-radius: 4px; margin: 4px 4px 0 0; }
+        .msg-img-wrap {
+            display: inline-block;
+            position: relative;
+            vertical-align: top;
+            margin: 4px 6px 0 0;
+        }
+        .msg-img-wrap img { max-height: 120px; border-radius: 4px; margin: 0; }
+        .msg-img-badge {
+            position: absolute;
+            top: 4px;
+            left: 4px;
+            background: rgba(0,0,0,0.75);
+            color: #fff;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            user-select: none;
+            z-index: 1;
+        }
+        .msg-img-badge:hover { background: rgba(78,201,176,0.9); }
         .msg-ai {
             padding: 8px 0;
-            white-space: pre-wrap;
             word-break: break-word;
         }
+        /* Markdown 渲染样式 */
+        .msg-ai h1, .msg-ai h2, .msg-ai h3 { margin: 10px 0 6px; line-height: 1.3; }
+        .msg-ai h1 { font-size: 1.3em; }
+        .msg-ai h2 { font-size: 1.15em; }
+        .msg-ai h3 { font-size: 1.05em; }
+        .msg-ai p { margin: 4px 0; }
+        .msg-ai ul, .msg-ai ol { margin: 4px 0 4px 20px; }
+        .msg-ai li { margin: 2px 0; }
+        .msg-ai code {
+            background: var(--vscode-textCodeBlock-background, rgba(127,127,127,0.15));
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-family: var(--vscode-editor-font-family, monospace);
+            font-size: 0.9em;
+        }
+        .msg-ai pre {
+            background: var(--vscode-textCodeBlock-background, rgba(0,0,0,0.2));
+            padding: 8px 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 6px 0;
+        }
+        .msg-ai pre code { background: none; padding: 0; }
+        .msg-ai blockquote {
+            border-left: 3px solid var(--vscode-textBlockQuote-border, #555);
+            padding-left: 10px;
+            margin: 4px 0;
+            opacity: 0.85;
+        }
+        .msg-ai hr { border: none; border-top: 1px solid var(--vscode-panel-border); margin: 8px 0; }
+        .msg-ai a { color: var(--vscode-textLink-foreground, #3794ff); text-decoration: none; }
+        .msg-ai a:hover { text-decoration: underline; }
+        .msg-ai strong { font-weight: bold; }
+        .msg-ai em { font-style: italic; }
         .msg-tool {
             font-size: 11px;
-            opacity: 0.6;
-            padding: 4px 0;
+            opacity: 0.5;
+            padding: 2px 0;
             font-style: italic;
+            color: var(--vscode-descriptionForeground, #888);
+        }
+        .msg-tool-details {
+            font-size: 11px;
+            margin: 2px 0;
+            opacity: 0.55;
+            border-left: 2px solid var(--vscode-panel-border, #333);
+            padding-left: 8px;
+        }
+        .msg-tool-details summary {
+            cursor: pointer;
+            user-select: none;
+            font-family: var(--vscode-editor-font-family, monospace);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .msg-tool-details summary:hover { opacity: 1; }
+        .msg-tool-details pre {
+            margin: 4px 0 0;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 150px;
+            overflow: auto;
+            font-size: 10px;
+            opacity: 0.8;
         }
         .msg-error {
             color: var(--vscode-errorForeground, #f44);
             padding: 4px 0;
         }
+        .msg-cost {
+            font-size: 10px;
+            opacity: 0.5;
+            margin-top: 4px;
+        }
 
+        /* ═══ Plan Card UI ═══ */
+        .plan-card {
+            border: 1px solid var(--vscode-editorWidget-border, #444);
+            border-radius: 6px;
+            padding: 10px;
+            margin: 8px 0;
+            background: var(--vscode-editor-background);
+        }
+        .plan-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 6px;
+        }
+        .plan-icon { font-size: 16px; }
+        .plan-title { font-weight: 600; font-size: 13px; flex: 1; }
+        .plan-badge {
+            font-size: 9px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            background: var(--vscode-badge-background, #444);
+            color: var(--vscode-badge-foreground, #fff);
+            text-transform: uppercase;
+        }
+        .plan-badge.executing { background: #2d7d46; }
+        .plan-badge.complete { background: #1a7f37; }
+        .plan-badge.failed { background: #c93c37; }
+        .plan-overview {
+            font-size: 11px;
+            opacity: 0.8;
+            margin-bottom: 8px;
+        }
+        .plan-tasks { margin-bottom: 8px; }
+        .plan-task {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 0;
+            font-size: 11px;
+        }
+        .task-icon {
+            width: 14px;
+            text-align: center;
+            font-size: 12px;
+        }
+        .task-active .task-icon { color: #cca700; }
+        .task-done .task-icon { color: #4ec9b0; }
+        .task-failed .task-icon { color: #f14c4c; }
+        .plan-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 4px;
+        }
+        .plan-btn {
+            padding: 4px 12px;
+            font-size: 11px;
+            border-radius: 3px;
+            border: 1px solid var(--vscode-button-border, #555);
+            cursor: pointer;
+            background: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+        }
+        .plan-btn:hover { opacity: 0.8; }
+        .plan-btn-exec { background: #2d7d46; border-color: #2d7d46; }
+        .plan-btn-abort { background: #6c6c6c; }
+        .plan-btn-rollback { background: #c93c37; border-color: #c93c37; }
+        .plan-done-text { font-size: 11px; color: #4ec9b0; }
+        .msg-plan-progress {
+            font-size: 11px;
+            opacity: 0.7;
+            padding: 2px 8px;
+            border-left: 2px solid #2d7d46;
+            margin: 4px 0;
+        }
+
+        /* 输入区域 */
         #input-area {
             border-top: 1px solid var(--vscode-panel-border);
             padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        /* 多图预览条 */
+        #image-strip {
+            display: none;
+            overflow-x: auto;
+            white-space: nowrap;
+            padding: 4px 0;
+            gap: 6px;
+        }
+        #image-strip::-webkit-scrollbar { height: 4px; }
+        #image-strip::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 2px; }
+        .img-thumb-wrap {
+            display: inline-block;
+            position: relative;
+            width: 96px;
+            height: 96px;
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid var(--vscode-panel-border);
+            margin-right: 6px;
+            vertical-align: top;
+        }
+        .img-thumb-wrap img { width: 100%; height: 100%; object-fit: cover; }
+        .img-thumb-num {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            background: rgba(0,0,0,0.75);
+            color: #fff;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            user-select: none;
+            z-index: 2;
+        }
+        .img-thumb-num:hover { background: rgba(78,201,176,0.9); }
+        .img-thumb-del {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            background: rgba(220,50,50,0.85);
+            color: #fff;
+            border: none;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            font-size: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+        }
+        .img-thumb-embed {
+            position: absolute;
+            bottom: 2px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,120,212,0.9);
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            font-size: 9px;
+            padding: 1px 6px;
+            cursor: pointer;
+        }
+        #input-row {
             display: flex;
             gap: 6px;
         }
@@ -109,43 +495,403 @@
         }
         #send-btn:hover { background: var(--vscode-button-hoverBackground); }
         #send-btn:disabled { opacity: 0.5; cursor: default; }
+        #send-btn.stop-mode {
+            background: #c74040;
+            opacity: 1;
+            cursor: pointer;
+        }
+        #send-btn.stop-mode:hover { background: #e04545; }
+
+        /* Lightbox */
+        #lightbox {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.88);
+            z-index: 9999;
+            cursor: grab;
+            overflow: hidden;
+        }
+        #lightbox.active { display: block; }
+        #lightbox.dragging { cursor: grabbing; }
+        #lightbox-img {
+            position: absolute;
+            transform-origin: 0 0;
+            border-radius: 6px;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+        #lightbox-actions {
+            position: fixed;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            z-index: 10001;
+        }
+        #lightbox-actions button {
+            background: rgba(255,255,255,0.15);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 4px;
+            padding: 6px 14px;
+            font-size: 12px;
+            cursor: pointer;
+            backdrop-filter: blur(4px);
+        }
+        #lightbox-actions button:hover { background: rgba(255,255,255,0.3); }
+        #lightbox-zoom {
+            position: fixed;
+            top: 10px;
+            right: 14px;
+            color: rgba(255,255,255,0.6);
+            font-size: 11px;
+            z-index: 10001;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
+    <div id="tab-bar"><span id="tab-new" title="新建会话" onclick="vscode.postMessage({type:'newTab'})">+</span></div>
     <div id="status-bar">
-        <span class="bar-label" id="hp-label">💡 0%</span>
-        <div class="bar-wrap"><div class="bar-fill" id="hp-fill"></div></div>
-        <span class="bar-label" id="rage-label">🔥 0</span>
+        <span class="bar-label" id="cost-label">0 ge</span>
+        <span class="bar-label" id="rage-label">&#128293; 0</span>
         <div class="bar-wrap"><div class="bar-fill" id="rage-fill"></div></div>
     </div>
-    <div id="messages"></div>
-    <div id="input-area">
-        <textarea id="input" placeholder="Ask qqq..." rows="1"></textarea>
-        <button id="send-btn">Send</button>
+    <canvas id="rage-chart" width="400" height="28" title="怒气值变迁"></canvas>
+    <div id="msg-area">
+        <div id="ge-bar-track"><div id="ge-bar-fill"></div></div>
+        <div id="messages"></div>
     </div>
+    <div id="input-area">
+        <div id="image-strip"></div>
+        <div id="input-row">
+            <textarea id="input" placeholder="Ask qqq... (Ctrl+V 粘贴图片)" rows="1"></textarea>
+            <button id="send-btn">Send</button>
+        </div>
+    </div>
+    <!-- Lightbox -->
+    <div id="lightbox">
+        <img id="lightbox-img" src="">
+        <span id="lightbox-zoom">100%</span>
+        <div id="lightbox-actions">
+            <button id="lb-download">&#x1F4BE; 下载</button>
+            <button id="lb-copy">&#x1F4CB; 复制位图</button>
+        </div>
+    </div>
+    <!-- 底边上下文血条 -->
+    <div id="ctx-bar"></div>
+    <div id="ctx-bar-tooltip"></div>
+    <div id="ctx-bar-hit"></div>
 
     <script>
         const vscode = acquireVsCodeApi();
         const messagesEl = document.getElementById('messages');
         const inputEl = document.getElementById('input');
         const sendBtn = document.getElementById('send-btn');
+        const imageStrip = document.getElementById('image-strip');
 
         let isGenerating = false;
         let currentAiMsg = null;
         let toolCounter = 0;
         let toolIndicator = null;
+        let totalCostGe = 0; // 窗口级费用累加
 
-        // 发送消息
-        function send() {
-            const text = inputEl.value.trim();
-            if (!text || isGenerating) return;
-            appendMessage('user', text);
-            vscode.postMessage({ type: 'send', text });
-            inputEl.value = '';
-            inputEl.style.height = 'auto';
+        // ═══════ 轻量 Markdown → HTML ═══════
+        function renderMarkdown(src) {
+            // 安全转义
+            const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            // 提取代码块
+            const codeBlocks = [];
+            let text = src.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+                codeBlocks.push(`<pre><code>${esc(code.replace(/\n$/, ''))}</code></pre>`);
+                return `\x00CB${codeBlocks.length - 1}\x00`;
+            });
+            // 行内代码
+            text = text.replace(/`([^`]+)`/g, (_, c) => `<code>${esc(c)}</code>`);
+            // 按行处理
+            const lines = text.split('\n');
+            const out = [];
+            let inList = false, listType = '';
+            for (let i = 0; i < lines.length; i++) {
+                let line = lines[i];
+                // 代码块占位符
+                if (/^\x00CB(\d+)\x00$/.test(line)) {
+                    if (inList) { out.push(`</${listType}>`); inList = false; }
+                    out.push(codeBlocks[+RegExp.$1]);
+                    continue;
+                }
+                // 标题
+                const hm = line.match(/^(#{1,3})\s+(.+)/);
+                if (hm) {
+                    if (inList) { out.push(`</${listType}>`); inList = false; }
+                    const lv = hm[1].length;
+                    out.push(`<h${lv}>${inline(hm[2])}</h${lv}>`);
+                    continue;
+                }
+                // 分割线
+                if (/^---+$/.test(line.trim())) { if (inList) { out.push(`</${listType}>`); inList = false; } out.push('<hr>'); continue; }
+                // 无序列表
+                const ulm = line.match(/^\s*[-*+]\s+(.+)/);
+                if (ulm) { if (!inList || listType !== 'ul') { if (inList) out.push(`</${listType}>`); out.push('<ul>'); inList = true; listType = 'ul'; } out.push(`<li>${inline(ulm[1])}</li>`); continue; }
+                // 有序列表
+                const olm = line.match(/^\s*\d+\.\s+(.+)/);
+                if (olm) { if (!inList || listType !== 'ol') { if (inList) out.push(`</${listType}>`); out.push('<ol>'); inList = true; listType = 'ol'; } out.push(`<li>${inline(olm[1])}</li>`); continue; }
+                // 引用
+                const bq = line.match(/^>\s?(.*)/);
+                if (bq) { if (inList) { out.push(`</${listType}>`); inList = false; } out.push(`<blockquote>${inline(bq[1])}</blockquote>`); continue; }
+                // 空行 / 普通段落
+                if (inList) { out.push(`</${listType}>`); inList = false; }
+                if (line.trim() === '') { out.push(''); continue; }
+                out.push(`<p>${inline(line)}</p>`);
+            }
+            if (inList) out.push(`</${listType}>`);
+            return out.join('\n');
+        }
+        function inline(s) {
+            // 安全转义（保留已有 html 标签）
+            s = s.replace(/&(?!amp;|lt;|gt;)/g, '&amp;').replace(/<(?!\/?(code|strong|em)>)/g, '&lt;');
+            // 加粗
+            s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            // 斜体
+            s = s.replace(/(?<![*])\*([^*]+)\*(?![*])/g, '<em>$1</em>');
+            // 链接
+            s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+            return s;
         }
 
-        sendBtn.addEventListener('click', send);
+        // ═══════ 左侧 ge 进度条 ═══════
+        const geBarFill = document.getElementById('ge-bar-fill');
+        const geBarTrack = document.getElementById('ge-bar-track');
+        function updateGeBar() {
+            // 非动画状态时，显示小数部分作为进度（0→1 ge 循环）
+            if (!geBarFill.classList.contains('animating')) {
+                const frac = totalCostGe % 1;
+                // 有消耗时至少显示 5% 确保可见
+                const h = totalCostGe > 0 ? Math.max(5, frac * 100) : 0;
+                geBarFill.style.height = h + '%';
+            }
+            geBarTrack.setAttribute('data-tip', totalCostGe.toFixed(4) + ' ge');
+        }
+        function startGeBarAnimation() {
+            geBarFill.classList.add('animating');
+        }
+        function stopGeBarAnimation() {
+            geBarFill.classList.remove('animating');
+            updateGeBar();
+        }
+
+        // 底边血条 hover 显示 tooltip
+        const ctxHit = document.getElementById('ctx-bar-hit');
+        const ctxTooltip = document.getElementById('ctx-bar-tooltip');
+        ctxHit.addEventListener('mouseenter', () => { ctxTooltip.style.display = 'block'; });
+        ctxHit.addEventListener('mouseleave', () => { ctxTooltip.style.display = 'none'; });
+        ctxHit.addEventListener('mousemove', (e) => {
+            ctxTooltip.style.left = e.clientX + 'px';
+        });
+
+        // ═══════ 怒气值 K线图 ═══════
+        const rageHistory = []; // [{value, time}]
+        const rageCanvas = document.getElementById('rage-chart');
+        const rageCtx = rageCanvas.getContext('2d');
+        const MAX_RAGE_POINTS = 50;
+
+        function drawRageChart() {
+            const w = rageCanvas.width = rageCanvas.offsetWidth * (window.devicePixelRatio || 1);
+            const h = rageCanvas.height = 28 * (window.devicePixelRatio || 1);
+            rageCtx.clearRect(0, 0, w, h);
+            if (rageHistory.length < 2) return;
+
+            const padY = 3;
+            const usableH = h - padY * 2;
+            const step = w / (MAX_RAGE_POINTS - 1);
+            const startIdx = Math.max(0, rageHistory.length - MAX_RAGE_POINTS);
+            const points = rageHistory.slice(startIdx);
+
+            // 填充区域
+            rageCtx.beginPath();
+            rageCtx.moveTo(0, h);
+            points.forEach((p, i) => {
+                const x = i * step;
+                const y = padY + usableH * (1 - p.value / 100);
+                if (i === 0) rageCtx.lineTo(x, y);
+                else rageCtx.lineTo(x, y);
+            });
+            rageCtx.lineTo((points.length - 1) * step, h);
+            rageCtx.closePath();
+            rageCtx.fillStyle = 'rgba(241, 76, 76, 0.15)';
+            rageCtx.fill();
+
+            // 折线
+            rageCtx.beginPath();
+            points.forEach((p, i) => {
+                const x = i * step;
+                const y = padY + usableH * (1 - p.value / 100);
+                if (i === 0) rageCtx.moveTo(x, y);
+                else rageCtx.lineTo(x, y);
+            });
+            rageCtx.strokeStyle = '#f14c4c';
+            rageCtx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
+            rageCtx.stroke();
+
+            // 最后一个点的值标注
+            const last = points[points.length - 1];
+            const lx = (points.length - 1) * step;
+            const ly = padY + usableH * (1 - last.value / 100);
+            rageCtx.beginPath();
+            rageCtx.arc(lx, ly, 3 * (window.devicePixelRatio || 1), 0, Math.PI * 2);
+            rageCtx.fillStyle = last.value >= 75 ? '#f14c4c' : last.value >= 50 ? '#cca700' : '#4ec9b0';
+            rageCtx.fill();
+        }
+
+        // ═══════ 多图管理 ═══════
+        let pendingImages = []; // [{id, base64, dataUrl}]
+        const MAX_IMAGES = 20;
+
+        function addImage(dataUrl, base64) {
+            if (pendingImages.length >= MAX_IMAGES) return;
+            const id = pendingImages.length + 1;
+            pendingImages.push({ id, base64, dataUrl });
+            renderImageStrip();
+        }
+
+        function removeImage(idx) {
+            pendingImages.splice(idx, 1);
+            // 重新编号
+            pendingImages.forEach((img, i) => { img.id = i + 1; });
+            renderImageStrip();
+        }
+
+        function renderImageStrip() {
+            imageStrip.innerHTML = '';
+            if (pendingImages.length === 0) {
+                imageStrip.style.display = 'none';
+                return;
+            }
+            imageStrip.style.display = 'flex';
+            pendingImages.forEach((img, idx) => {
+                const wrap = document.createElement('div');
+                wrap.className = 'img-thumb-wrap';
+
+                const imgEl = document.createElement('img');
+                imgEl.src = img.dataUrl;
+                wrap.appendChild(imgEl);
+
+                const num = document.createElement('span');
+                num.className = 'img-thumb-num';
+                num.textContent = '#' + img.id;
+                num.onclick = (e) => { e.stopPropagation(); openLightbox(img.dataUrl, img.base64); };
+                wrap.appendChild(num);
+
+                const del = document.createElement('button');
+                del.className = 'img-thumb-del';
+                del.textContent = '\u00d7';
+                del.onclick = () => removeImage(idx);
+                wrap.appendChild(del);
+
+                const embed = document.createElement('button');
+                embed.className = 'img-thumb-embed';
+                embed.textContent = '\u5d4c\u5165';
+                embed.onclick = () => {
+                    const marker = `[\u56fe#${img.id}]`;
+                    inputEl.value += marker;
+                    inputEl.focus();
+                };
+                wrap.appendChild(embed);
+
+                imageStrip.appendChild(wrap);
+            });
+        }
+
+        // 粘贴图片（> 1MB 自动压缩到 1280px 宽度）
+        inputEl.addEventListener('paste', (e) => {
+            const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+            for (const item of items) {
+                if (item.type.startsWith('image/')) {
+                    e.preventDefault();
+                    const file = item.getAsFile();
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        const dataUrl = ev.target.result;
+                        // 压缩大图片：> 2MB 时缩到 2048px 宽
+                        if (file.size > 2 * 1024 * 1024) {
+                            const img = new Image();
+                            img.onload = () => {
+                                const MAX_W = 2048;
+                                const scale = img.width > MAX_W ? MAX_W / img.width : 1;
+                                const canvas = document.createElement('canvas');
+                                canvas.width = Math.round(img.width * scale);
+                                canvas.height = Math.round(img.height * scale);
+                                canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+                                const compressed = canvas.toDataURL('image/jpeg', 0.85);
+                                addImage(compressed, compressed.split(',')[1]);
+                            };
+                            img.src = dataUrl;
+                        } else {
+                            addImage(dataUrl, dataUrl.split(',')[1]);
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                    break;
+                }
+            }
+        });
+
+        // ═══════ 发送消息 ═══════
+        function send() {
+            const text = inputEl.value.trim();
+            if ((!text && pendingImages.length === 0) || isGenerating) return;
+
+            const displayText = text || '\ud83d\uddbc\ufe0f [\u56fe\u7247]';
+            const msgEl = appendMessage('doer', displayText);
+
+            // 在用户消息中显示缩略图（带可点击角标）
+            if (pendingImages.length > 0) {
+                const imgRow = document.createElement('div');
+                imgRow.style.cssText = 'margin-top:6px;';
+                pendingImages.forEach(img => {
+                    const wrap = document.createElement('span');
+                    wrap.className = 'msg-img-wrap';
+                    const imgEl = document.createElement('img');
+                    imgEl.src = img.dataUrl;
+                    imgEl.dataset.base64 = img.base64;
+                    wrap.appendChild(imgEl);
+                    const badge = document.createElement('span');
+                    badge.className = 'msg-img-badge';
+                    badge.textContent = '#' + img.id;
+                    badge.onclick = () => openLightbox(img.dataUrl, img.base64);
+                    wrap.appendChild(badge);
+                    imgRow.appendChild(wrap);
+                });
+                msgEl.appendChild(imgRow);
+            }
+
+            // 构建消息数据
+            const images = pendingImages.map(img => ({ id: img.id, base64: img.base64 }));
+            vscode.postMessage({ type: 'send', text: text || '', images: images.length > 0 ? images : null });
+
+            // 重置
+            inputEl.value = '';
+            inputEl.style.height = 'auto';
+            pendingImages = [];
+            renderImageStrip();
+        }
+
+        sendBtn.addEventListener('click', () => {
+            if (isGenerating) {
+                // 停止生成
+                vscode.postMessage({ type: 'abort' });
+                isGenerating = false;
+                sendBtn.disabled = false;
+                sendBtn.textContent = 'Send';
+                sendBtn.classList.remove('stop-mode');
+                stopGeBarAnimation();
+                appendMessage('error', '⬛ 已手动停止');
+            } else {
+                send();
+            }
+        });
         inputEl.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -159,22 +905,149 @@
             inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
         });
 
-        // 接收来自扩展的消息
+        // ═══════ 字符级 Undo/Redo（从 q2 Roam 移植） ═══════
+        (function initCharUndo(input) {
+            const state = { history: [input.value || ''], index: 0, lastValue: input.value || '', isProgrammatic: false };
+            input.addEventListener('input', () => {
+                if (state.isProgrammatic) { state.isProgrammatic = false; return; }
+                const v = input.value;
+                if (state.index < state.history.length - 1) state.history = state.history.slice(0, state.index + 1);
+                if (v !== state.lastValue) { state.history.push(v); state.index = state.history.length - 1; state.lastValue = v; }
+            });
+            input.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+                    e.preventDefault(); e.stopPropagation();
+                    if (state.index > 0) { state.index--; state.isProgrammatic = true; input.value = state.history[state.index]; state.lastValue = input.value; input.dispatchEvent(new Event('input', { bubbles: true })); }
+                    return;
+                }
+                if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
+                    e.preventDefault(); e.stopPropagation();
+                    if (state.index < state.history.length - 1) { state.index++; state.isProgrammatic = true; input.value = state.history[state.index]; state.lastValue = input.value; input.dispatchEvent(new Event('input', { bubbles: true })); }
+                    return;
+                }
+            });
+        })(inputEl);
+
+        // ═══════ Lightbox（缩放 / 拖拽 / 双击重置） ═══════
+        const lightbox = document.getElementById('lightbox');
+        const lightboxImg = document.getElementById('lightbox-img');
+        const lbZoomLabel = document.getElementById('lightbox-zoom');
+        let lightboxBase64 = null;
+        let lbScale = 1, lbX = 0, lbY = 0; // transform 状态
+        let lbNatW = 0, lbNatH = 0; // 自然尺寸
+        let lbDrag = false, lbDragStartX = 0, lbDragStartY = 0, lbDragOriginX = 0, lbDragOriginY = 0;
+
+        function lbApply() {
+            lightboxImg.style.transform = `translate(${lbX}px,${lbY}px) scale(${lbScale})`;
+            lbZoomLabel.textContent = Math.round(lbScale * 100) + '%';
+        }
+
+        function lbFitCenter() {
+            const vw = lightbox.clientWidth, vh = lightbox.clientHeight;
+            const pad = 40;
+            const fitScale = Math.min((vw - pad * 2) / lbNatW, (vh - pad * 2) / lbNatH, 1);
+            lbScale = fitScale;
+            lbX = (vw - lbNatW * lbScale) / 2;
+            lbY = (vh - lbNatH * lbScale) / 2;
+            lbApply();
+        }
+
+        function openLightbox(src, base64) {
+            lightboxBase64 = base64 || src.split(',')[1] || null;
+            lightboxImg.onload = () => {
+                lbNatW = lightboxImg.naturalWidth;
+                lbNatH = lightboxImg.naturalHeight;
+                lightboxImg.style.width = lbNatW + 'px';
+                lightboxImg.style.height = lbNatH + 'px';
+                lbFitCenter();
+            };
+            lightboxImg.src = src;
+            lightbox.classList.add('active');
+        }
+
+        function closeLightbox() {
+            lightbox.classList.remove('active');
+            lightbox.classList.remove('dragging');
+            lightboxBase64 = null;
+            lbDrag = false;
+        }
+
+        // 滚轮缩放（以鼠标指针为中心）
+        lightbox.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+            const newScale = Math.min(Math.max(lbScale * factor, 0.05), 30);
+            // 鼠标相对于 lightbox 容器的坐标
+            const mx = e.clientX, my = e.clientY;
+            // 以鼠标位置为锚点缩放
+            lbX = mx - (mx - lbX) * (newScale / lbScale);
+            lbY = my - (my - lbY) * (newScale / lbScale);
+            lbScale = newScale;
+            lbApply();
+        }, { passive: false });
+
+        // 拖拽平移
+        let lbDidDrag = false;
+        lightbox.addEventListener('mousedown', (e) => {
+            if (e.target.tagName === 'BUTTON') return;
+            lbDrag = true;
+            lbDidDrag = false;
+            lbDragStartX = e.clientX; lbDragStartY = e.clientY;
+            lbDragOriginX = lbX; lbDragOriginY = lbY;
+            lightbox.classList.add('dragging');
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (!lbDrag) return;
+            lbX = lbDragOriginX + (e.clientX - lbDragStartX);
+            lbY = lbDragOriginY + (e.clientY - lbDragStartY);
+            if (Math.abs(e.clientX - lbDragStartX) > 3 || Math.abs(e.clientY - lbDragStartY) > 3) lbDidDrag = true;
+            lbApply();
+        });
+        window.addEventListener('mouseup', () => {
+            if (lbDrag) { lbDrag = false; lightbox.classList.remove('dragging'); }
+        });
+
+        // 双击重置居中
+        lightboxImg.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            lbFitCenter();
+        });
+
+        // 点击空白处关闭（拖拽后不关闭）
+        lightbox.addEventListener('click', (e) => {
+            if (lbDidDrag) { lbDidDrag = false; return; }
+            if (e.target === lightbox) closeLightbox();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeLightbox();
+        });
+
+        document.getElementById('lb-download').addEventListener('click', () => {
+            if (lightboxBase64) vscode.postMessage({ type: 'downloadImage', base64: lightboxBase64 });
+        });
+        document.getElementById('lb-copy').addEventListener('click', () => {
+            if (lightboxBase64) vscode.postMessage({ type: 'copyImage', base64: lightboxBase64 });
+        });
+
+        // ═══════ 接收来自扩展的消息 ═══════
         window.addEventListener('message', (event) => {
             const msg = event.data;
             switch (msg.type) {
                 case 'start':
                     isGenerating = true;
-                    sendBtn.disabled = true;
-                    sendBtn.textContent = '...';
+                    sendBtn.disabled = false;
+                    sendBtn.textContent = '■ Stop';
+                    sendBtn.classList.add('stop-mode');
                     toolCounter = 0;
                     toolIndicator = null;
                     currentAiMsg = appendMessage('ai', '');
+                    startGeBarAnimation();
                     break;
 
                 case 'token':
                     if (currentAiMsg) {
-                        currentAiMsg.textContent += msg.content;
+                        currentAiMsg._rawText = (currentAiMsg._rawText || '') + msg.content;
+                        currentAiMsg.innerHTML = renderMarkdown(currentAiMsg._rawText);
                         scrollToBottom();
                     }
                     break;
@@ -183,19 +1056,64 @@
                     toolCounter++;
                     if (!toolIndicator) {
                         toolIndicator = document.createElement('div');
-                        toolIndicator.className = 'msg tool';
-                        toolIndicator.style.cssText = 'font-size:11px;opacity:0.6;padding:2px 8px;';
+                        toolIndicator.className = 'msg msg-tool';
                         messagesEl.appendChild(toolIndicator);
                     }
-                    toolIndicator.textContent = `⚙ thinking... (${toolCounter} tool${toolCounter > 1 ? 's' : ''})`;
+                    // 显示工具名 + 计数
+                    const toolIcon = { read_file: '📄', search_text: '🔍', list_files: '📂', run_command: '▶', edit_file: '✏️', create_file: '📝', analyze_image: '🖼️', lsp_definitions: '🔗', lsp_references: '🔗', fetch_webpage: '🌐' };
+                    const icon = toolIcon[msg.name] || '⚙';
+                    toolIndicator.textContent = `${icon} ${msg.name}` + (toolCounter > 1 ? ` (第${toolCounter}次调用)` : '');
                     scrollToBottom();
+                    break;
+
+                case 'toolResult':
+                    {
+                        // 极简摘要：一行可展开
+                        const summary = _toolSummary(msg.toolName, msg.output);
+                        const details = document.createElement('details');
+                        details.className = 'msg-tool-details';
+                        const sumEl = document.createElement('summary');
+                        sumEl.textContent = summary;
+                        details.appendChild(sumEl);
+                        // 展开后显示截断的原始内容
+                        const pre = document.createElement('pre');
+                        pre.textContent = (msg.output || '').slice(0, 2000);
+                        details.appendChild(pre);
+                        messagesEl.appendChild(details);
+                        scrollToBottom();
+                    }
                     break;
 
                 case 'done':
                     isGenerating = false;
                     sendBtn.disabled = false;
                     sendBtn.textContent = 'Send';
+                    sendBtn.classList.remove('stop-mode');
+                    stopGeBarAnimation();
+                    // 最终渲染 markdown
+                    if (currentAiMsg && currentAiMsg._rawText) {
+                        currentAiMsg.innerHTML = renderMarkdown(currentAiMsg._rawText);
+                    }
                     currentAiMsg = null;
+                    break;
+
+                case 'cost':
+                    // 显示本轮费用标签 + 累加到左上角总费用
+                    {
+                        const costEl = document.createElement('div');
+                        costEl.className = 'msg-cost';
+                        if (msg.estimate === 'free') {
+                            costEl.textContent = '\u514d\u8d39\u65f6\u6bb5 \u2728';
+                        } else {
+                            costEl.textContent = '\u672c\u8f6e\u6d88\u8017: ' + msg.estimate + ' ge';
+                            const val = parseFloat(msg.estimate) || 0;
+                            totalCostGe += val;
+                            document.getElementById('cost-label').textContent = totalCostGe < 0.01 ? totalCostGe.toFixed(4) + ' ge' : totalCostGe.toFixed(2) + ' ge';
+                            updateGeBar();
+                        }
+                        messagesEl.appendChild(costEl);
+                        scrollToBottom();
+                    }
                     break;
 
                 case 'error':
@@ -203,26 +1121,60 @@
                     isGenerating = false;
                     sendBtn.disabled = false;
                     sendBtn.textContent = 'Send';
+                    sendBtn.classList.remove('stop-mode');
+                    stopGeBarAnimation();
                     currentAiMsg = null;
                     break;
 
                 case 'cleared':
                     messagesEl.innerHTML = '';
+                    totalCostGe = 0;
+                    document.getElementById('cost-label').textContent = '0 ge';
+                    updateGeBar();
+                    break;
+
+                case 'sessionList':
+                    _renderTabs(msg.sessions, msg.activeId);
+                    break;
+
+                case 'restoreDoer':
+                    appendMessage('doer', msg.content);
+                    break;
+
+                case 'restoreAssistant':
+                    {
+                        const el = appendMessage('ai', '');
+                        el.innerHTML = renderMarkdown(msg.content);
+                    }
                     break;
 
                 case 'rage':
                     document.getElementById('rage-fill').style.width = msg.value + '%';
-                    document.getElementById('rage-label').textContent = '🔥 ' + msg.value;
+                    document.getElementById('rage-label').textContent = '\ud83d\udd25 ' + msg.value;
+                    break;
+
+                case 'rageDot':
+                    // K线打点：每次 API 调用一个点，rage=thinking tokens 占比
+                    document.getElementById('rage-fill').style.width = msg.rage + '%';
+                    document.getElementById('rage-label').textContent = '\ud83d\udd25 ' + msg.rage;
+                    rageHistory.push({ value: msg.rage, time: Date.now() });
+                    if (rageHistory.length > MAX_RAGE_POINTS * 2) rageHistory.splice(0, rageHistory.length - MAX_RAGE_POINTS);
+                    drawRageChart();
                     break;
 
                 case 'hp':
-                    document.getElementById('hp-fill').style.width = msg.percent + '%';
-                    document.getElementById('hp-label').textContent = '💡 ' + msg.percent + '%';
-                    // 血条颜色渐变: 绿→黄→红
-                    const hpFill = document.getElementById('hp-fill');
-                    if (msg.percent > 80) hpFill.style.background = '#f14c4c';
-                    else if (msg.percent > 50) hpFill.style.background = '#cca700';
-                    else hpFill.style.background = '#4ec9b0';
+                    // 底边上下文血条
+                    {
+                        const ctxBar = document.getElementById('ctx-bar');
+                        // 有使用时至少显示 3% 确保可见
+                        const w = msg.percent > 0 ? Math.max(3, msg.percent) : 0;
+                        ctxBar.style.width = w + '%';
+                        document.getElementById('ctx-bar-tooltip').textContent = msg.percent + '% (~' + Math.round(msg.tokens / 1000) + 'K tokens)';
+                        // 颜色渐变：绿→黄→红
+                        if (msg.percent > 80) ctxBar.style.background = '#f14c4c';
+                        else if (msg.percent > 50) ctxBar.style.background = '#cca700';
+                        else ctxBar.style.background = '#4ec9b0';
+                    }
                     break;
 
                 case 'confirm':
@@ -239,7 +1191,7 @@
                         for (const action of msg.actions) {
                             const btn = document.createElement('button');
                             btn.textContent = action;
-                            btn.style.cssText = 'padding:3px 10px;font-size:11px;cursor:pointer;border:1px solid var(--vscode-button-border,#555);border-radius:3px;background:var(--vscode-button-background,#0e639c);color:var(--vscode-button-foreground,#fff);';
+                            btn.style.cssText = 'padding:3px 10px;font-size:11px;cursor:pointer;border:1px solid var(--vscode-button-border,#555);border-radius:3px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);';
                             btn.onclick = () => {
                                 vscode.postMessage({ type: 'confirmResponse', id: msg.id, action });
                                 box.remove();
@@ -251,6 +1203,179 @@
                         scrollToBottom();
                     }
                     break;
+
+                // ═══ Plan UI ═══
+                case 'planDraft':
+                    {
+                        const planEl = document.createElement('div');
+                        planEl.className = 'msg plan-card';
+                        planEl.id = 'plan-' + msg.plan.id;
+                        planEl.innerHTML = `
+                            <div class="plan-header">
+                                <span class="plan-icon">📋</span>
+                                <span class="plan-title">${msg.plan.title}</span>
+                                <span class="plan-badge">DRAFT</span>
+                            </div>
+                            <div class="plan-overview">${msg.plan.overview}</div>
+                            <div class="plan-tasks">
+                                ${msg.plan.tasks.map(t => `
+                                    <div class="plan-task" data-id="${t.id}" data-status="pending">
+                                        <span class="task-icon">○</span>
+                                        <span class="task-content">${t.content}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <div class="plan-actions">
+                                <button class="plan-btn plan-btn-exec" onclick="vscode.postMessage({type:'planExecute',planId:'${msg.plan.id}'})">\u2589 执行计划</button>
+                                <button class="plan-btn plan-btn-cancel" onclick="this.closest('.plan-card').remove()">取消</button>
+                            </div>
+                        `;
+                        messagesEl.appendChild(planEl);
+                        scrollToBottom();
+                    }
+                    break;
+
+                case 'planExecuting':
+                    {
+                        const card = document.getElementById('plan-' + msg.planId);
+                        if (card) {
+                            const badge = card.querySelector('.plan-badge');
+                            if (badge) { badge.textContent = 'EXECUTING'; badge.className = 'plan-badge executing'; }
+                            const actions = card.querySelector('.plan-actions');
+                            if (actions) actions.innerHTML = `<button class="plan-btn plan-btn-abort" onclick="vscode.postMessage({type:'planAbort'})">⏸ 暂停</button>`;
+                        }
+                    }
+                    break;
+
+                case 'planTaskStart':
+                    {
+                        // 更新 task 状态图标
+                        const taskEls = document.querySelectorAll('.plan-task[data-id="' + msg.taskId + '"]');
+                        taskEls.forEach(el => {
+                            el.dataset.status = 'in_progress';
+                            el.querySelector('.task-icon').textContent = '\u25d4';
+                            el.classList.add('task-active');
+                        });
+                        // 显示进度消息
+                        const progressMsg = document.createElement('div');
+                        progressMsg.className = 'msg msg-plan-progress';
+                        progressMsg.textContent = `▶ Task ${msg.order + 1}: ${msg.content}`;
+                        messagesEl.appendChild(progressMsg);
+                        scrollToBottom();
+                    }
+                    break;
+
+                case 'planTaskComplete':
+                    {
+                        const taskEls = document.querySelectorAll('.plan-task[data-id="' + msg.taskId + '"]');
+                        taskEls.forEach(el => {
+                            el.dataset.status = 'complete';
+                            el.querySelector('.task-icon').textContent = '\u2713';
+                            el.classList.remove('task-active');
+                            el.classList.add('task-done');
+                        });
+                    }
+                    break;
+
+                case 'planTaskFail':
+                    {
+                        const taskEls = document.querySelectorAll('.plan-task[data-id="' + msg.taskId + '"]');
+                        taskEls.forEach(el => {
+                            el.dataset.status = 'failed';
+                            el.querySelector('.task-icon').textContent = '\u2717';
+                            el.classList.remove('task-active');
+                            el.classList.add('task-failed');
+                        });
+                    }
+                    break;
+
+                case 'planProgress':
+                    {
+                        // 更新进度条（如果有）
+                        const progressBar = document.querySelector('.plan-progress-bar');
+                        if (progressBar) {
+                            progressBar.style.width = msg.percent + '%';
+                            progressBar.textContent = `${msg.complete}/${msg.total}`;
+                        }
+                    }
+                    break;
+
+                case 'planComplete':
+                    {
+                        const card = document.getElementById('plan-' + msg.planId);
+                        if (card) {
+                            const badge = card.querySelector('.plan-badge');
+                            if (badge) { badge.textContent = 'COMPLETE \u2713'; badge.className = 'plan-badge complete'; }
+                            const actions = card.querySelector('.plan-actions');
+                            if (actions) actions.innerHTML = '<span class="plan-done-text">\u2728 全部完成</span>';
+                        }
+                        appendMessage('ai', `✅ 计划「${msg.title}」已全部执行完成。`);
+                    }
+                    break;
+
+                case 'planFail':
+                    {
+                        const card = document.getElementById('plan-' + msg.planId);
+                        if (card) {
+                            const badge = card.querySelector('.plan-badge');
+                            if (badge) { badge.textContent = 'FAILED'; badge.className = 'plan-badge failed'; }
+                            const actions = card.querySelector('.plan-actions');
+                            if (actions) actions.innerHTML = `
+                                <button class="plan-btn plan-btn-exec" onclick="vscode.postMessage({type:'planResume',planId:'${msg.planId}'})">\u25b6 继续</button>
+                                <button class="plan-btn plan-btn-rollback" onclick="_showRollbackPicker('${msg.planId}')">↩ 回滚</button>
+                            `;
+                        }
+                    }
+                    break;
+
+                case 'planPaused':
+                    appendMessage('ai', '⏸ 计划已暂停。发送任何消息继续，或点击回滚撤销上一步。');
+                    break;
+
+                case 'planRevised':
+                    {
+                        const actionText = msg.action === 'retry' ? '🔄 正在重试失败步骤' : '📝 计划已自动修订';
+                        appendMessage('ai', `${actionText}：${msg.analysis}`);
+                        // 更新 plan card 的 task 列表
+                        const card = document.getElementById('plan-' + msg.planId);
+                        if (card && msg.tasks) {
+                            const taskList = card.querySelector('.plan-tasks');
+                            if (taskList) {
+                                taskList.innerHTML = msg.tasks.map(t => {
+                                    const icon = t.status === 'complete' ? '✓' : t.status === 'failed' ? '✗' : '○';
+                                    const cls = t.status === 'complete' ? 'complete' : t.status === 'failed' ? 'failed' : '';
+                                    return `<div class="plan-task ${cls}"><span class="plan-task-icon">${icon}</span>${t.content}</div>`;
+                                }).join('');
+                            }
+                            const badge = card.querySelector('.plan-badge');
+                            if (badge) { badge.textContent = 'EXECUTING'; badge.className = 'plan-badge executing'; }
+                        }
+                    }
+                    break;
+
+                case 'planRolledBack':
+                    appendMessage('ai', `↩ 已回滚到 checkpoint (${msg.ref?.slice(0,8) || 'unknown'})。代码已恢复，可重新执行。`);
+                    break;
+
+                case 'planUpdate':
+                    {
+                        // 全量刷新 plan card
+                        const card = document.getElementById('plan-' + msg.plan.id);
+                        if (card) {
+                            const badge = card.querySelector('.plan-badge');
+                            if (badge) badge.textContent = msg.plan.status.toUpperCase();
+                            msg.plan.tasks.forEach(t => {
+                                const el = card.querySelector(`.plan-task[data-id="${t.id}"]`);
+                                if (el) {
+                                    el.dataset.status = t.status;
+                                    const icon = t.status === 'complete' ? '\u2713' : t.status === 'failed' ? '\u2717' : '\u25cb';
+                                    el.querySelector('.task-icon').textContent = icon;
+                                    el.className = 'plan-task' + (t.status === 'complete' ? ' task-done' : t.status === 'failed' ? ' task-failed' : '');
+                                }
+                            });
+                        }
+                    }
+                    break;
             }
         });
 
@@ -259,12 +1384,88 @@
             el.className = `msg msg-${role}`;
             el.textContent = text;
             messagesEl.appendChild(el);
+            // DOM 裁剪：超过 200 个子节点时移除最早的50个
+            if (messagesEl.children.length > 200) {
+                for (let i = 0; i < 50; i++) messagesEl.removeChild(messagesEl.firstChild);
+            }
             scrollToBottom();
             return el;
         }
 
         function scrollToBottom() {
             messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        // ═══ Plan 回滚选择器 ═══
+        function _showRollbackPicker(planId) {
+            // 找到已完成的 tasks 供回滚
+            const card = document.getElementById('plan-' + planId);
+            if (!card) return;
+            const doneTasks = card.querySelectorAll('.plan-task[data-status="complete"]');
+            if (doneTasks.length === 0) {
+                appendMessage('ai', '没有可回滚的 checkpoint。');
+                return;
+            }
+            // 回滚到最后一个完成的 task
+            const lastDone = doneTasks[doneTasks.length - 1];
+            const taskId = lastDone.dataset.id;
+            vscode.postMessage({ type: 'planRollback', planId, taskId });
+        }
+
+        // ═══════ Tab 渲染 ═══════
+        function _renderTabs(sessions, activeId) {
+            const bar = document.getElementById('tab-bar');
+            // 保留 + 按钮
+            bar.innerHTML = '';
+            sessions.forEach(s => {
+                const tab = document.createElement('span');
+                tab.className = 'tab-item' + (s.id === activeId ? ' active' : '');
+                tab.textContent = s.title || '新对话';
+                tab.title = s.title || '新对话';
+                tab.onclick = () => vscode.postMessage({ type: 'switchTab', id: s.id });
+                // 关闭按钮
+                const close = document.createElement('span');
+                close.className = 'tab-close';
+                close.textContent = '\u00d7';
+                close.onclick = (e) => { e.stopPropagation(); vscode.postMessage({ type: 'closeTab', id: s.id }); };
+                tab.appendChild(close);
+                bar.appendChild(tab);
+            });
+            const newBtn = document.createElement('span');
+            newBtn.id = 'tab-new';
+            newBtn.textContent = '+';
+            newBtn.title = '新建会话';
+            newBtn.onclick = () => vscode.postMessage({ type: 'newTab' });
+            bar.appendChild(newBtn);
+        }
+
+        // 工具结果极简摘要生成器
+        function _toolSummary(name, output) {
+            if (!output) return `${name} → (empty)`;
+            const lines = output.split('\n').filter(Boolean);
+            const len = output.length;
+            switch (name) {
+                case 'read_file': {
+                    const m = output.match(/File has (\d+) lines/);
+                    if (m) return `📄 ${m[1]} lines`;
+                    return `📄 ${lines.length} lines, ${len} chars`;
+                }
+                case 'search_text':
+                    if (output === 'No matches found.') return '🔍 0 matches';
+                    return `🔍 ${lines.length} match${lines.length > 1 ? 'es' : ''}`;
+                case 'list_files':
+                    return `📂 ${lines.length} entries`;
+                case 'run_command': {
+                    if (output.startsWith('Command failed')) return `⚠ failed`;
+                    return `▶ ${lines.length} lines output`;
+                }
+                case 'edit_file':
+                    return output.includes('✓') ? '✅ applied' : '❌ failed';
+                case 'analyze_image':
+                    return '🖼️ vision analyzed';
+                default:
+                    return `${name} → ${len > 100 ? len + ' chars' : output.slice(0, 60)}`;
+            }
         }
     </script>
 </body>

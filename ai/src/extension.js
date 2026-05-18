@@ -1,5 +1,6 @@
 const vscode = require('vscode');
 const { ChatPanelProvider } = require('./chat/panel');
+const { setAuthTokenRef } = require('./tools');
 
 // 全局日志输出频道
 let outputChannel;
@@ -41,6 +42,7 @@ function activate(context) {
             });
             if (token) {
                 await context.globalState.update('qqq-ai.authToken', token);
+                setAuthTokenRef(token);
                 vscode.window.showInformationMessage('qqq AI: Token 已保存');
             }
         }),
@@ -53,9 +55,14 @@ function activate(context) {
                 { placeHolder: '选择 AI 模型' }
             );
             if (pick) {
-                chatProvider.agent.setPlan(pick.value);
-                vscode.window.showInformationMessage(`qqq AI: 已切换到 ${pick.label}`);
+                vscode.window.showInformationMessage(`qqq AI: 模型已自动由服务端控制（免费时段自动 Pro+Max）`);
             }
+        }),
+        vscode.commands.registerCommand('qqq-ai.planAbort', () => {
+            chatProvider.abortPlan();
+        }),
+        vscode.commands.registerCommand('qqq-ai.planExecute', () => {
+            chatProvider.executePlan();
         })
     );
 

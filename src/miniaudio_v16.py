@@ -193,6 +193,38 @@ class _MiniaudioCompat:
         return "not ok\n\n--- diagnostics ---\n" + diag
 
 
+def _https_urlopen(url, timeout=30, headers=None):
+    """★ 直接用 http.client 发 GET 请求，绕开 urllib.request 的 opener 机制。
+    解决嵌入式 Python 中 urllib.request 缓存无 HTTPSHandler 导致
+    'unknown url type: https' 的问题。"""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme == 'https':
+        import ssl
+        ctx = ssl.create_default_context()
+        import http.client
+        conn = http.client.HTTPSConnection(
+            parsed.hostname, parsed.port or 443,
+            context=ctx, timeout=timeout,
+        )
+    else:
+        import http.client
+        conn = http.client.HTTPConnection(
+            parsed.hostname, parsed.port or 80,
+            timeout=timeout,
+        )
+    path = parsed.path or '/'
+    if parsed.query:
+        path += '?' + parsed.query
+    hdrs = {'User-Agent': 'qqq-radio/1'}
+    if headers:
+        hdrs.update(headers)
+    conn.request('GET', path, headers=hdrs)
+    resp = conn.getresponse()
+    resp._conn = conn  # prevent GC closing connection
+    return resp
+
+
 class _RadioStreamSource(miniaudio.StreamableSource):
     """流式音频源，作为 miniaudio stream_any 的传入。
     后台线程 HTTP 下载 + 内部缓冲区 + Condition 即时唤醒。"""
@@ -200,14 +232,11 @@ class _RadioStreamSource(miniaudio.StreamableSource):
     BLOCK_SIZE = 16384    # 16KB 每次网络读取，加速初始填充
 
     def __init__(self, url):
-        import urllib.request
         self._buf = bytearray()
         self._cond = threading.Condition()
         self._stop = threading.Event()
         self._eof = False
-        req = urllib.request.Request(url, method='GET')
-        req.add_header('User-Agent', 'qqq-radio/1')
-        self._resp = urllib.request.urlopen(req, timeout=30)
+        self._resp = _https_urlopen(url, timeout=30)
         self._thread = threading.Thread(target=self._download, daemon=True)
         self._thread.start()
 
@@ -2017,7 +2046,6 @@ class NonBlockingAudioEngine:
 
     def _radio_hls_worker(self, m3u8_url, token: PlaybackToken):
         """HLS 电台播放：循环拉取 playlist → 下载新段 → 解码 → 无缝播放"""
-        import urllib.request
         import tempfile
 
         device = None
@@ -2131,12 +2159,13 @@ class NonBlockingAudioEngine:
 
     def _hls_fetch_playlist(self, m3u8_url, base_url):
         """拉取 m3u8 并解析，返回 [(seq, url, duration), ...] 或 None（错误）"""
-        import urllib.request
         try:
-            req = urllib.request.Request(m3u8_url, method='GET')
-            req.add_header('User-Agent', 'qqq-radio/1')
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            resp = _https_urlopen(m3u8_url, timeout=15)
+            try:
                 text = resp.read().decode('utf-8', errors='replace')
+            finally:
+                try: resp.close()
+                except Exception: pass
         except Exception as e:
             self._log_critical(f"【!!】 Radio playlist fetch error: {e}")
             return None
@@ -2184,15 +2213,16 @@ class NonBlockingAudioEngine:
         支持 MP3/FLAC/WAV（miniaudio 原生）+ AAC/fMP4（ffmpeg 兑底）。
         失败返回 None。
         """
-        import urllib.request
         import tempfile
         import subprocess
         tmp_path = None
         try:
-            req = urllib.request.Request(seg_url, method='GET')
-            req.add_header('User-Agent', 'qqq-radio/1')
-            with urllib.request.urlopen(req, timeout=20) as resp:
+            resp = _https_urlopen(seg_url, timeout=20)
+            try:
                 data = resp.read()
+            finally:
+                try: resp.close()
+                except Exception: pass
 
             # 根据 URL 后缀决定临时文件后缀
             ext = '.mp3'

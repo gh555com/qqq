@@ -1,251 +1,39 @@
-[17:22:04] qqq-ai: activating
-[17:22:04] qqq-ai: activated
-[17:22:34] → user: 你好
-[17:22:34] ◆ Phase 1: Planning (Pro+max)...
-[17:22:36]   rage=0 → ⚡ Flash | info_needed=0
-[17:22:36] ◆ Phase 3: Executing (⚡ Flash)...
-[17:22:36] → gateway POST https://gh555.com/api/v3/ai/chat
-[17:22:37] ✓ gateway 200 streaming...
-[17:25:08] → user: 你能识别图片吗？
-[17:25:08] ◆ Phase 1: Planning (Pro+max)...
-[17:25:11]   rage=0 → ⚡ Flash | info_needed=0
-[17:25:11] ◆ Phase 3: Executing (⚡ Flash)...
-[17:25:11] → gateway POST https://gh555.com/api/v3/ai/chat
-[17:25:12] ✓ gateway 200 streaming...
-[17:25:39] → user: 尽可能详细滴介绍一 下你自己？
-[17:25:39] ◆ Phase 1: Planning (Pro+max)...
-[17:25:41]   rage=5 → ⚡ Flash | info_needed=0
-[17:25:41] ◆ Phase 3: Executing (⚡ Flash)...
-[17:25:41] → gateway POST https://gh555.com/api/v3/ai/chat
-[17:25:42] ✓ gateway 200 streaming...
-[17:26:55] → user: 我记得你好像能联网搜索？
-[17:26:55] ◆ Phase 1: Planning (Pro+max)...
-[17:26:59]   rage=10 → ⚡ Flash | info_needed=0
-[17:26:59] ◆ Phase 3: Executing (⚡ Flash)...
-[17:26:59] → gateway POST https://gh555.com/api/v3/ai/chat
-[17:27:01] ✓ gateway 200 streaming...
-
-[2026-05-17T17:22:04.508+08:00][INFO] qqq 扩展激活（中控模式）...
-[2026-05-17T17:22:04.523+08:00][INFO] Q2: 文件管理器已激活（使用 geq().js 四级回退 + size调度/缓存 + 最新 IO 路径逻辑）
-[2026-05-17T17:22:04.523+08:00][INFO] qqq 扩展激活完成
-[2026-05-17T17:22:04.757+08:00][INFO] [PythonCheck] L1 完美命中: e:\s\d\qoder\f\a\User\globalStorage\keeleylednergz.qqq\python_engine\python.exe
-[2026-05-17T17:22:04.894+08:00][INFO] FFmpeg Path: e:\s\d\qoder\f\a\User\globalStorage\keeleylednergz.qqq\ffmpeg.exe
-[2026-05-17T17:22:04.925+08:00][INFO] Integrity: PASSED
-[2026-05-17T17:22:04.925+08:00][INFO] FFmpeg Path: e:\s\d\qoder\f\a\User\globalStorage\keeleylednergz.qqq\ffmpeg.exe
-[2026-05-17T17:22:04.925+08:00][INFO] Q2 Integrity: PASSED
-[2026-05-17T17:22:07.528+08:00][INFO] qqq 延迟初始化开始...
-[2026-05-17T17:22:07.537+08:00][INFO] [wq] Reporter started, initial ping in 66s
-[2026-05-17T17:22:09.541+08:00][INFO] [Broker] Connected successfully
-[2026-05-17T17:22:09.542+08:00][INFO] [Broker] Passive reconnect succeeded (idle window)
-[2026-05-17T17:22:09.542+08:00][INFO] [Q4] 音频源状态已重置
-[2026-05-17T17:22:10.550+08:00][INFO] qqq startDaemons 开始 (6秒延迟)
-[2026-05-17T17:22:10.551+08:00][INFO] [startDaemons] 已有 bridge 活动中 (py=true, rust=null, shell=null)，跳过幽灵进程清理
-[2026-05-17T17:22:10.556+08:00][INFO] ====================================================
-[2026-05-17T17:22:10.556+08:00][INFO] �� Q-ENGINE STARTING | VERSION: 16.5.1 | 2026/5/17 17:22:10
-[2026-05-17T17:22:10.556+08:00][INFO] �� ACTIVE FFmpeg: e:\s\d\qoder\f\a\User\globalStorage\keeleylednergz.qqq\ffmpeg.exe (GLOBAL_STORAGE)
-[2026-05-17T17:22:10.556+08:00][INFO] ====================================================
-[2026-05-17T17:22:10.556+08:00][INFO] 开始启动守护进程，用户选择滴引擎: auto
-[2026-05-17T17:22:10.556+08:00][INFO] [Daemon] User preference: auto, but Rust always starts first
-[2026-05-17T17:22:10.556+08:00][INFO] 启动 Rust bridge...
-[2026-05-17T17:22:10.557+08:00][INFO] Rust Bridge 尝试启动: "e:\s\wol\py\q3\assets\q_win_x64.exe" --daemon
-[2026-05-17T17:22:10.595+08:00][WARN] Rust stderr: Daemon started (multi-threaded). PID=28264
-Watchdog started, monitoring parent PID=16576
-[2026-05-17T17:22:10.676+08:00][INFO] Rust bridge started and handshaked
-[2026-05-17T17:22:10.677+08:00][INFO] Rust Bridge 启动成功
-[2026-05-17T17:22:10.677+08:00][INFO] Rust Bridge OK
-[2026-05-17T17:22:10.844+08:00][INFO] [GhostClean] Killing orphan Rust daemon PID=41408 (parent=16576, live=28264)
-[2026-05-17T17:22:12.403+08:00][INFO] [Watermark] Status changed: removeWatermark=true, refreshing all frames...
-[2026-05-17T17:22:13.787+08:00][WARN] [Audio] Clipboard watcher error: ClipboardWatcher start failed
-[2026-05-17T17:22:15.942+08:00][INFO] qqq dow.js 预热 (w10)
-[2026-05-17T17:23:05.065+08:00][WARN] [ConfigGate] 清除设置失败 roamAsStartPage: ユーザー設定 への書き込み中にエラーが発生しました。 ファイル 'vscode-userdata:/e:/s/d/qoder/f/a/User/settings.json' を書き込むことができません (NoPermissions (FileSystemError): Error: EPERM: operation not permitted, rename 'e:\s\d\qoder\f\a\User\settings.json.vsctmp' -> 'e:\s\d\qoder\f\a\User\settings.json')
-[2026-05-17T17:23:05.067+08:00][WARN] [ConfigGate] 清除设置失败 roamName: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.069+08:00][WARN] [ConfigGate] 清除设置失败 enlargeSmallImages: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.072+08:00][WARN] [ConfigGate] 清除设置失败 performanceMode: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.073+08:00][WARN] [ConfigGate] 清除设置失败 frameSizeMode: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.075+08:00][WARN] [ConfigGate] 清除设置失败 cleanFreak: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.076+08:00][WARN] [ConfigGate] 清除设置失败 ioEngine: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.078+08:00][WARN] [ConfigGate] 清除设置失败 downloadSecurityLevel: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.079+08:00][WARN] [ConfigGate] 清除设置失败 docExportImageResolution: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.080+08:00][WARN] [ConfigGate] 清除设置失败 docExportIncludeCipher: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.082+08:00][WARN] [ConfigGate] 清除设置失败 textSlideColorScheme: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.083+08:00][WARN] [ConfigGate] 清除设置失败 szDisplayMode: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.084+08:00][WARN] [ConfigGate] 清除设置失败 sortBy: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.085+08:00][WARN] [ConfigGate] 清除设置失败 autoWatchChanges: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.086+08:00][WARN] [ConfigGate] 清除设置失败 codelensLevel: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.088+08:00][WARN] [ConfigGate] 清除设置失败 takeOverCodelensStyle: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.089+08:00][WARN] [ConfigGate] 清除设置失败 forceTextFlowScheme: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.091+08:00][WARN] [ConfigGate] 清除设置失败 autoDownload: ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-[2026-05-17T17:23:05.282+08:00][INFO] [wq] Config synced for phone: 8615802858204, Pro mode activated, removeWatermark=true, overwritten=0, keys=[]
-[2026-05-17T17:23:14.080+08:00][INFO] [wq] Ping ok, delta=480s, accepted=11480, server_now=1779009793
-[2026-05-17T17:23:14.080+08:00][INFO] [wq] Next ping scheduled in 899s
-
-shiki.min.js:12 [Shiki] Loaded and attached to window.shiki
-out/:1  Failed to load resource: net::ERR_FILE_NOT_FOUND
- [Intervention] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: vscode-file://vscode-app/e:/s/d/qoder/resources/app/out/media/iconfont.woff?t=1770090885595
-workbench.desktop.main.js:36  INFO [ApplicationConfigService] Syncing privacy policy to config: undefined -> agree
-workbench.desktop.main.js:50862 [Extension Host] STOPPED on first line for debugging on port 53938
-_tryFindDebugPort @ workbench.desktop.main.js:50862
-workbench.desktop.main.js:36  INFO Started local extension host with pid 16576.
-workbench.desktop.main.js:36  WARN Skipping extension /E:/s/d/qoder/f/e/ms-ceintl.vscode-language-pack-zh-hans-1.96.2024121109 in favour of the builtin extension /e:/s/d/qoder/resources/app/extensions/MS-CEINTL.vscode-language-pack-zh-hans.
-warn @ workbench.desktop.main.js:36
-workbench.desktop.main.js:36  WARN Skipping extension /E:/s/d/qoder/f/e/theme-solarized-light in favour of the builtin extension /e:/s/d/qoder/resources/app/extensions/theme-solarized-light.
-warn @ workbench.desktop.main.js:36
-workbench.desktop.main.js:36  INFO 開発の拡張機能を e:\s\wol\py\q3\ai に読み込んでいます
-workbench.desktop.main.js:36  INFO 開発の拡張機能を e:\s\wol\py\q3 に読み込んでいます
-workbench.desktop.main.js:36   ERR Extension 'ms-python.vscode-pylance' wants API proposal 'mcpConfigurationProvider' but that proposal DOES NOT EXIST. Likely, the proposal has been finalized (check 'vscode.d.ts') or was abandoned.
-error @ workbench.desktop.main.js:36
-workbench.desktop.main.js:1503 Overwriting extension <<copilot-instructions.md>> to now point to mime <<text/x-instructions>>
-(anonymous) @ workbench.desktop.main.js:1503
-out/:1  Failed to load resource: net::ERR_FILE_NOT_FOUND
-workbench.desktop.main.js:36  INFO [ErrorMsgService] Loaded 244 error code texts (en)
-workbench.desktop.main.js:36  INFO [DynamicConfigService] Initialized with version: 1.0.3
-workbench.desktop.main.js:36  INFO [AicodingServerRequestService] Service initialized
-workbench.desktop.main.js:36  INFO [AicodingServerRequestService] Server endpoint service initialized
-workbench.desktop.main.js:36  INFO [QoderAuthService] Restored from storage
-workbench.desktop.main.js:36  INFO [ApplicationAuthService] Syncing userInfo after storage restored, userId: 71bb03ec-dfb0-4bed-aafe-8fe014bcb808
-workbench.desktop.main.js:36  INFO [ApplicationAuthService] Syncing userPlan after storage restored
-workbench.desktop.main.js:36  INFO [SpeechRecognitionService] Service initialized
-workbench.desktop.main.js:36  INFO [QoderAuthService] Experts availability: true
-workbench.desktop.main.js:36  INFO [QoderAuthService] Experts availability: true
-workbench.desktop.main.js:50862 Extension Host
-workbench.desktop.main.js:50862 Debugger attached.
-workbench.desktop.main.js:36  INFO [TerminalSandbox] Getting Windows sandbox path from local machine
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/KeeleyLednergz/qqq/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/KeeleyLednergz/qqq/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension KeeleyLednergz.qqq. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/gh555/qqq-ai/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/gh555/qqq-ai/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension gh555.qqq-ai. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.desktop.main.js:36  INFO CustomModelService: Fetched BYOK config, enabled=undefined, providers=0
-workbench.desktop.main.js:36  INFO Profile client is ready
-workbench.desktop.main.js:36  INFO Agent is ready
-workbench.desktop.main.js:36  INFO Remote WebSocket connected, syncing configuration to go client...
-workbench.desktop.main.js:36  INFO Language client is ready
-workbench.desktop.main.js:36  INFO [ApplicationConfigService] Service connection state changed: connected
-workbench.desktop.main.js:36  INFO [QoderAuthService] Received Go connected and user is logged in, trying to sync user info...
-workbench.desktop.main.js:36  INFO [QoderAuthService] Syncing user info to Go, eventType: connected
-workbench.desktop.main.js:36  INFO Successfully synced configuration to client.
-workbench.desktop.main.js:36  INFO Configuration synced to go client after remote WebSocket connected.
-workbench.desktop.main.js:36  INFO Successfully synced configuration to client.
-workbench.desktop.main.js:36  INFO [QoderAuthService] User info synced to Go, eventType: connected, success: true
-workbench.desktop.main.js:36  INFO [QoderAuthService] Cosy login completed, firing onDidChangeCosyLoginStatus(userInfo)
-workbench.desktop.main.js:36  INFO [ApplicationAuthService] Cosy login status changed, userInfo: 71bb03ec-dfb0-4bed-aafe-8fe014bcb808
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/mcnerdius/themeinfo/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/mcnerdius/themeinfo/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension mcnerdius.themeinfo. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/ritwickdey/liveserver/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/ritwickdey/liveserver/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension ritwickdey.liveserver. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-es/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-es/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension ms-ceintl.vscode-language-pack-es. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-fr/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-fr/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension ms-ceintl.vscode-language-pack-fr. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-ja/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-ja/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension ms-ceintl.vscode-language-pack-ja. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/wraith13/background-phi-colors/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/wraith13/background-phi-colors/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension wraith13.background-phi-colors. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-zh-hans/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-zh-hans/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension ms-ceintl.vscode-language-pack-zh-hans. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/hoovercj/vscode-power-mode/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/hoovercj/vscode-power-mode/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension hoovercj.vscode-power-mode. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/gh555/qqq/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/gh555/qqq/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension gh555.qqq. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-ko/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-ko/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension ms-ceintl.vscode-language-pack-ko. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-de/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-de/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension ms-ceintl.vscode-language-pack-de. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/arabic-language/vscode-ar/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/arabic-language/vscode-ar/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension arabic-language.vscode-ar. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-ru/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-ru/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension ms-ceintl.vscode-language-pack-ru. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.html:1 Access to fetch at 'https://marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-pt-br/latest' from origin 'vscode-file://vscode-app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-marketplace.qoder.sh/_apis/public/gallery/vscode/ms-ceintl/vscode-language-pack-pt-br/latest:1  Failed to load resource: net::ERR_FAILED
-workbench.desktop.main.js:36   ERR Error while getting the latest version for the extension ms-ceintl.vscode-language-pack-pt-br. TypeError: Failed to fetch
-error @ workbench.desktop.main.js:36
-workbench.desktop.main.js:36  INFO [perf] Render performance baseline is 34ms
-workbench.desktop.main.js:2991 [Extension Host] [i18n] Using default language (already initialized): 中文 → zh (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:212:30786))
-workbench.desktop.main.js:2991 [Extension Host] [Q2] i18n test: q('q2.ui.pin') = "长驻" (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:212:30786))
-workbench.desktop.main.js:36  INFO Auto updating outdated extensions. ms-ceintl.vscode-language-pack-zh-hans, arabic-language.vscode-ar, ms-ceintl.vscode-language-pack-de, ms-ceintl.vscode-language-pack-es, ms-ceintl.vscode-language-pack-fr, ms-ceintl.vscode-language-pack-ja, ms-ceintl.vscode-language-pack-ko, ms-ceintl.vscode-language-pack-pt-br, ms-ceintl.vscode-language-pack-ru, ritwickdey.liveserver
-workbench.desktop.main.js:2991 [Extension Host] [Q4] QQQ Clipboard History (fusion-final) activating... (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:212:30786))
-workbench.desktop.main.js:2991 [Extension Host] [Q4] QQQ Clipboard History (fusion-final) activated. (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:212:30786))
-workbench.desktop.main.js:36   ERR [Extension Host] (node:16576) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
-(Use `Qoder --trace-deprecation ...` to show where the warning was created)
-error @ workbench.desktop.main.js:36
-workbench.desktop.main.js:2991 [Extension Host] (node:16576) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
-(Use `Qoder --trace-deprecation ...` to show where the warning was created) (at file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:212:30786)
-$Go @ workbench.desktop.main.js:2991
-workbench.desktop.main.js:2991 [Extension Host] [Q4] ★ merge-on-save: recovered 0 pin(s), 380 item(s) from disk (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:212:30786))
-workbench.desktop.main.js:3010 [aicoding.aicoding-agent]Get "https://center.qoder.sh/algo/api/v2/byok/config": read tcp 192.168.0.30:64517->8.212.124.35:443: wsarecv: A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.
-$onExtensionRuntimeError @ workbench.desktop.main.js:3010
-workbench.desktop.main.js:3010 Error: Get "https://center.qoder.sh/algo/api/v2/byok/config": read tcp 192.168.0.30:64517->8.212.124.35:443: wsarecv: A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.
-	at e:\s\d\qoder\resources\app\extensions\aicoding-agent\dist\extension.js:2:5889931
-	at ie (e:\s\d\qoder\resources\app\extensions\aicoding-agent\dist\extension.js:2:5890225)
-	at e:\s\d\qoder\resources\app\extensions\aicoding-agent\dist\extension.js:2:5884995
-	at Immediate.<anonymous> (e:\s\d\qoder\resources\app\extensions\aicoding-agent\dist\extension.js:2:5885015)
-	at process.processImmediate (node:internal/timers:485:21)
-	at process.topLevelDomainCallback (node:domain:161:15)
-	at process.callbackTrampoline (node:internal/async_hooks:128:24)
-$onExtensionRuntimeError @ workbench.desktop.main.js:3010
-workbench.desktop.main.js:36   ERR 不明なエラーが発生しました。ログで詳細を確認してください。
-error @ workbench.desktop.main.js:36
-workbench.desktop.main.js:36   ERR Get "https://center.qoder.sh/algo/api/v2/byok/config": read tcp 192.168.0.30:64517->8.212.124.35:443: wsarecv: A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.: Error: Get "https://center.qoder.sh/algo/api/v2/byok/config": read tcp 192.168.0.30:64517->8.212.124.35:443: wsarecv: A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.
-	at e:\s\d\qoder\resources\app\extensions\aicoding-agent\dist\extension.js:2:5889931
-	at ie (e:\s\d\qoder\resources\app\extensions\aicoding-agent\dist\extension.js:2:5890225)
-	at e:\s\d\qoder\resources\app\extensions\aicoding-agent\dist\extension.js:2:5884995
-	at Immediate.<anonymous> (e:\s\d\qoder\resources\app\extensions\aicoding-agent\dist\extension.js:2:5885015)
-	at process.processImmediate (node:internal/timers:485:21)
-	at process.topLevelDomainCallback (node:domain:161:15)
-	at process.callbackTrampoline (node:internal/async_hooks:128:24)
-error @ workbench.desktop.main.js:36
-workbench.desktop.main.js:36   ERR CustomModelService: Failed to fetch BYOK config Error: Get "https://center.qoder.sh/algo/api/v2/byok/config": read tcp 192.168.0.30:64517->8.212.124.35:443: wsarecv: A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.
-error @ workbench.desktop.main.js:36
-workbench.desktop.main.js:51109 An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
-mountTo @ workbench.desktop.main.js:51109
-workbench.desktop.main.js:36   ERR ファイル 'vscode-userdata:/e:/s/d/qoder/f/a/User/settings.json' を書き込むことができません (NoPermissions (FileSystemError): Error: EPERM: operation not permitted, rename 'e:\s\d\qoder\f\a\User\settings.json.vsctmp' -> 'e:\s\d\qoder\f\a\User\settings.json'): Error: ファイル 'vscode-userdata:/e:/s/d/qoder/f/a/User/settings.json' を書き込むことができません (NoPermissions (FileSystemError): Error: EPERM: operation not permitted, rename 'e:\s\d\qoder\f\a\User\settings.json.vsctmp' -> 'e:\s\d\qoder\f\a\User\settings.json')
-    at Z_r.writeFile (vscode-file://vscode-app/e:/s/d/qoder/resources/app/out/vs/workbench/workbench.desktop.main.js:50810:89749)
-    at async vscode-file://vscode-app/e:/s/d/qoder/resources/app/out/vs/workbench/workbench.desktop.main.js:20360:22877
-error @ workbench.desktop.main.js:36
-workbench.desktop.main.js:36   ERR ファイルの変更が保存されていないため、ユーザー設定を書き込めません。ユーザー設定ファイルを保存してから、もう一度お試しください。
-error @ workbench.desktop.main.js:36
-workbench.desktop.main.js:36   ERR [text file model] handleSaveError(1) - exit - resulted in a save error: Error: ファイル 'vscode-userdata:/e:/s/d/qoder/f/a/User/settings.json' を書き込むことができません (NoPermissions (FileSystemError): Error: EPERM: operation not permitted, rename 'e:\s\d\qoder\f\a\User\settings.json.vsctmp' -> 'e:\s\d\qoder\f\a\User\settings.json') vscode-userdata:/e%3A/s/d/qoder/f/a/User/settings.json
-error @ workbench.desktop.main.js:36
-workbench.desktop.main.js:50807 'settings.json' を保存できませんでした。ファイル 'vscode-userdata:/e:/s/d/qoder/f/a/User/settings.json' を書き込むことができません (NoPermissions (FileSystemError): Error: EPERM: operation not permitted, rename 'e:\s\d\qoder\f\a\User\settings.json.vsctmp' -> 'e:\s\d\qoder\f\a\User\settings.json')
-onDidChangeNotification @ workbench.desktop.main.js:50807
-workbench.desktop.main.js:2991 [Extension Host] [Q4] 触发容量熔断，执行批量清理... (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:212:30786))
-workbench.desktop.main.js:2991 [Extension Host] [Q4] ★ merge-on-save: recovered 0 pin(s), 1000 item(s) from disk (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:212:30786))
-workbench.html:1 Blocked aria-hidden on an element because its descendant retained focus. The focus must not be hidden from assistive technology users. Avoid using aria-hidden on a focused element or its ancestor. Consider using the inert attribute instead, which will also prevent focus. For more details, see the aria-hidden section of the WAI-ARIA specification at https://w3c.github.io/aria/#aria-hidden.
-Element with focus: <textarea.ime-text-area>
-Ancestor with aria-hidden: <textarea.ime-text-area> null
-workbench.desktop.main.js:2991 [Extension Host] [Q4] 触发容量熔断，执行批量清理... (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:212:30786))
-workbench.desktop.main.js:2991 [Extension Host] [Q4] ★ merge-on-save: recovered 0 pin(s), 1000 item(s) from disk (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:212:30786))
-workbench.html:1 Blocked aria-hidden on an element because its descendant retained focus. The focus must not be hidden from assistive technology users. Avoid using aria-hidden on a focused element or its ancestor. Consider using the inert attribute instead, which will also prevent focus. For more details, see the aria-hidden section of the WAI-ARIA specification at https://w3c.github.io/aria/#aria-hidden.
-Element with focus: <textarea.ime-text-area>
-Ancestor with aria-hidden: <textarea.ime-text-area> <textarea class=​"ime-text-area" readonly=​"true" tabindex=​"-1" aria-hidden=​"true">​</textarea>​
-workbench.desktop.main.js:2991 [Extension Host] [Q4] 触发容量熔断，执行批量清理... (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:212:30786))
-workbench.desktop.main.js:2991 [Extension Host] [Q4] ★ merge-on-save: recovered 0 pin(s), 1000 item(s) from disk (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:212:30786))
+[2:51:38] qqq-ai: activating
+[2:51:38] memory: loaded 200 messages
+[2:51:38] memory: restored 200 msgs, rage=3, facts=0, narrative=0c
+[2:51:38] qqq-ai: activated
+[2:51:52] → doer: 之前滴记忆还有吗？ 我们之前聊过些啥？
+[2:51:52] ◆ �� Pro+Max (trivial=false, chat=false)
+[2:51:52] → gateway POST https://gh555.com/api/v3/ai/chat
+[2:51:56] ✓ gateway 200 streaming...
+[2:51:59]   K线打点: rage=0 (wge=0)
+[2:53:22] → doer: E:\s\wol\py\gaea 该项目 有一个  AI 资源监控中心， 也就是对于 qqq i de 我们调用  AI 接口滴时候  遇到了哪些瓶颈 ， 还有
+[2:53:22] ◆ �� Pro+Max (trivial=false, chat=false)
+[2:53:22] → gateway POST https://gh555.com/api/v3/ai/chat
+[2:53:26] ✓ gateway 200 streaming...
+[2:53:28]   K线打点: rage=0 (wge=0)
+[2:53:28] → tool: read_file({"path": "e:\\s\\wol\\py\\gaea\\internal\\http\\ai_observer.go"})
+[2:53:28] ← tool result: package httpx
+import (
+"context"
+"encoding/json"
+"fmt"
+"strconv"
+"time"
+"github.com/redis/go-redis/v9"
+[2:53:28] → gateway POST https://gh555.com/api/v3/ai/chat
+[2:53:32] ✓ gateway 200 streaming...
+[2:53:33]   K线打点: rage=0 (wge=0)
+[2:53:33] → tool: read_file({"path": "e:\\s\\wol\\py\\gaea\\internal\\http\\stats_ai.go"})
+[2:53:33] ← tool result: package httpx
+import (
+"encoding/json"
+"fmt"
+"strconv"
+"time"
+"github.com/gofiber/fiber/v2"
+)
+// ════
+[2:53:33] → gateway POST https://gh555.com/api/v3/ai/chat
+[2:53:36] ✓ gateway 200 streaming...
+[2:53:40]   K线打点: rage=0 (wge=0)
