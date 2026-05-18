@@ -1597,10 +1597,12 @@ Rules:
             ];
             const token = await this._getAuthToken();
             if (!token) return;
+            // 独立 turn_id：不与主轮复用（主轮 billing 已 flush，复用会导致摘要成本孤悬 Redis）
+            const summaryTurnId = crypto.randomUUID();
             const resp = await fetch(GATEWAY_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ messages: summaryMessages, stream: false, thinking: { type: 'disabled' }, turn_id: this._turnId || crypto.randomUUID() })
+                body: JSON.stringify({ messages: summaryMessages, stream: false, thinking: { type: 'disabled' }, turn_id: summaryTurnId })
             });
             if (resp.ok) {
                 const data = await resp.json();
@@ -1610,6 +1612,14 @@ Rules:
                     this._log(`memory: summary generated (${text.length} chars)`);
                 }
             }
+            // flush 摘要的独立计费（服务端 Redis 已按 summaryTurnId 累加成本）
+            const prevTurnId = this._turnId;
+            const prevCost = this._turnCostWge;
+            this._turnId = summaryTurnId;
+            this._turnCostWge = 1; // 哨兵值，绕过 <=0 守卫；服务端以 Redis 实际成本为准
+            this._flushBilling('memory summary', 'en');
+            this._turnId = prevTurnId;
+            this._turnCostWge = prevCost;
         } catch (e) {
             this._log(`memory: summary generation failed — ${e.message}`);
         }
