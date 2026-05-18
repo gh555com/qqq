@@ -1,39 +1,515 @@
-[2:51:38] qqq-ai: activating
-[2:51:38] memory: loaded 200 messages
-[2:51:38] memory: restored 200 msgs, rage=3, facts=0, narrative=0c
-[2:51:38] qqq-ai: activated
-[2:51:52] → doer: 之前滴记忆还有吗？ 我们之前聊过些啥？
-[2:51:52] ◆ �� Pro+Max (trivial=false, chat=false)
-[2:51:52] → gateway POST https://gh555.com/api/v3/ai/chat
-[2:51:56] ✓ gateway 200 streaming...
-[2:51:59]   K线打点: rage=0 (wge=0)
-[2:53:22] → doer: E:\s\wol\py\gaea 该项目 有一个  AI 资源监控中心， 也就是对于 qqq i de 我们调用  AI 接口滴时候  遇到了哪些瓶颈 ， 还有
-[2:53:22] ◆ �� Pro+Max (trivial=false, chat=false)
-[2:53:22] → gateway POST https://gh555.com/api/v3/ai/chat
-[2:53:26] ✓ gateway 200 streaming...
-[2:53:28]   K线打点: rage=0 (wge=0)
-[2:53:28] → tool: read_file({"path": "e:\\s\\wol\\py\\gaea\\internal\\http\\ai_observer.go"})
-[2:53:28] ← tool result: package httpx
-import (
-"context"
-"encoding/json"
-"fmt"
-"strconv"
-"time"
-"github.com/redis/go-redis/v9"
-[2:53:28] → gateway POST https://gh555.com/api/v3/ai/chat
-[2:53:32] ✓ gateway 200 streaming...
-[2:53:33]   K线打点: rage=0 (wge=0)
-[2:53:33] → tool: read_file({"path": "e:\\s\\wol\\py\\gaea\\internal\\http\\stats_ai.go"})
-[2:53:33] ← tool result: package httpx
-import (
-"encoding/json"
-"fmt"
-"strconv"
-"time"
-"github.com/gofiber/fiber/v2"
-)
-// ════
-[2:53:33] → gateway POST https://gh555.com/api/v3/ai/chat
-[2:53:36] ✓ gateway 200 streaming...
-[2:53:40]   K线打点: rage=0 (wge=0)
+
+[2026-05-18 15:37:39][vix-broker][INFO] [Pipe] Send: _id=14, ok=True
+[2026-05-18 15:37:40][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=15
+[2026-05-18 15:37:40][vix-broker][INFO] [Pipe] Send: _id=15, ok=True
+[2026-05-18 15:37:42][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=16
+[2026-05-18 15:37:42][vix-broker][INFO] [Pipe] Send: _id=16, ok=True
+[2026-05-18 15:37:42][vix-broker][INFO] [Pipe] Write failed, closing
+[2026-05-18 15:37:42][vix-broker][INFO] [Pipe] Client loop ended for pipe:<PyHANDLE:764>
+[2026-05-18 15:39:55][vix-broker][INFO] [Accept] Client connected! hPipe=<PyHANDLE:868>
+[2026-05-18 15:39:55][vix-broker][INFO] [Pipe] Client loop started for pipe:<PyHANDLE:868>
+[2026-05-18 15:39:55][vix-broker][INFO] [Accept] Pipe instance created: <PyHANDLE:1520>
+[2026-05-18 15:39:55][vix-broker][INFO] [Pipe] Client disconnected (chunk=None)
+[2026-05-18 15:39:55][vix-broker][INFO] [Pipe] Client loop ended for pipe:<PyHANDLE:868>
+[2026-05-18 15:39:55][vix-broker][INFO] [Accept] Client connected! hPipe=<PyHANDLE:1520>
+[2026-05-18 15:39:55][vix-broker][INFO] [Pipe] Client loop started for pipe:<PyHANDLE:1520>
+[2026-05-18 15:39:55][vix-broker][INFO] [Accept] Pipe instance created: <PyHANDLE:1512>
+[2026-05-18 15:39:55][vix-broker][INFO] [Pipe] Recv: action=hello, _id=1
+[2026-05-18 15:39:55][vix-broker][INFO] [Pipe] Send: _id=1, ok=True
+[2026-05-18 15:39:59][vix-broker][INFO] [Pipe] Recv: action=start_clipboard_watcher, _id=2
+[2026-05-18 15:39:59][vix-broker][INFO] [Pipe] Send: _id=2, ok=True
+[2026-05-18 15:41:17][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=22
+[2026-05-18 15:41:17][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 15:41:17][vix-broker][INFO] [Pipe] Send: _id=22, ok=True
+[2026-05-18 15:42:24][vix-broker][INFO] [Hotkey] Tracking file: [('6364376', {'ts': 1779089860417, 'proc': 'Qoder.exe'})], current=7611778
+[2026-05-18 15:42:24][vix-broker][INFO] [Hotkey] Cleaned up dead hwnds: ['6364376']
+[2026-05-18 15:42:24][vix-broker][INFO] [Hotkey] No alive q2 window to activate
+[2026-05-18 15:42:29][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=27
+[2026-05-18 15:42:29][vix-broker][INFO] [Pipe] Send: _id=27, ok=False
+[2026-05-18 15:42:32][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=28
+[2026-05-18 15:42:32][vix-broker][INFO] [Pipe] Send: _id=28, ok=True
+[2026-05-18 15:42:32][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=29
+[2026-05-18 15:42:32][vix-broker][INFO] [Pipe] Send: _id=29, ok=True
+[2026-05-18 15:42:33][vix-broker][INFO] [Pipe] Recv: action=folder_info, _id=30
+[2026-05-18 15:42:33][vix-broker][INFO] [Pipe] Send: _id=30, ok=True
+[2026-05-18 15:42:43][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=32
+[2026-05-18 15:42:43][vix-broker][INFO] [Pipe] Send: _id=32, ok=True
+[2026-05-18 15:43:58][vix-broker][INFO] [Hotkey] Tracking file: [('5252904', {'ts': 1779090163222, 'proc': 'Qoder.exe'})], current=7611778
+[2026-05-18 15:43:58][vix-broker][INFO] [Hotkey] Activated window hwnd=5252904
+[2026-05-18 15:43:59][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=38
+[2026-05-18 15:43:59][vix-broker][INFO] [Pipe] Send: _id=38, ok=True
+[2026-05-18 15:44:02][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=39
+[2026-05-18 15:44:02][vix-broker][INFO] [Pipe] Send: _id=39, ok=True
+[2026-05-18 15:44:14][vix-broker][INFO] [Pipe] Recv: action=play_sfx, _id=40
+[2026-05-18 15:44:14][vix-broker][INFO] [Pipe] Send: _id=40, ok=True
+[2026-05-18 15:44:14][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=41
+[2026-05-18 15:44:14][vix-broker][INFO] [Pipe] Send: _id=41, ok=True
+[2026-05-18 15:44:16][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=43
+[2026-05-18 15:44:16][vix-broker][INFO] [Pipe] Send: _id=43, ok=True
+[2026-05-18 15:44:35][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=45
+[2026-05-18 15:44:35][vix-broker][INFO] [Pipe] Send: _id=45, ok=False
+[2026-05-18 15:44:37][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=47
+[2026-05-18 15:44:37][vix-broker][INFO] [Pipe] Send: _id=47, ok=True
+[2026-05-18 15:44:37][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=48
+[2026-05-18 15:44:37][vix-broker][INFO] [Pipe] Send: _id=48, ok=True
+[2026-05-18 15:45:03][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=51
+[2026-05-18 15:45:03][vix-broker][INFO] [Pipe] Send: _id=51, ok=True
+[2026-05-18 15:45:05][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=52
+[2026-05-18 15:45:05][vix-broker][INFO] [Pipe] Send: _id=52, ok=True
+[2026-05-18 15:45:19][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=54
+[2026-05-18 15:45:19][vix-broker][INFO] [Pipe] Send: _id=54, ok=True
+[2026-05-18 15:45:49][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=57
+[2026-05-18 15:45:49][vix-broker][INFO] [Pipe] Send: _id=57, ok=True
+[2026-05-18 15:46:05][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=60
+[2026-05-18 15:46:05][vix-broker][INFO] [Pipe] Send: _id=60, ok=True
+[2026-05-18 15:46:14][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=62
+[2026-05-18 15:46:14][vix-broker][INFO] [Pipe] Send: _id=62, ok=False
+[2026-05-18 15:46:17][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=64
+[2026-05-18 15:46:17][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 15:46:17][vix-broker][INFO] [Pipe] Send: _id=64, ok=True
+[2026-05-18 15:51:16][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=79
+[2026-05-18 15:51:16][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 15:51:16][vix-broker][INFO] [Pipe] Send: _id=79, ok=True
+[2026-05-18 15:55:56][vix-broker][INFO] [Hotkey] Tracking file: [('5252904', {'ts': 1779090365136, 'proc': 'Qoder.exe'})], current=7611778
+[2026-05-18 15:55:56][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=95
+[2026-05-18 15:55:56][vix-broker][INFO] [Pipe] Send: _id=95, ok=True
+[2026-05-18 15:55:56][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=96
+[2026-05-18 15:55:56][vix-broker][INFO] [Pipe] Send: _id=96, ok=True
+[2026-05-18 15:55:56][vix-broker][INFO] [Hotkey] Activated window hwnd=5252904
+[2026-05-18 15:56:02][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=98
+[2026-05-18 15:56:02][vix-broker][INFO] [Pipe] Send: _id=98, ok=True
+[2026-05-18 15:56:02][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=99
+[2026-05-18 15:56:02][vix-broker][INFO] [Pipe] Send: _id=99, ok=True
+[2026-05-18 15:56:05][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=100
+[2026-05-18 15:56:05][vix-broker][INFO] [Pipe] Send: _id=100, ok=True
+[2026-05-18 15:56:09][vix-broker][INFO] [Pipe] Recv: action=extract_icon, _id=101
+[2026-05-18 15:56:09][vix-broker][INFO] [Pipe] Send: _id=101, ok=True
+[2026-05-18 15:56:09][vix-broker][INFO] [Pipe] Recv: action=extract_icon, _id=102
+[2026-05-18 15:56:09][vix-broker][INFO] [Pipe] Send: _id=102, ok=True
+[2026-05-18 15:56:19][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=104
+[2026-05-18 15:56:19][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 15:56:19][vix-broker][INFO] [Pipe] Send: _id=104, ok=True
+[2026-05-18 15:56:55][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=107
+[2026-05-18 15:56:55][vix-broker][INFO] [Pipe] Send: _id=107, ok=True
+[2026-05-18 15:56:59][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=110
+[2026-05-18 15:56:59][vix-broker][INFO] [Pipe] Send: _id=110, ok=True
+[2026-05-18 15:57:03][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=111
+[2026-05-18 15:57:03][vix-broker][INFO] [Pipe] Send: _id=111, ok=True
+[2026-05-18 15:59:04][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=122
+[2026-05-18 15:59:04][vix-broker][INFO] [Pipe] Send: _id=122, ok=True
+[2026-05-18 16:01:16][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=130
+[2026-05-18 16:01:16][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 16:01:16][vix-broker][INFO] [Pipe] Send: _id=130, ok=True
+[2026-05-18 16:01:48][vix-broker][INFO] [Hotkey] Tracking file: [('5252904', {'ts': 1779091144745, 'proc': 'Qoder.exe'})], current=7611778
+[2026-05-18 16:01:48][vix-broker][INFO] [Hotkey] Activated window hwnd=5252904
+[2026-05-18 16:01:49][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=133
+[2026-05-18 16:01:49][vix-broker][INFO] [Pipe] Send: _id=133, ok=True
+[2026-05-18 16:01:52][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=134
+[2026-05-18 16:01:52][vix-broker][INFO] [Pipe] Send: _id=134, ok=True
+[2026-05-18 16:01:54][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=135
+[2026-05-18 16:01:54][vix-broker][INFO] [Pipe] Send: _id=135, ok=True
+[2026-05-18 16:01:56][vix-broker][INFO] [Pipe] Recv: action=setFiles, _id=136
+[2026-05-18 16:01:56][vix-broker][INFO] [Pipe] Send: _id=136, ok=True
+[2026-05-18 16:01:56][vix-broker][INFO] [Pipe] Recv: action=setFiles, _id=137
+[2026-05-18 16:01:56][vix-broker][INFO] [Pipe] Send: _id=137, ok=True
+[2026-05-18 16:04:47][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=148
+[2026-05-18 16:04:47][vix-broker][INFO] [Pipe] Send: _id=148, ok=False
+[2026-05-18 16:04:59][vix-broker][INFO] [Hotkey] Tracking file: [('5252904', {'ts': 1779091314184, 'proc': 'Qoder.exe'})], current=7611778
+[2026-05-18 16:04:59][vix-broker][INFO] [Hotkey] Activated window hwnd=5252904
+[2026-05-18 16:04:59][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=151
+[2026-05-18 16:04:59][vix-broker][INFO] [Pipe] Send: _id=151, ok=True
+[2026-05-18 16:06:00][vix-broker][INFO] [Hotkey] Tracking file: [('5252904', {'ts': 1779091499477, 'proc': 'Qoder.exe'})], current=7611778
+[2026-05-18 16:06:01][vix-broker][INFO] [Hotkey] Activated window hwnd=5252904
+[2026-05-18 16:06:01][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=156
+[2026-05-18 16:06:01][vix-broker][INFO] [Pipe] Send: _id=156, ok=False
+[2026-05-18 16:06:06][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=157
+[2026-05-18 16:06:06][vix-broker][INFO] [Pipe] Send: _id=157, ok=True
+[2026-05-18 16:06:18][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=159
+[2026-05-18 16:06:18][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 16:06:18][vix-broker][INFO] [Pipe] Send: _id=159, ok=True
+[2026-05-18 16:06:45][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=162
+[2026-05-18 16:06:45][vix-broker][INFO] [Pipe] Send: _id=162, ok=True
+[2026-05-18 16:06:45][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=163
+[2026-05-18 16:06:45][vix-broker][INFO] [Pipe] Send: _id=163, ok=True
+[2026-05-18 16:06:49][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=164
+[2026-05-18 16:06:49][vix-broker][INFO] [Pipe] Send: _id=164, ok=True
+[2026-05-18 16:06:55][vix-broker][INFO] [Pipe] Recv: action=play_sfx, _id=165
+[2026-05-18 16:06:55][vix-broker][INFO] [Pipe] Send: _id=165, ok=True
+[2026-05-18 16:07:13][vix-broker][INFO] [Pipe] Recv: action=play_sfx, _id=168
+[2026-05-18 16:07:13][vix-broker][INFO] [Pipe] Send: _id=168, ok=True
+[2026-05-18 16:07:20][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=170
+[2026-05-18 16:07:20][vix-broker][INFO] [Pipe] Send: _id=170, ok=True
+[2026-05-18 16:07:35][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=172
+[2026-05-18 16:07:35][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 16:07:35][vix-broker][INFO] [Pipe] Send: _id=172, ok=True
+[2026-05-18 16:11:18][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=185
+[2026-05-18 16:11:18][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 16:11:18][vix-broker][INFO] [Pipe] Send: _id=185, ok=True
+[2026-05-18 16:14:26][vix-broker][INFO] [Hotkey] Tracking file: [('5252904', {'ts': 1779091640195, 'proc': 'Qoder.exe'})], current=7611778
+[2026-05-18 16:14:26][vix-broker][INFO] [Hotkey] Activated window hwnd=5252904
+[2026-05-18 16:14:26][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=196
+[2026-05-18 16:14:26][vix-broker][INFO] [Pipe] Send: _id=196, ok=False
+[2026-05-18 16:14:35][vix-broker][INFO] [Hotkey] Tracking file: [('5252904', {'ts': 1779091640195, 'proc': 'Qoder.exe'})], current=9708358
+[2026-05-18 16:14:35][vix-broker][INFO] [Hotkey] Activated window hwnd=5252904
+[2026-05-18 16:14:35][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=198
+[2026-05-18 16:14:35][vix-broker][INFO] [Pipe] Send: _id=198, ok=True
+[2026-05-18 16:14:45][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=200
+[2026-05-18 16:14:45][vix-broker][INFO] [Pipe] Send: _id=200, ok=True
+[2026-05-18 16:16:19][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=206
+[2026-05-18 16:16:19][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 16:16:19][vix-broker][INFO] [Pipe] Send: _id=206, ok=True
+[2026-05-18 16:21:18][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=222
+[2026-05-18 16:21:18][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 16:21:18][vix-broker][INFO] [Pipe] Send: _id=222, ok=True
+[2026-05-18 16:22:06][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=226
+[2026-05-18 16:22:06][vix-broker][INFO] [Pipe] Send: _id=226, ok=True
+[2026-05-18 16:22:21][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=228
+[2026-05-18 16:22:21][vix-broker][INFO] [Pipe] Send: _id=228, ok=True
+[2026-05-18 16:22:25][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=229
+[2026-05-18 16:22:25][vix-broker][INFO] [Pipe] Send: _id=229, ok=True
+[2026-05-18 16:22:27][vix-broker][INFO] [Pipe] Recv: action=play_sfx, _id=230
+[2026-05-18 16:22:27][vix-broker][INFO] [Pipe] Send: _id=230, ok=True
+[2026-05-18 16:22:32][vix-broker][INFO] [Pipe] Recv: action=play_sfx, _id=231
+[2026-05-18 16:22:32][vix-broker][INFO] [Pipe] Send: _id=231, ok=True
+[2026-05-18 16:22:32][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=232
+[2026-05-18 16:22:32][vix-broker][INFO] [Pipe] Send: _id=232, ok=True
+[2026-05-18 16:22:34][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=233
+[2026-05-18 16:22:34][vix-broker][INFO] [Pipe] Send: _id=233, ok=True
+[2026-05-18 16:22:39][vix-broker][INFO] [Pipe] Recv: action=play_sfx, _id=236
+[2026-05-18 16:22:39][vix-broker][INFO] [Pipe] Send: _id=236, ok=True
+[2026-05-18 16:22:53][vix-broker][INFO] [Pipe] Recv: action=setFiles, _id=237
+[2026-05-18 16:22:53][vix-broker][INFO] [Pipe] Send: _id=237, ok=True
+[2026-05-18 16:22:53][vix-broker][INFO] [Pipe] Recv: action=setFiles, _id=238
+[2026-05-18 16:22:53][vix-broker][INFO] [Pipe] Send: _id=238, ok=True
+[2026-05-18 16:23:10][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=241
+[2026-05-18 16:23:10][vix-broker][INFO] [Pipe] Send: _id=241, ok=True
+[2026-05-18 16:23:12][vix-broker][INFO] [Pipe] Recv: action=play_sfx, _id=242
+[2026-05-18 16:23:12][vix-broker][INFO] [Pipe] Send: _id=242, ok=True
+[2026-05-18 16:23:42][vix-broker][INFO] Endpoint dir ensured: C:\Users\q\AppData\Local\vix_audio_broker
+[2026-05-18 16:23:42][vix-broker][INFO] Token enabled=True
+[2026-05-18 16:23:42][vix-broker][INFO] Trying Named Pipe: \\.\pipe\vix_audio_broker_1001
+[2026-05-18 16:23:42][vix-broker][INFO] Named Pipe created successfully: \\.\pipe\vix_audio_broker_1001
+[2026-05-18 16:23:42][vix-broker][INFO] Endpoint dir ensured: C:\Users\q\AppData\Local\vix_audio_broker
+[2026-05-18 16:23:42][vix-broker][INFO] Endpoint file written: C:\Users\q\AppData\Local\vix_audio_broker\endpoint.json
+[2026-05-18 16:23:42][vix-broker][INFO] Broker started. PID=13024 endpoint={'app_id': 'vix-broker', 'protocol': 1, 'family': 'pipe', 'name': '\\\\.\\pipe\\vix_audio_broker_1001', 'pid': 13024, 'token_enabled': True}
+[2026-05-18 16:23:42][vix-broker][INFO] [Hotkey] Started (Space+Q to restore q2 window)
+[2026-05-18 16:23:42][vix-broker][INFO] Starting pipe accept thread for \\.\pipe\vix_audio_broker_1001
+[2026-05-18 16:23:42][vix-broker][INFO] [Accept] Starting accept loop for \\.\pipe\vix_audio_broker_1001
+[2026-05-18 16:23:42][vix-broker][INFO] Pipe accept thread started: pipe-accept, alive=True
+[2026-05-18 16:23:42][vix-broker][INFO] [Accept] Pipe instance created: <PyHANDLE:732>
+[2026-05-18 16:23:42][vix-broker][INFO] [Accept] Client connected! hPipe=<PyHANDLE:732>
+[2026-05-18 16:23:42][vix-broker][INFO] [Pipe] Client loop started for pipe:<PyHANDLE:732>
+[2026-05-18 16:23:42][vix-broker][INFO] [Accept] Pipe instance created: <PyHANDLE:748>
+[2026-05-18 16:23:42][vix-broker][INFO] [Pipe] Client disconnected (chunk=None)
+[2026-05-18 16:23:42][vix-broker][INFO] [Accept] Client connected! hPipe=<PyHANDLE:748>
+[2026-05-18 16:23:42][vix-broker][INFO] [Pipe] Client loop ended for pipe:<PyHANDLE:732>
+[2026-05-18 16:23:42][vix-broker][INFO] [Pipe] Client loop started for pipe:<PyHANDLE:748>
+[2026-05-18 16:23:42][vix-broker][INFO] [Accept] Pipe instance created: <PyHANDLE:764>
+[2026-05-18 16:23:42][vix-broker][INFO] [Pipe] Recv: action=hello, _id=133
+[2026-05-18 16:23:42][vix-broker][INFO] [Pipe] Send: _id=133, ok=True
+[2026-05-18 16:23:43][vix-broker][INFO] After delay, thread alive=True
+[2026-05-18 16:23:57][vix-broker][INFO] [Accept] Client connected! hPipe=<PyHANDLE:764>
+[2026-05-18 16:23:57][vix-broker][INFO] [Pipe] Client loop started for pipe:<PyHANDLE:764>
+[2026-05-18 16:23:57][vix-broker][INFO] [Accept] Pipe instance created: <PyHANDLE:736>
+[2026-05-18 16:23:57][vix-broker][INFO] [Pipe] Client disconnected (chunk=None)
+[2026-05-18 16:23:57][vix-broker][INFO] [Accept] Client connected! hPipe=<PyHANDLE:736>
+[2026-05-18 16:23:57][vix-broker][INFO] [Pipe] Client loop ended for pipe:<PyHANDLE:764>
+[2026-05-18 16:23:57][vix-broker][INFO] [Pipe] Client loop started for pipe:<PyHANDLE:736>
+[2026-05-18 16:23:57][vix-broker][INFO] [Accept] Pipe instance created: <PyHANDLE:732>
+[2026-05-18 16:23:57][vix-broker][INFO] [Pipe] Recv: action=hello, _id=145
+[2026-05-18 16:23:57][vix-broker][INFO] [Pipe] Send: _id=145, ok=True
+[2026-05-18 16:23:57][vix-broker][INFO] [Accept] Client connected! hPipe=<PyHANDLE:732>
+[2026-05-18 16:23:57][vix-broker][INFO] [Pipe] Client loop started for pipe:<PyHANDLE:732>
+[2026-05-18 16:23:57][vix-broker][INFO] [Accept] Pipe instance created: <PyHANDLE:772>
+[2026-05-18 16:23:57][vix-broker][INFO] [Pipe] Client disconnected (chunk=None)
+[2026-05-18 16:23:57][vix-broker][INFO] [Accept] Client connected! hPipe=<PyHANDLE:772>
+[2026-05-18 16:23:57][vix-broker][INFO] [Pipe] Client loop ended for pipe:<PyHANDLE:732>
+[2026-05-18 16:23:57][vix-broker][INFO] [Pipe] Client loop started for pipe:<PyHANDLE:772>
+[2026-05-18 16:23:57][vix-broker][INFO] [Accept] Pipe instance created: <PyHANDLE:820>
+[2026-05-18 16:23:57][vix-broker][INFO] [Pipe] Recv: action=hello, _id=145
+[2026-05-18 16:23:57][vix-broker][INFO] [Pipe] Send: _id=145, ok=True
+[2026-05-18 16:23:58][vix-broker][INFO] [Accept] Client connected! hPipe=<PyHANDLE:820>
+[2026-05-18 16:23:58][vix-broker][INFO] [Pipe] Client loop started for pipe:<PyHANDLE:820>
+[2026-05-18 16:23:58][vix-broker][INFO] [Accept] Pipe instance created: <PyHANDLE:792>
+[2026-05-18 16:23:58][vix-broker][INFO] [Pipe] Client disconnected (chunk=None)
+[2026-05-18 16:23:58][vix-broker][INFO] [Accept] Client connected! hPipe=<PyHANDLE:792>
+[2026-05-18 16:23:58][vix-broker][INFO] [Pipe] Client loop ended for pipe:<PyHANDLE:820>
+[2026-05-18 16:23:58][vix-broker][INFO] [Pipe] Client loop started for pipe:<PyHANDLE:792>
+[2026-05-18 16:23:58][vix-broker][INFO] [Accept] Pipe instance created: <PyHANDLE:796>
+[2026-05-18 16:23:58][vix-broker][INFO] [Pipe] Recv: action=hello, _id=146
+[2026-05-18 16:23:58][vix-broker][INFO] [Pipe] Send: _id=146, ok=True
+[2026-05-18 16:26:46][vix-broker][INFO] [Hotkey] Tracking file: [('5252904', {'ts': 1779092590047, 'proc': 'Qoder.exe'})], current=7611778
+[2026-05-18 16:26:46][vix-broker][INFO] [Hotkey] Cleaned up dead hwnds: ['5252904']
+[2026-05-18 16:26:46][vix-broker][INFO] [Hotkey] No alive q2 window to activate
+[2026-05-18 16:27:06][vix-broker][INFO] [Accept] Client connected! hPipe=<PyHANDLE:796>
+[2026-05-18 16:27:06][vix-broker][INFO] [Pipe] Client loop started for pipe:<PyHANDLE:796>
+[2026-05-18 16:27:06][vix-broker][INFO] [Accept] Pipe instance created: <PyHANDLE:864>
+[2026-05-18 16:27:06][vix-broker][INFO] [Accept] Client connected! hPipe=<PyHANDLE:864>
+[2026-05-18 16:27:06][vix-broker][INFO] [Pipe] Client loop started for pipe:<PyHANDLE:864>
+[2026-05-18 16:27:06][vix-broker][INFO] [Accept] Pipe instance created: <PyHANDLE:872>
+[2026-05-18 16:27:06][vix-broker][INFO] [Pipe] Recv: action=hello, _id=1
+[2026-05-18 16:27:06][vix-broker][INFO] [Pipe] Send: _id=1, ok=True
+[2026-05-18 16:27:07][vix-broker][INFO] [Pipe] Client disconnected (chunk=None)
+[2026-05-18 16:27:07][vix-broker][INFO] [Pipe] Client loop ended for pipe:<PyHANDLE:796>
+[2026-05-18 16:27:08][vix-broker][INFO] [Pipe] Recv: action=get_audio_state, _id=2
+[2026-05-18 16:27:08][vix-broker][INFO] [Pipe] Send: _id=2, ok=True
+[2026-05-18 16:27:09][vix-broker][INFO] [Pipe] Recv: action=get_audio_state, _id=3
+[2026-05-18 16:27:09][vix-broker][INFO] [Pipe] Send: _id=3, ok=True
+[2026-05-18 16:27:11][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=5
+[2026-05-18 16:27:11][vix-broker][INFO] [Pipe] Send: _id=5, ok=False
+[2026-05-18 16:27:11][vix-broker][INFO] [Pipe] Recv: action=start_clipboard_watcher, _id=6
+[2026-05-18 16:27:11][vix-broker][INFO] [Pipe] Send: _id=6, ok=True
+[2026-05-18 16:27:11][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=7
+[2026-05-18 16:27:11][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 16:27:11][vix-broker][INFO] [Pipe] Send: _id=7, ok=True
+[2026-05-18 16:27:13][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=8
+[2026-05-18 16:27:13][vix-broker][INFO] [Pipe] Send: _id=8, ok=True
+[2026-05-18 16:31:54][vix-broker][INFO] [Hotkey] Tracking file: [('10101242', {'ts': 1779092833147, 'proc': 'Qoder.exe'})], current=7611778
+[2026-05-18 16:31:54][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=24
+[2026-05-18 16:31:54][vix-broker][INFO] [Pipe] Send: _id=24, ok=True
+[2026-05-18 16:31:54][vix-broker][INFO] [Hotkey] Activated window hwnd=10101242
+[2026-05-18 16:32:10][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=26
+[2026-05-18 16:32:10][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 16:32:10][vix-broker][INFO] [Pipe] Send: _id=26, ok=True
+[2026-05-18 16:32:15][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=28
+[2026-05-18 16:32:15][vix-broker][INFO] [Pipe] Send: _id=28, ok=False
+[2026-05-18 16:32:19][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=29
+[2026-05-18 16:32:19][vix-broker][INFO] [Pipe] Send: _id=29, ok=True
+[2026-05-18 16:35:54][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=42
+[2026-05-18 16:35:54][vix-broker][INFO] [Pipe] Send: _id=42, ok=True
+[2026-05-18 16:35:54][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=43
+[2026-05-18 16:35:54][vix-broker][INFO] [Pipe] Send: _id=43, ok=True
+[2026-05-18 16:35:55][vix-broker][INFO] [Pipe] Recv: action=folder_info, _id=44
+[2026-05-18 16:35:55][vix-broker][INFO] [Pipe] Send: _id=44, ok=True
+[2026-05-18 16:36:00][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=46
+[2026-05-18 16:36:00][vix-broker][INFO] [Pipe] Send: _id=46, ok=True
+[2026-05-18 16:36:10][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=48
+[2026-05-18 16:36:10][vix-broker][INFO] [Pipe] Send: _id=48, ok=True
+[2026-05-18 16:36:11][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=49
+[2026-05-18 16:36:11][vix-broker][INFO] [Pipe] Send: _id=49, ok=True
+[2026-05-18 16:36:15][vix-broker][INFO] [Pipe] Recv: action=extract_icon, _id=50
+[2026-05-18 16:36:15][vix-broker][INFO] [Pipe] Send: _id=50, ok=True
+[2026-05-18 16:36:17][vix-broker][INFO] [Pipe] Recv: action=extract_icon, _id=51
+[2026-05-18 16:36:17][vix-broker][INFO] [Pipe] Send: _id=51, ok=True
+[2026-05-18 16:36:17][vix-broker][INFO] [Pipe] Recv: action=extract_icon, _id=52
+[2026-05-18 16:36:17][vix-broker][INFO] [Pipe] Send: _id=52, ok=True
+[2026-05-18 16:36:20][vix-broker][INFO] [Pipe] Recv: action=extract_icon, _id=53
+[2026-05-18 16:36:20][vix-broker][INFO] [Pipe] Send: _id=53, ok=True
+[2026-05-18 16:36:20][vix-broker][INFO] [Pipe] Recv: action=extract_icon, _id=54
+[2026-05-18 16:36:20][vix-broker][INFO] [Pipe] Send: _id=54, ok=True
+[2026-05-18 16:36:20][vix-broker][INFO] [Pipe] Recv: action=extract_icon, _id=55
+[2026-05-18 16:36:20][vix-broker][INFO] [Pipe] Send: _id=55, ok=True
+[2026-05-18 16:36:53][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=59
+[2026-05-18 16:36:53][vix-broker][INFO] [Pipe] Send: _id=59, ok=True
+[2026-05-18 16:37:11][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=61
+[2026-05-18 16:37:11][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 16:37:11][vix-broker][INFO] [Pipe] Send: _id=61, ok=True
+[2026-05-18 16:42:11][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=77
+[2026-05-18 16:42:11][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 16:42:11][vix-broker][INFO] [Pipe] Send: _id=77, ok=True
+[2026-05-18 16:47:11][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=93
+[2026-05-18 16:47:11][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 16:47:11][vix-broker][INFO] [Pipe] Send: _id=93, ok=True
+[2026-05-18 16:52:12][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=109
+[2026-05-18 16:52:12][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 16:52:12][vix-broker][INFO] [Pipe] Send: _id=109, ok=True
+[2026-05-18 16:57:11][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=125
+[2026-05-18 16:57:11][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 16:57:11][vix-broker][INFO] [Pipe] Send: _id=125, ok=True
+[2026-05-18 17:02:10][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=141
+[2026-05-18 17:02:10][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 17:02:10][vix-broker][INFO] [Pipe] Send: _id=141, ok=True
+[2026-05-18 17:07:10][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=157
+[2026-05-18 17:07:10][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 17:07:10][vix-broker][INFO] [Pipe] Send: _id=157, ok=True
+[2026-05-18 17:12:12][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=173
+[2026-05-18 17:12:12][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 17:12:12][vix-broker][INFO] [Pipe] Send: _id=173, ok=True
+[2026-05-18 17:17:13][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=189
+[2026-05-18 17:17:13][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 17:17:13][vix-broker][INFO] [Pipe] Send: _id=189, ok=True
+[2026-05-18 17:22:11][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=205
+[2026-05-18 17:22:11][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 17:22:11][vix-broker][INFO] [Pipe] Send: _id=205, ok=True
+[2026-05-18 17:27:10][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=221
+[2026-05-18 17:27:10][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 17:27:10][vix-broker][INFO] [Pipe] Send: _id=221, ok=True
+[2026-05-18 17:32:12][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=237
+[2026-05-18 17:32:12][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 17:32:12][vix-broker][INFO] [Pipe] Send: _id=237, ok=True
+[2026-05-18 17:32:34][vix-broker][INFO] [Hotkey] Tracking file: [('10101242', {'ts': 1779093413205, 'proc': 'Qoder.exe'})], current=7611778
+[2026-05-18 17:32:34][vix-broker][INFO] [Hotkey] Activated window hwnd=10101242
+[2026-05-18 17:32:34][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=240
+[2026-05-18 17:32:34][vix-broker][INFO] [Pipe] Send: _id=240, ok=True
+[2026-05-18 17:33:13][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=244
+[2026-05-18 17:33:13][vix-broker][INFO] [Pipe] Send: _id=244, ok=True
+[2026-05-18 17:33:23][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=245
+[2026-05-18 17:33:23][vix-broker][INFO] [Pipe] Send: _id=245, ok=True
+[2026-05-18 17:33:23][vix-broker][INFO] [Pipe] Recv: action=check_audio_engine, _id=247
+[2026-05-18 17:33:23][vix-broker][INFO] [Pipe] Send: _id=247, ok=True
+[2026-05-18 17:33:24][vix-broker][INFO] [Pipe] Recv: action=stop_audio, _id=248
+[2026-05-18 17:33:24][vix-broker][INFO] [Pipe] Send: _id=248, ok=True
+[2026-05-18 17:33:24][vix-broker][INFO] [Pipe] Recv: action=play_audio, _id=249
+[2026-05-18 17:33:24][vix-broker][INFO] [Audio] play_audio: file=3.mp3, count=0
+[2026-05-18 17:33:24][vix-broker][INFO] [Audio] Radio is live, switching to stream: https://gh555.com/radio/stream
+[2026-05-18 17:33:24][vix-broker][INFO] [Pipe] Send: _id=249, ok=True
+[2026-05-18 17:33:26][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=250
+[2026-05-18 17:33:26][vix-broker][INFO] [Radio] status updated: live=True, stream=https://gh555.com/radio/stream, m3u8=https://gh555.com/radio/live.m3u8
+[2026-05-18 17:33:26][vix-broker][INFO] [Pipe] Send: _id=250, ok=True
+[2026-05-18 17:33:27][vix-broker][INFO] [Hotkey] Tracking file: [('10101242', {'ts': 1779096803545, 'proc': 'Qoder.exe'})], current=7611778
+[2026-05-18 17:33:28][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=252
+[2026-05-18 17:33:28][vix-broker][INFO] [Pipe] Send: _id=252, ok=True
+[2026-05-18 17:33:28][vix-broker][INFO] [Hotkey] Activated window hwnd=10101242
+[2026-05-18 17:33:31][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=254
+[2026-05-18 17:33:31][vix-broker][INFO] [Pipe] Send: _id=254, ok=True
+[2026-05-18 17:34:05][vix-broker][INFO] [Hotkey] Tracking file: [('10101242', {'ts': 1779096811889, 'proc': 'Qoder.exe'})], current=7611778
+[2026-05-18 17:34:05][vix-broker][INFO] [Hotkey] Activated window hwnd=10101242
+[2026-05-18 17:34:05][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=257
+[2026-05-18 17:34:05][vix-broker][INFO] [Pipe] Send: _id=257, ok=True
+[2026-05-18 17:34:08][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=259
+[2026-05-18 17:34:08][vix-broker][INFO] [Pipe] Send: _id=259, ok=True
+[2026-05-18 17:34:17][vix-broker][INFO] [Pipe] Recv: action=play_sfx, _id=260
+[2026-05-18 17:34:17][vix-broker][INFO] [Pipe] Send: _id=260, ok=True
+[2026-05-18 17:35:57][vix-broker][INFO] [Hotkey] Tracking file: [('10101242', {'ts': 1779096848628, 'proc': 'Qoder.exe'})], current=7611778
+[2026-05-18 17:35:57][vix-broker][INFO] [Hotkey] Activated window hwnd=10101242
+[2026-05-18 17:35:57][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=267
+[2026-05-18 17:35:57][vix-broker][INFO] [Pipe] Send: _id=267, ok=True
+[2026-05-18 17:36:05][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=268
+[2026-05-18 17:36:05][vix-broker][INFO] [Pipe] Send: _id=268, ok=True
+[2026-05-18 17:36:29][vix-broker][INFO] [Hotkey] Tracking file: [('10101242', {'ts': 1779096965463, 'proc': 'Qoder.exe'})], current=7611778
+[2026-05-18 17:36:29][vix-broker][INFO] [Hotkey] Activated window hwnd=10101242
+[2026-05-18 17:36:29][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=272
+[2026-05-18 17:36:29][vix-broker][INFO] [Pipe] Send: _id=272, ok=True
+[2026-05-18 17:36:34][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=273
+[2026-05-18 17:36:34][vix-broker][INFO] [Pipe] Send: _id=273, ok=True
+[2026-05-18 17:36:50][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=276
+[2026-05-18 17:36:50][vix-broker][INFO] [Pipe] Send: _id=276, ok=True
+[2026-05-18 17:36:57][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=277
+[2026-05-18 17:36:57][vix-broker][INFO] [Pipe] Send: _id=277, ok=True
+[2026-05-18 17:37:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=279
+[2026-05-18 17:37:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 17:37:08][vix-broker][INFO] [Pipe] Send: _id=279, ok=True
+[2026-05-18 17:42:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=296
+[2026-05-18 17:42:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 17:42:08][vix-broker][INFO] [Pipe] Send: _id=296, ok=True
+[2026-05-18 17:47:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=311
+[2026-05-18 17:47:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 17:47:08][vix-broker][INFO] [Pipe] Send: _id=311, ok=True
+[2026-05-18 17:49:28][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=320
+[2026-05-18 17:49:28][vix-broker][INFO] [Pipe] Send: _id=320, ok=False
+[2026-05-18 17:49:30][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=322
+[2026-05-18 17:49:30][vix-broker][INFO] [Pipe] Send: _id=322, ok=True
+[2026-05-18 17:49:30][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=323
+[2026-05-18 17:49:30][vix-broker][INFO] [Pipe] Send: _id=323, ok=True
+[2026-05-18 17:49:52][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=325
+[2026-05-18 17:49:52][vix-broker][INFO] [Pipe] Send: _id=325, ok=True
+[2026-05-18 17:50:05][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=327
+[2026-05-18 17:50:05][vix-broker][INFO] [Pipe] Send: _id=327, ok=True
+[2026-05-18 17:50:12][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=329
+[2026-05-18 17:50:12][vix-broker][INFO] [Pipe] Send: _id=329, ok=True
+[2026-05-18 17:50:18][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=330
+[2026-05-18 17:50:18][vix-broker][INFO] [Pipe] Send: _id=330, ok=True
+[2026-05-18 17:50:29][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=333
+[2026-05-18 17:50:29][vix-broker][INFO] [Pipe] Send: _id=333, ok=True
+[2026-05-18 17:52:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=338
+[2026-05-18 17:52:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 17:52:08][vix-broker][INFO] [Pipe] Send: _id=338, ok=True
+[2026-05-18 17:57:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=354
+[2026-05-18 17:57:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 17:57:08][vix-broker][INFO] [Pipe] Send: _id=354, ok=True
+[2026-05-18 18:02:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=370
+[2026-05-18 18:02:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 18:02:08][vix-broker][INFO] [Pipe] Send: _id=370, ok=True
+[2026-05-18 18:07:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=386
+[2026-05-18 18:07:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 18:07:08][vix-broker][INFO] [Pipe] Send: _id=386, ok=True
+[2026-05-18 18:08:55][vix-broker][INFO] [Hotkey] Tracking file: [('10101242', {'ts': 1779097829079, 'proc': 'Qoder.exe'})], current=7611778
+[2026-05-18 18:08:55][vix-broker][INFO] [Hotkey] Activated window hwnd=10101242
+[2026-05-18 18:08:56][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=394
+[2026-05-18 18:08:56][vix-broker][INFO] [Pipe] Send: _id=394, ok=True
+[2026-05-18 18:08:58][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=395
+[2026-05-18 18:08:58][vix-broker][INFO] [Pipe] Send: _id=395, ok=True
+[2026-05-18 18:12:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=405
+[2026-05-18 18:12:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 18:12:08][vix-broker][INFO] [Pipe] Send: _id=405, ok=True
+[2026-05-18 18:13:27][vix-broker][INFO] [Audio] Device lost detected by music engine, resetting SFX hub...
+[2026-05-18 18:13:27][vix-broker][INFO] [Audio] AudioHub (SFX engine) reset complete
+[2026-05-18 18:13:27][vix-broker][INFO] [Audio] AudioHub (SFX engine) reset complete
+[2026-05-18 18:13:27][vix-broker][INFO] [Audio] 【!!】 Radio: stream EOF, skipping in-place → full-reconnect
+[2026-05-18 18:13:27][vix-broker][INFO] [Audio] [Radio] Waiting 3s before reconnect (failures=0)
+[2026-05-18 18:16:16][vix-broker][INFO] [Audio] Device lost detected by music engine, resetting SFX hub...
+[2026-05-18 18:16:16][vix-broker][INFO] [Audio] AudioHub (SFX engine) reset complete
+[2026-05-18 18:16:16][vix-broker][INFO] [Audio] AudioHub (SFX engine) reset complete
+[2026-05-18 18:16:16][vix-broker][INFO] [Audio] 【!!】 Radio: device silent >5s, source alive → in-place recovery
+[2026-05-18 18:16:25][vix-broker][INFO] [Audio] 【!!】 Radio: device creation timed out (8s), system likely asleep — skipping retry 1
+[2026-05-18 18:16:35][vix-broker][INFO] [Audio] 【!!】 Radio: device creation timed out (8s), system likely asleep — skipping retry 2
+[2026-05-18 18:16:51][vix-broker][INFO] [Audio] 【!!】 Radio: device creation timed out (8s), system likely asleep — skipping retry 3
+[2026-05-18 18:16:51][vix-broker][INFO] [Audio] 【!!】 Radio: in-place recovery failed → full-reconnect
+[2026-05-18 18:16:51][vix-broker][INFO] [Audio] [Radio] Waiting 15s before reconnect (failures=1)
+[2026-05-18 18:17:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=421
+[2026-05-18 18:17:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 18:17:08][vix-broker][INFO] [Pipe] Send: _id=421, ok=True
+[2026-05-18 18:22:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=437
+[2026-05-18 18:22:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 18:22:08][vix-broker][INFO] [Pipe] Send: _id=437, ok=True
+[2026-05-18 18:27:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=453
+[2026-05-18 18:27:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 18:27:08][vix-broker][INFO] [Pipe] Send: _id=453, ok=True
+[2026-05-18 18:32:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=469
+[2026-05-18 18:32:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 18:32:08][vix-broker][INFO] [Pipe] Send: _id=469, ok=True
+[2026-05-18 18:37:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=485
+[2026-05-18 18:37:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 18:37:08][vix-broker][INFO] [Pipe] Send: _id=485, ok=True
+[2026-05-18 18:42:09][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=501
+[2026-05-18 18:42:09][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 18:42:09][vix-broker][INFO] [Pipe] Send: _id=501, ok=True
+[2026-05-18 18:47:09][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=517
+[2026-05-18 18:47:09][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 18:47:09][vix-broker][INFO] [Pipe] Send: _id=517, ok=True
+[2026-05-18 18:52:09][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=533
+[2026-05-18 18:52:09][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 18:52:09][vix-broker][INFO] [Pipe] Send: _id=533, ok=True
+[2026-05-18 18:57:09][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=549
+[2026-05-18 18:57:09][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 18:57:09][vix-broker][INFO] [Pipe] Send: _id=549, ok=True
+[2026-05-18 19:02:09][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=565
+[2026-05-18 19:02:09][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 19:02:09][vix-broker][INFO] [Pipe] Send: _id=565, ok=True
+[2026-05-18 19:07:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=581
+[2026-05-18 19:07:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 19:07:08][vix-broker][INFO] [Pipe] Send: _id=581, ok=True
+[2026-05-18 19:12:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=597
+[2026-05-18 19:12:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 19:12:08][vix-broker][INFO] [Pipe] Send: _id=597, ok=True
+[2026-05-18 19:17:09][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=613
+[2026-05-18 19:17:09][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 19:17:09][vix-broker][INFO] [Pipe] Send: _id=613, ok=True
+[2026-05-18 19:22:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=629
+[2026-05-18 19:22:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 19:22:08][vix-broker][INFO] [Pipe] Send: _id=629, ok=True
+[2026-05-18 19:27:09][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=645
+[2026-05-18 19:27:09][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 19:27:09][vix-broker][INFO] [Pipe] Send: _id=645, ok=True
+[2026-05-18 19:32:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=661
+[2026-05-18 19:32:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 19:32:08][vix-broker][INFO] [Pipe] Send: _id=661, ok=True
+[2026-05-18 19:37:09][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=677
+[2026-05-18 19:37:09][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 19:37:09][vix-broker][INFO] [Pipe] Send: _id=677, ok=True
+[2026-05-18 19:42:08][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=693
+[2026-05-18 19:42:08][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 19:42:08][vix-broker][INFO] [Pipe] Send: _id=693, ok=True
+[2026-05-18 19:47:09][vix-broker][INFO] [Pipe] Recv: action=set_radio_status, _id=709
+[2026-05-18 19:47:09][vix-broker][INFO] [Radio] status updated: live=False, stream=N/A, m3u8=
+[2026-05-18 19:47:09][vix-broker][INFO] [Pipe] Send: _id=709, ok=True
+[2026-05-18 19:50:56][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=723
+[2026-05-18 19:50:56][vix-broker][INFO] [Pipe] Send: _id=723, ok=True
+[2026-05-18 19:51:01][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=725
+[2026-05-18 19:51:01][vix-broker][INFO] [Pipe] Send: _id=725, ok=False
+[2026-05-18 19:51:03][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=726
+[2026-05-18 19:51:03][vix-broker][INFO] [Pipe] Send: _id=726, ok=True
+[2026-05-18 19:51:03][vix-broker][INFO] [Pipe] Recv: action=stop_audio, _id=727
+[2026-05-18 19:51:03][vix-broker][INFO] [Pipe] Send: _id=727, ok=True
+[2026-05-18 19:51:07][vix-broker][INFO] [Pipe] Recv: action=get_foreground_hwnd, _id=729
+[2026-05-18 19:51:07][vix-broker][INFO] [Pipe] Send: _id=729, ok=True

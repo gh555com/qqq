@@ -77,6 +77,8 @@ class PlanExecutor {
         this._aborted = false;
         this._currentPlanId = planId;
         this._executionContext = []; // 重置执行上下文
+        // F-1: 初始化跨 task 累积对话 — LLM 在后续 task 能看到前面的工具调用历史
+        this._agent._planConversation = [];
         this._log(`executor: starting plan "${plan.title}" (${plan.tasks.length} tasks)`);
 
         try {
@@ -117,6 +119,8 @@ class PlanExecutor {
         } finally {
             this._running = false;
             this._currentPlanId = null;
+            // F-1: 清理跨 task 累积对话，避免下次 plan 复用上一 plan 的历史
+            if (this._agent) this._agent._planConversation = null;
         }
     }
 
@@ -170,42 +174,43 @@ class PlanExecutor {
 
     /**
      * 构建 task 的执行 prompt
+     * F-1：区分首个 task vs 后续 task
+     * - 首个：发完整 prompt（plan 总览 + 所有步骤 + 当前 task）
+     * - 后续：发轻量 prompt（依赖对话历史，LLM 已能看到前面工具调用）
      */
     _buildTaskPrompt(plan, task) {
-        // ━━━ 跨 task 上下文注入（核心：后续 task 能看到前面的实现细节）━━━
-        const contextBlock = this._executionContext.length > 0
-            ? this._executionContext.map(c =>
-                `### Task ${c.order + 1}: ${c.content}\n${c.result}`
-            ).join('\n\n')
-            : '(无)';
-
+        const isFirstTask = this._executionContext.length === 0;
         const currentFiles = task.files.length > 0
             ? `\n涉及文件: ${task.files.join(', ')}`
             : '';
 
-        const remainingTasks = plan.tasks
-            .filter(t => t.status === TASK_STATUS.PENDING && t.id !== task.id)
-            .map(t => `  - ${t.content}`)
-            .join('\n');
+        if (isFirstTask) {
+            // 首个 task：完整 prompt
+            const allTasks = plan.tasks
+                .map((t, i) => `  ${i + 1}. ${t.content}${i === task.order ? ' ← 当前' : ''}`)
+                .join('\n');
 
-        return `你正在执行一个多步计划。以下是完整上下文。
+            return `你正在执行一个多步计划。
 
 ## 计划总览
 ${plan.overview}
 
-## 已完成步骤的详细结果
-${contextBlock}
+## 全部步骤
+${allTasks}
 
 ## 当前任务（第 ${task.order + 1}/${plan.tasks.length} 步）
 ${task.content}${currentFiles}
 
-## 后续待做
-${remainingTasks || '(这是最后一步)'}
-
 ## 执行要求
-- 基于上面已完成步骤的结果继续工作（文件路径、变量名、函数签名等已确定）
 - 精确执行当前任务，不多不少
 - 完成后简要汇报：改了哪些文件、关键函数名、注意事项`;
+        } else {
+            // 后续 task：轻量 prompt — LLM 能从上下文看到前面做了什么
+            return `## 下一步：第 ${task.order + 1}/${plan.tasks.length} 步——${task.content}${currentFiles}
+
+基于上面已完成的工作（文件路径、函数签名、变量名均已确定）继续。
+不要重新规划，不要重复之前的工作，精确执行当前 task 后简要汇报。`;
+        }
     }
 
     // ═══ Git Checkpoint ═══

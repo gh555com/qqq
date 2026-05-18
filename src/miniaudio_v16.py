@@ -1781,20 +1781,22 @@ class NonBlockingAudioEngine:
         self.executor.submit(self._radio_hls_wrapper, m3u8_url, token)
         return token
 
-    def play_radio_stream(self, stream_url: str):
-        """★ 接入直推流电台（单 HTTP 连接持续接收 MP3 字节，替代 HLS）"""
+    def play_radio_stream(self, stream_url: str, live_check=None):
+        """★ 接入直推流电台（单 HTTP 连接持续接收 MP3 字节，替代 HLS）
+        live_check: 可选 callable，返回 bool 表示电台当前是否在线。
+            worker 在每次重连前调用，离线时跳过本轮直连尝试，避免死磕已下线滴 URL。"""
         token = PlaybackToken()
         self._register_token(token)
-        self.executor.submit(self._radio_stream_wrapper, stream_url, token)
+        self.executor.submit(self._radio_stream_wrapper, stream_url, token, live_check)
         return token
 
-    def _radio_stream_wrapper(self, stream_url, token: PlaybackToken):
+    def _radio_stream_wrapper(self, stream_url, token: PlaybackToken, live_check=None):
         try:
-            self._radio_stream_worker(stream_url, token)
+            self._radio_stream_worker(stream_url, token, live_check=live_check)
         finally:
             self._unregister_token(token)
 
-    def _radio_stream_worker(self, stream_url, token: PlaybackToken):
+    def _radio_stream_worker(self, stream_url, token: PlaybackToken, live_check=None):
         """直推流电台：使用自定义 StreamableSource + stream_any 实现
         单解码器实例连续解码整条 MP3 流，彻底消除段切换卡顿。
         架构：后台线程 HTTP 下载+缓冲 → stream_any 持久解码器 → device 回调消费。
@@ -1806,6 +1808,19 @@ class NonBlockingAudioEngine:
 
         try:
             while not token.stopped:
+                # ★ Skip retry when radio is offline (server-side live=False).
+                # Avoids burning CPU/network/log on a known-dead URL after the radio
+                # stops broadcasting (or after wake-from-sleep when URL may 404).
+                if live_check is not None:
+                    try:
+                        if not live_check():
+                            self._log_critical("[Radio] live=False, waiting 30s before recheck")
+                            _wait_start = time.time()
+                            while not token.stopped and (time.time() - _wait_start) < 30.0:
+                                time.sleep(2.0)
+                            continue
+                    except Exception:
+                        pass
                 source = None
                 try:
                     source = _RadioStreamSource(stream_url)
@@ -1832,12 +1847,51 @@ class NonBlockingAudioEngine:
                         device = None
                     device_dead = False
 
-                    device = self.PlaybackDevice(
-                        output_format=self.REQUESTED_FORMAT,
-                        nchannels=self.REQUESTED_CHANNELS,
-                        sample_rate=self.REQUESTED_RATE,
-                    )
-                    device.start(gen)
+                    # ★ Device creation with timeout: PlaybackDevice() can hang
+                    # indefinitely after wake-from-sleep when audio subsystem is
+                    # still recovering. Without this guard, worker silently freezes.
+                    _dev_result = [None]
+                    _dev_error = [None]
+                    def _create_main_dev():
+                        try:
+                            _dev_result[0] = self.PlaybackDevice(
+                                output_format=self.REQUESTED_FORMAT,
+                                nchannels=self.REQUESTED_CHANNELS,
+                                sample_rate=self.REQUESTED_RATE,
+                            )
+                            _dev_result[0].start(gen)
+                        except Exception as e:
+                            _dev_error[0] = e
+                    _dev_thread = threading.Thread(target=_create_main_dev, daemon=True)
+                    _dev_thread.start()
+                    _dev_thread.join(timeout=8.0)
+                    if _dev_thread.is_alive():
+                        self._log_critical("【!!】 Radio: main-path device creation timed out (8s), system likely asleep — reconnect")
+                        _consecutive_device_failures += 1
+                        device_dead = True
+                        # leak the thread; it will finish or die when device finally responds
+                        raise RuntimeError("main-path device creation timeout")
+                    if _dev_error[0]:
+                        raise _dev_error[0]
+                    device = _dev_result[0]
+
+                    # ★ Health check: confirm device is actually pulling data within 8s.
+                    # Without this, a "zombie" device can be created (no errors) but
+                    # never pull data, leaving worker stuck in monitor loop forever.
+                    _health_deadline = time.time() + 8.0
+                    _device_alive = False
+                    while not token.stopped and time.time() < _health_deadline:
+                        time.sleep(0.5)
+                        if token.device_silent_seconds() < 1.5:
+                            _device_alive = True
+                            break
+                    if not _device_alive and not token.stopped:
+                        self._log_critical("【!!】 Radio: device created but no data pull within 8s — reconnect")
+                        self._kill_device_async(device)
+                        device = None
+                        _consecutive_device_failures += 1
+                        device_dead = True
+                        raise RuntimeError("device zombie (no data)")
 
                     # 监控循环：检测设备静音/断流
                     _last_recovery_time = 0  # ★ Track rapid recovery cycling (screensaver scenario)

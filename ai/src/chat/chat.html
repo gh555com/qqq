@@ -469,6 +469,20 @@
             gap: 6px;
         }
 
+        #input-est-row {
+            display: flex;
+            justify-content: flex-end;
+            padding: 0 4px;
+            font-size: 9px;
+            color: var(--vscode-descriptionForeground);
+            opacity: 0.6;
+            font-family: var(--vscode-editor-font-family, monospace);
+            user-select: none;
+        }
+        #input-est { cursor: help; }
+        #input-est.warn { color: #d4a017; opacity: 0.85; }
+        #input-est.bad { color: #d77; opacity: 0.95; }
+
         #input {
             flex: 1;
             background: var(--vscode-input-background);
@@ -550,6 +564,49 @@
             z-index: 10001;
             pointer-events: none;
         }
+
+        /* ═══ Metrics Dashboard (Tofu Blocks) ═══ */
+        #metrics-panel {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2px 3px;
+            padding: 3px 6px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            font-size: 10px;
+            font-family: var(--vscode-editor-font-family, monospace);
+            align-items: center;
+            min-height: 20px;
+        }
+        .mc {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            padding: 1px 4px;
+            border-radius: 3px;
+            background: var(--vscode-input-background);
+            cursor: default;
+            white-space: nowrap;
+            opacity: 0.65;
+            transition: opacity 0.15s;
+        }
+        .mc:hover { opacity: 1; background: var(--vscode-list-hoverBackground); }
+        .mc-i { font-size: 9px; opacity: 0.8; }
+        .mc-v { font-weight: 600; min-width: 16px; text-align: right; }
+        .mc-sep {
+            width: 1px;
+            height: 14px;
+            background: var(--vscode-panel-border);
+            margin: 0 1px;
+            opacity: 0.5;
+        }
+        .mc-lbl {
+            opacity: 0.5;
+            font-size: 9px;
+            margin-right: 1px;
+        }
+        .mc-hi { color: #4ec9b0; }
+        .mc-warn { color: #cca700; }
+        .mc-bad { color: #f14c4c; }
     </style>
 </head>
 <body>
@@ -560,12 +617,63 @@
         <div class="bar-wrap"><div class="bar-fill" id="rage-fill"></div></div>
     </div>
     <canvas id="rage-chart" width="400" height="28" title="怒气值变迁"></canvas>
+    <!-- ━━━ Metrics Dashboard ━━━ -->
+    <div id="metrics-panel">
+        <!-- Turn -->
+        <div class="mc" title="本轮输入 token 数（发送给 AI 的上下文量，包含 system prompt + 对话历史 + 当前消息）"><span class="mc-i">↑</span><span class="mc-v" id="mv-in">—</span></div>
+        <div class="mc" title="本轮输出 token 数（AI 生成的回复 + 工具调用）"><span class="mc-i">↓</span><span class="mc-v" id="mv-out">—</span></div>
+        <div class="mc" title="深度思考 token 数（reasoning_tokens，越高 = 模型思考越深，质量越好但费用也越高）"><span class="mc-i">🧠</span><span class="mc-v" id="mv-think">—</span></div>
+        <div class="mc" title="前缀缓存命中率：cacheHit/(cacheHit+cacheMiss)×100%。越高 = 越省钱，缓存命中价格是未命中的 1/120"><span class="mc-i">💾</span><span class="mc-v" id="mv-cache">—</span></div>
+        <div class="mc" title="缓存命中 token 数（这些 token 按极低价格计费，约 ¥0.025/M）"><span class="mc-lbl">命中</span><span class="mc-v mc-hi" id="mv-hit">—</span></div>
+        <div class="mc" title="缓存未命中 token 数（这些 token 按全价计费，约 ¥3/M，是命中价的 120 倍）"><span class="mc-lbl">未命中</span><span class="mc-v mc-bad" id="mv-miss">—</span></div>
+        <div class="mc" title="本轮消耗 ge（服务端精确计费，包含所有 API 调用 + vision）"><span class="mc-i">💰</span><span class="mc-v" id="mv-cost">—</span></div>
+        <div class="mc" title="模型档位：⚡ Flash = 快速便宜(无思考)，🧠 Pro+Max = 深度思考(质量最高)"><span class="mc-v" id="mv-tier" style="font-weight:normal;opacity:0.7">—</span></div>
+        <div class="mc" title="本轮工具调用次数（read_file/edit_file/run_command 等）"><span class="mc-i">🔧</span><span class="mc-v" id="mv-tools">—</span></div>
+        <div class="mc" title="本轮响应总耗时（从发送到 AI 回复完成）"><span class="mc-i">⏱</span><span class="mc-v" id="mv-time">—</span></div>
+        <div class="mc" title="输出吞吐量 = completionTokens/耗时(秒)，越高 = 模型生成越快"><span class="mc-lbl">tok/s</span><span class="mc-v mc-hi" id="mv-tps">—</span></div>
+        <div class="mc" title="缓存命中节省金额(CNY) = cacheHitTokens × (¥3-¥0.025)/1M，衡量前缀缓存优化真实收益"><span class="mc-lbl">¥省</span><span class="mc-v mc-hi" id="mv-save">—</span></div>
+        <div class="mc" title="本轮 API 重试次数（429/502/503/网络错误触发自动退避重试）"><span class="mc-lbl">retry</span><span class="mc-v" id="mv-retry">—</span></div>
+        <div class="mc" title="本轮每个工具调用的平均耗时（ms），衡量工具执行效率"><span class="mc-lbl">t̄ool</span><span class="mc-v" id="mv-tavg">—</span></div>
+        <div class="mc" title="TTFT (Time To First Token) = 从发请求到收到第一个有效 token 的延迟。越低 → 网络/推理起动越快（&lt;500ms 优，1–3s 正常，&gt;3s 慢）"><span class="mc-lbl">TTFT</span><span class="mc-v" id="mv-ttft">—</span></div>
+        <div class="mc" title="免费时段指示器：✨ = 当前轮免费，— = 正常计费"><span class="mc-v" id="mv-free" style="font-weight:normal">—</span></div>
+        <div class="mc-sep"></div>
+        <!-- Session -->
+        <div class="mc" title="本次对话累计输入 token 总量"><span class="mc-lbl">Σ↑</span><span class="mc-v" id="mv-sin">—</span></div>
+        <div class="mc" title="本次对话累计输出 token 总量"><span class="mc-lbl">Σ↓</span><span class="mc-v" id="mv-sout">—</span></div>
+        <div class="mc" title="本次对话累计缓存命中 token 总量（省下的钱）"><span class="mc-lbl">Σ💾</span><span class="mc-v" id="mv-scache">—</span></div>
+        <div class="mc" title="本次对话累计缓存未命中 token 总量"><span class="mc-lbl">Σ✗</span><span class="mc-v" id="mv-smiss">—</span></div>
+        <div class="mc" title="本次对话累计消耗 ge 总量"><span class="mc-lbl">Σ💰</span><span class="mc-v" id="mv-scost">—</span></div>
+        <div class="mc" title="本次对话总轮次数（每轮 = 一次用户发送 + AI 完整回复）"><span class="mc-i">🔄</span><span class="mc-v" id="mv-turns">—</span></div>
+        <div class="mc" title="本次对话累计重试次数（网络抖动越多 = 越高）"><span class="mc-lbl">Σretry</span><span class="mc-v" id="mv-sretry">—</span></div>
+        <div class="mc" title="本次对话缓存累计节省金额(CNY)，衡量整场对话前缀缓存优化总收益"><span class="mc-lbl">Σ¥省</span><span class="mc-v mc-hi" id="mv-ssave">—</span></div>
+        <div class="mc" title="Session 平均输出吞吐量 = session 总 output / session 总耗时。反映整场对话的平均生成速度"><span class="mc-lbl">x̄tok/s</span><span class="mc-v" id="mv-savgtps">—</span></div>
+        <div class="mc" title="平均每轮节省 ¥ = 总¥省/总轮次。反映单轮缓存优化平均收益"><span class="mc-lbl">x̄¥/turn</span><span class="mc-v mc-hi" id="mv-savgsave">—</span></div>
+        <div class="mc" title="平均每轮重试次数 = 总重试/总轮次。反映网络稳定性 (>0.5 = 不稳定)"><span class="mc-lbl">x̄ret/turn</span><span class="mc-v" id="mv-savgretry">—</span></div>
+        <div class="mc-sep"></div>
+        <!-- Engine -->
+        <div class="mc" title="上下文引擎事实库条数（从压缩的老消息中提取的结构化事实，用于语义检索）"><span class="mc-i">📚</span><span class="mc-v" id="mv-facts">—</span></div>
+        <div class="mc" title="全局叙事摘要字符数（压缩历史的连贯性概述，用于保持 AI 跨轮上下文连贯）"><span class="mc-i">📖</span><span class="mc-v" id="mv-narr">—</span></div>
+        <div class="mc" title="上下文窗口使用率 = totalTokens/800K×100%，超过50%就要开始压缩老消息"><span class="mc-i">📊</span><span class="mc-v" id="mv-ctx">—</span></div>
+        <div class="mc" title="首轮缓存预热状态：⏳预热中·✅成功·❌失败·—未启动。panel 打开 500ms 后后台发预热请求，让 SYSTEM_PROMPT 缓存预先建立"><span class="mc-lbl">warm</span><span class="mc-v" id="mv-warm">—</span></div>
+        <div class="mc" title="距上次 API 调用多久，用于判断前缀缓存是否还在 TTL 内（DeepSeek 缓存 TTL 约 5–10分钟）"><span class="mc-lbl">cache</span><span class="mc-v" id="mv-lastcall">—</span></div>
+        <div class="mc-sep"></div>
+        <!-- Lifetime（跨 IDE 重启累计） -->
+        <div class="mc" title="Lifetime：跨 IDE 重启累计使用总轮次（衰老计数器）"><span class="mc-lbl">∞轮</span><span class="mc-v" id="mv-lturns">—</span></div>
+        <div class="mc" title="Lifetime：跨 IDE 重启累计启动过多少个 panel session"><span class="mc-lbl">∞sess</span><span class="mc-v" id="mv-lsess">—</span></div>
+        <div class="mc" title="Lifetime：跨 IDE 重启累计总消耗 ge（1ge=¥1）"><span class="mc-lbl">∞¥花</span><span class="mc-v" id="mv-lcost">—</span></div>
+        <div class="mc" title="Lifetime：跨 IDE 重启累计前缀缓存总节省 ¥、高亮显示你总共省下多少钱"><span class="mc-lbl">∞¥省</span><span class="mc-v mc-hi" id="mv-lsave">—</span></div>
+        <div class="mc" title="Lifetime：跨 IDE 重启累计总输入 token 量"><span class="mc-lbl">∞↑</span><span class="mc-v" id="mv-lin">—</span></div>
+        <div class="mc" title="Lifetime：跨 IDE 重启累计总输出 token 量"><span class="mc-lbl">∞↓</span><span class="mc-v" id="mv-lout">—</span></div>
+        <div class="mc" title="Lifetime：跨 IDE 重启累计总重试次数"><span class="mc-lbl">∞ret</span><span class="mc-v" id="mv-lret">—</span></div>
+        <div class="mc" title="Lifetime：跨 IDE 重启累计总耗时（你在 qqq 上花了多少时间）"><span class="mc-lbl">∞⏱</span><span class="mc-v" id="mv-ldur">—</span></div>
+    </div>
     <div id="msg-area">
         <div id="ge-bar-track"><div id="ge-bar-fill"></div></div>
         <div id="messages"></div>
     </div>
     <div id="input-area">
         <div id="image-strip"></div>
+        <div id="input-est-row"><span id="input-est" title="预估当前输入将使用的 token 量（按 chars÷4 估算）。中文需乘上 1.5–2倍。越多 tokens = 越贵，如果上下文也充足，本轮费用估计也会高">— tok</span></div>
         <div id="input-row">
             <textarea id="input" placeholder="Ask qqq... (Ctrl+V 粘贴图片)" rows="1"></textarea>
             <button id="send-btn">Send</button>
@@ -591,6 +699,29 @@
         const inputEl = document.getElementById('input');
         const sendBtn = document.getElementById('send-btn');
         const imageStrip = document.getElementById('image-strip');
+        const inputEstEl = document.getElementById('input-est');
+
+        // ━━━ E-2: 输入框实时 token 预估 + 自动高度（A-1: rAF 节流） ━━━
+        let _inputRafPending = false;
+        inputEl.addEventListener('input', () => {
+            if (_inputRafPending) return;
+            _inputRafPending = true;
+            requestAnimationFrame(() => {
+                _inputRafPending = false;
+                // token 预估
+                const len = inputEl.value.length;
+                if (len === 0) { inputEstEl.textContent = '— tok'; inputEstEl.className = ''; }
+                else {
+                    const hasCJK = /[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/.test(inputEl.value);
+                    const est = Math.ceil(len / (hasCJK ? 1.5 : 4));
+                    inputEstEl.textContent = '~' + (est >= 1000 ? (est/1000).toFixed(1)+'K' : est) + ' tok';
+                    inputEstEl.className = est > 4000 ? 'bad' : est > 1000 ? 'warn' : '';
+                }
+                // 自动高度
+                inputEl.style.height = 'auto';
+                inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+            });
+        });
 
         let isGenerating = false;
         let currentAiMsg = null;
@@ -899,11 +1030,7 @@
             }
         });
 
-        // 自动调整输入框高度
-        inputEl.addEventListener('input', () => {
-            inputEl.style.height = 'auto';
-            inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
-        });
+        // A-1: 自动高度已合并到上方 rAF 节流 input listener
 
         // ═══════ 字符级 Undo/Redo（从 q2 Roam 移植） ═══════
         (function initCharUndo(input) {
@@ -1226,12 +1353,27 @@
                                 `).join('')}
                             </div>
                             <div class="plan-actions">
-                                <button class="plan-btn plan-btn-exec" onclick="vscode.postMessage({type:'planExecute',planId:'${msg.plan.id}'})">\u2589 执行计划</button>
+                                <button class="plan-btn plan-btn-exec" onclick="vscode.postMessage({type:'planExecute',planId:'${msg.plan.id}'})">▉ 执行计划</button>
                                 <button class="plan-btn plan-btn-cancel" onclick="this.closest('.plan-card').remove()">取消</button>
+                            </div>
+                            <div class="plan-hint" style="font-size:11px;color:var(--vscode-descriptionForeground);margin-top:6px;padding:4px 8px;border-top:1px solid var(--vscode-editorWidget-border,#333);">
+                                💬 继续对话即可修改计划 — 说“把第3步去掉”“加个测试”“先做B再做A”
                             </div>
                         `;
                         messagesEl.appendChild(planEl);
                         scrollToBottom();
+                    }
+                    break;
+
+                case 'planRevising':
+                    {
+                        const card = document.getElementById('plan-' + msg.planId);
+                        if (card) {
+                            const badge = card.querySelector('.plan-badge');
+                            if (badge) { badge.textContent = 'REVISING...'; badge.style.color = '#f0a020'; }
+                            const hint = card.querySelector('.plan-hint');
+                            if (hint) hint.textContent = '⚙️ 正在根据你的反馈修订计划...';
+                        }
                     }
                     break;
 
@@ -1334,23 +1476,50 @@
 
                 case 'planRevised':
                     {
-                        const actionText = msg.action === 'retry' ? '🔄 正在重试失败步骤' : '📝 计划已自动修订';
-                        appendMessage('ai', `${actionText}：${msg.analysis}`);
-                        // 更新 plan card 的 task 列表
                         const card = document.getElementById('plan-' + msg.planId);
-                        if (card && msg.tasks) {
-                            const taskList = card.querySelector('.plan-tasks');
-                            if (taskList) {
-                                taskList.innerHTML = msg.tasks.map(t => {
-                                    const icon = t.status === 'complete' ? '✓' : t.status === 'failed' ? '✗' : '○';
-                                    const cls = t.status === 'complete' ? 'complete' : t.status === 'failed' ? 'failed' : '';
-                                    return `<div class="plan-task ${cls}"><span class="plan-task-icon">${icon}</span>${t.content}</div>`;
-                                }).join('');
+                        if (msg.action === 'revise' && msg.plan) {
+                            // 用户反馈修订（执行前）— 刷新整个卡片
+                            if (card) {
+                                const badge = card.querySelector('.plan-badge');
+                                if (badge) { badge.textContent = 'DRAFT'; badge.style.color = ''; badge.className = 'plan-badge'; }
+                                const titleEl = card.querySelector('.plan-title');
+                                if (titleEl) titleEl.textContent = msg.plan.title;
+                                const overviewEl = card.querySelector('.plan-overview');
+                                if (overviewEl) overviewEl.textContent = msg.plan.overview;
+                                const taskList = card.querySelector('.plan-tasks');
+                                if (taskList) {
+                                    taskList.innerHTML = msg.plan.tasks.map(t => `
+                                        <div class="plan-task" data-id="${t.id}" data-status="pending">
+                                            <span class="task-icon">○</span>
+                                            <span class="task-content">${t.content}</span>
+                                        </div>
+                                    `).join('');
+                                }
+                                const hint = card.querySelector('.plan-hint');
+                                if (hint) hint.textContent = '💬 继续对话即可修改计划 — 说“把第3步去掉”“加个测试”“先做B再做A”';
                             }
-                            const badge = card.querySelector('.plan-badge');
-                            if (badge) { badge.textContent = 'EXECUTING'; badge.className = 'plan-badge executing'; }
+                        } else {
+                            // 执行中失败修订（原有逻辑）
+                            const actionText = msg.action === 'retry' ? '🔄 正在重试失败步骤' : '📝 计划已自动修订';
+                            appendMessage('ai', `${actionText}：${msg.analysis}`);
+                            if (card && msg.tasks) {
+                                const taskList = card.querySelector('.plan-tasks');
+                                if (taskList) {
+                                    taskList.innerHTML = msg.tasks.map(t => {
+                                        const icon = t.status === 'complete' ? '✓' : t.status === 'failed' ? '✗' : '○';
+                                        const cls = t.status === 'complete' ? 'complete' : t.status === 'failed' ? 'failed' : '';
+                                        return `<div class="plan-task ${cls}"><span class="plan-task-icon">${icon}</span>${t.content}</div>`;
+                                    }).join('');
+                                }
+                                const badge = card.querySelector('.plan-badge');
+                                if (badge) { badge.textContent = 'EXECUTING'; badge.className = 'plan-badge executing'; }
+                            }
                         }
                     }
+                    break;
+
+                case 'metrics':
+                    _updateMetrics(msg.metrics);
                     break;
 
                 case 'planRolledBack':
@@ -1438,6 +1607,104 @@
             newBtn.onclick = () => vscode.postMessage({ type: 'newTab' });
             bar.appendChild(newBtn);
         }
+
+        // ═══════ Metrics Dashboard 更新器 ═══════
+        function _updateMetrics(m) {
+            const t = m.turn, s = m.session, e = m.engine;
+            const fk = (n) => n >= 1000000 ? (n/1000000).toFixed(1)+'M' : n >= 1000 ? (n/1000).toFixed(1)+'K' : String(n);
+            const fg = (n) => n <= 0 ? '0' : n < 0.001 ? '<0.001' : n < 0.01 ? n.toFixed(4) : n.toFixed(3);
+
+            // Turn
+            _mv('mv-in', fk(t.promptTokens));
+            _mv('mv-out', fk(t.completionTokens));
+            _mv('mv-think', fk(t.reasoningTokens));
+            const total = t.cacheHitTokens + t.cacheMissTokens;
+            const hitRate = total > 0 ? Math.round(t.cacheHitTokens / total * 100) : 0;
+            const cacheEl = _mv('mv-cache', hitRate + '%');
+            if (cacheEl) cacheEl.className = 'mc-v' + (hitRate >= 60 ? ' mc-hi' : hitRate >= 20 ? ' mc-warn' : total > 0 ? ' mc-bad' : '');
+            _mv('mv-hit', fk(t.cacheHitTokens));
+            _mv('mv-miss', fk(t.cacheMissTokens));
+            _mv('mv-cost', fg(t.costGe));
+            _mv('mv-tier', t.tier);
+            _mv('mv-tools', String(t.toolCount));
+            _mv('mv-time', t.durationMs >= 60000 ? (t.durationMs/60000).toFixed(1)+'m' : t.durationMs >= 1000 ? (t.durationMs/1000).toFixed(1)+'s' : t.durationMs+'ms');
+            _mv('mv-tps', t.tokPerSec > 0 ? t.tokPerSec : '—');
+            _mv('mv-save', t.cnySaved > 0 ? '¥' + (t.cnySaved < 0.001 ? '<0.001' : t.cnySaved < 0.01 ? t.cnySaved.toFixed(4) : t.cnySaved.toFixed(3)) : '—');
+            const retryEl = _mv('mv-retry', t.retries > 0 ? String(t.retries) : '0');
+            if (retryEl) retryEl.className = 'mc-v' + (t.retries >= 3 ? ' mc-bad' : t.retries >= 1 ? ' mc-warn' : '');
+            _mv('mv-tavg', t.toolAvgMs > 0 ? (t.toolAvgMs >= 1000 ? (t.toolAvgMs/1000).toFixed(1)+'s' : t.toolAvgMs+'ms') : '—');
+            const ttftEl = _mv('mv-ttft', t.ttftMs > 0 ? (t.ttftMs >= 1000 ? (t.ttftMs/1000).toFixed(1)+'s' : t.ttftMs+'ms') : '—');
+            if (ttftEl) ttftEl.className = 'mc-v' + (t.ttftMs > 3000 ? ' mc-bad' : t.ttftMs > 1500 ? ' mc-warn' : t.ttftMs > 0 ? ' mc-hi' : '');
+            _mv('mv-free', t.freeWindow ? '\u2728' : '\u2014');
+
+            // Session
+            _mv('mv-sin', fk(s.promptTokens));
+            _mv('mv-sout', fk(s.completionTokens));
+            _mv('mv-scache', fk(s.cacheHitTokens));
+            _mv('mv-smiss', fk(s.cacheMissTokens));
+            _mv('mv-scost', fg(s.costGe));
+            _mv('mv-turns', String(s.turns));
+            _mv('mv-sretry', String(s.retries || 0));
+            _mv('mv-ssave', s.cnySaved > 0 ? '¥' + (s.cnySaved < 0.001 ? '<0.001' : s.cnySaved < 0.01 ? s.cnySaved.toFixed(4) : s.cnySaved.toFixed(3)) : '—');
+            // ━ Session 趋势派生指标 ━
+            const avgTps = s.totalDurationMs > 0 ? Math.round(s.completionTokens / s.totalDurationMs * 1000) : 0;
+            _mv('mv-savgtps', avgTps > 0 ? avgTps : '—');
+            const avgSave = s.turns > 0 ? s.cnySaved / s.turns : 0;
+            _mv('mv-savgsave', avgSave > 0 ? '¥' + (avgSave < 0.001 ? '<0.001' : avgSave < 0.01 ? avgSave.toFixed(4) : avgSave.toFixed(3)) : '—');
+            const avgRet = s.turns > 0 ? (s.retries / s.turns) : 0;
+            const avgRetEl = _mv('mv-savgretry', s.turns > 0 ? avgRet.toFixed(2) : '—');
+            if (avgRetEl) avgRetEl.className = 'mc-v' + (avgRet > 0.5 ? ' mc-bad' : avgRet > 0.1 ? ' mc-warn' : avgRet > 0 ? '' : '');
+
+            // Engine
+            _mv('mv-facts', String(e.factsCount));
+            _mv('mv-narr', fk(e.narrativeLen));
+            const ctxEl = _mv('mv-ctx', e.ctxPct + '%');
+            if (ctxEl) ctxEl.className = 'mc-v' + (e.ctxPct > 80 ? ' mc-bad' : e.ctxPct > 50 ? ' mc-warn' : e.ctxPct > 0 ? ' mc-hi' : '');
+            // ━ 预热状态 ━
+            const warmEl = _mv('mv-warm', e.warmupStatus === 'ok' ? '✅' : e.warmupStatus === 'fail' ? '❌' : e.warmupStatus === 'pending' ? '⏳' : '—');
+            if (warmEl) warmEl.className = 'mc-v' + (e.warmupStatus === 'ok' ? ' mc-hi' : e.warmupStatus === 'fail' ? ' mc-bad' : e.warmupStatus === 'pending' ? ' mc-warn' : '');
+            // ━ 缓存距上次调用时间 ━
+            _lastCallTs = e.lastCallTs || 0;
+            _renderLastCall();
+            // ━ Lifetime 指标 ━
+            const L = m.lifetime;
+            if (L) {
+                _mv('mv-lturns', String(L.turns || 0));
+                _mv('mv-lsess', String(L.sessions || 0));
+                _mv('mv-lcost', fg(L.costGe || 0));
+                _mv('mv-lsave', L.cnySaved > 0 ? '¥' + (L.cnySaved < 0.001 ? '<0.001' : L.cnySaved < 0.01 ? L.cnySaved.toFixed(4) : L.cnySaved.toFixed(3)) : '—');
+                _mv('mv-lin', fk(L.promptTokens || 0));
+                _mv('mv-lout', fk(L.completionTokens || 0));
+                _mv('mv-lret', String(L.retries || 0));
+                const totalMin = Math.round((L.durationMs || 0) / 60000);
+                _mv('mv-ldur', totalMin < 60 ? totalMin + 'm' : (totalMin / 60).toFixed(1) + 'h');
+            }
+        }
+        let _lastCallTs = 0;
+        function _renderLastCall() {
+            const el = document.getElementById('mv-lastcall');
+            if (!el) return;
+            if (!_lastCallTs) { el.textContent = '—'; el.className = 'mc-v'; return; }
+            const ago = Date.now() - _lastCallTs;
+            let txt, cls;
+            if (ago < 60000) { txt = Math.round(ago/1000) + 's'; cls = ' mc-hi'; }
+            else if (ago < 600000) { txt = Math.round(ago/60000) + 'm'; cls = ago < 300000 ? ' mc-hi' : ' mc-warn'; }
+            else { txt = Math.round(ago/60000) + 'm'; cls = ' mc-bad'; }
+            el.textContent = txt + ' ago';
+            el.className = 'mc-v' + cls;
+        }
+        // S-3: visibilitychange 感知 — 隐藏时暂停，可见时恢复
+        let _lastCallTimer = setInterval(_renderLastCall, 5000);
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                clearInterval(_lastCallTimer);
+                _lastCallTimer = null;
+            } else {
+                _renderLastCall();
+                _lastCallTimer = setInterval(_renderLastCall, 5000);
+            }
+        });
+        function _mv(id, val) { const el = document.getElementById(id); if (el) { el.textContent = val; } return el; }
 
         // 工具结果极简摘要生成器
         function _toolSummary(name, output) {

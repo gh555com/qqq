@@ -503,6 +503,57 @@ async function _getDelayedDiagnostics(filePath) {
     }
 }
 
+// A-2: search_text 优化 — 目录读取缓存 + .gitignore 支持
+const _DIR_CACHE = new Map();           // dir -> { entries, ts }
+const _GITIGNORE_CACHE = new Map();     // root -> { patterns: Set<string>, ts }
+const _DIR_CACHE_TTL = 5000;            // 5s TTL—避免脱数据
+const _GITIGNORE_CACHE_TTL = 30000;     // 30s TTL
+
+function _readdirCached(dir) {
+    const now = Date.now();
+    const cached = _DIR_CACHE.get(dir);
+    if (cached && (now - cached.ts) < _DIR_CACHE_TTL) return cached.entries;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return null; }
+    _DIR_CACHE.set(dir, { entries, ts: now });
+    // 限流：超过 500 项时清除最早项
+    if (_DIR_CACHE.size > 500) {
+        const oldest = _DIR_CACHE.keys().next().value;
+        _DIR_CACHE.delete(oldest);
+    }
+    return entries;
+}
+
+function _loadGitignore(root) {
+    const now = Date.now();
+    const cached = _GITIGNORE_CACHE.get(root);
+    if (cached && (now - cached.ts) < _GITIGNORE_CACHE_TTL) return cached.patterns;
+    const patterns = { dirs: new Set(), exts: new Set() };
+    try {
+        const gi = path.join(root, '.gitignore');
+        if (fs.existsSync(gi)) {
+            const content = fs.readFileSync(gi, 'utf8');
+            for (const raw of content.split('\n')) {
+                const line = raw.trim();
+                if (!line || line.startsWith('#') || line.startsWith('!')) continue;
+                // 简单解析：名字/、名字、*.ext 三种格式
+                if (line.startsWith('*.')) {
+                    patterns.exts.add(line.slice(1).toLowerCase()); // .ext
+                } else {
+                    // 剥去头尾斜杠
+                    const name = line.replace(/^\/+|\/+$/g, '');
+                    // 只处理不含中间斜杠且不含通配符的纯名字
+                    if (name && !name.includes('/') && !name.includes('*') && !name.includes('?')) {
+                        patterns.dirs.add(name);
+                    }
+                }
+            }
+        }
+    } catch (_) {}
+    _GITIGNORE_CACHE.set(root, { patterns, ts: now });
+    return patterns;
+}
+
 function executeSearchText({ query, path: searchPath, max_results = 30 }) {
     // Pure Node.js recursive regex search — no external tools dependency
     let searchDirs = [];
@@ -519,7 +570,7 @@ function executeSearchText({ query, path: searchPath, max_results = 30 }) {
         }
     }
 
-    const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'backup', '__pycache__', '.venv', 'vendor']);
+    const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'backup', '__pycache__', '.venv', 'vendor', 'build', 'out', '.next', '.nuxt', '.cache', 'coverage', 'target']);
     const SKIP_EXTS = new Set(['.exe', '.dll', '.so', '.dylib', '.bin', '.png', '.jpg', '.gif', '.mp3', '.mp4', '.zip', '.tar', '.gz', '.xz', '.woff', '.woff2', '.ttf', '.eot', '.ico', '.vsix', '.lock']);
     const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
     let regex;
@@ -531,20 +582,22 @@ function executeSearchText({ query, path: searchPath, max_results = 30 }) {
     }
 
     const matches = [];
-    function walk(dir, depth) {
+    function walk(dir, depth, gitignore) {
         if (depth > 10 || matches.length >= max_results) return;
-        let entries;
-        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+        const entries = _readdirCached(dir);
+        if (!entries) return;
         for (const entry of entries) {
             if (matches.length >= max_results) return;
             if (entry.name.startsWith('.') && entry.isDirectory()) continue;
             if (SKIP_DIRS.has(entry.name) && entry.isDirectory()) continue;
+            if (gitignore && entry.isDirectory() && gitignore.dirs.has(entry.name)) continue;
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) {
-                walk(full, depth + 1);
+                walk(full, depth + 1, gitignore);
             } else {
                 const ext = path.extname(entry.name).toLowerCase();
                 if (SKIP_EXTS.has(ext)) continue;
+                if (gitignore && gitignore.exts.has(ext)) continue;
                 try {
                     const stat = fs.statSync(full);
                     if (stat.size > MAX_FILE_SIZE) continue;
@@ -561,7 +614,8 @@ function executeSearchText({ query, path: searchPath, max_results = 30 }) {
     }
 
     for (const dir of searchDirs) {
-        walk(dir, 0);
+        const gitignore = _loadGitignore(dir);
+        walk(dir, 0, gitignore);
         if (matches.length >= max_results) break;
     }
 
@@ -852,7 +906,8 @@ function executeRunCommand({ command, cwd }) {
     }
 }
 
-function getTools() {
+function getTools(includeVision = true) {
+    if (!includeVision) return TOOL_DEFINITIONS.filter(t => t.function.name !== 'analyze_image');
     return TOOL_DEFINITIONS;
 }
 

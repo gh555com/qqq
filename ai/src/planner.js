@@ -62,6 +62,12 @@ class PlanManager {
 
         try { fs.mkdirSync(this._plansDir, { recursive: true }); } catch (_) {}
         this._index = this._loadIndex();
+
+        // B-2: 防抖落盘 — plan 状态频繁变更时合并同步 IO
+        this._pendingPlans = new Map();   // id -> plan实例（总是最新版）
+        this._indexDirty = false;
+        this._saveTimer = null;
+        this._SAVE_DEBOUNCE_MS = 500;
     }
 
     // ═══ Index ═══
@@ -76,10 +82,42 @@ class PlanManager {
     }
 
     _saveIndex() {
+        // B-2: 标记 dirty，由 _scheduleFlush 合并写
+        this._indexDirty = true;
+        this._scheduleFlush();
+    }
+
+    _writeIndexNow() {
         try {
             fs.writeFileSync(this._indexPath, JSON.stringify(this._index, null, 2), 'utf8');
         } catch (e) {
             this._log(`planner: index save error — ${e.message}`);
+        }
+    }
+
+    // B-2: 防抖调度
+    _scheduleFlush() {
+        if (this._saveTimer) return;
+        this._saveTimer = setTimeout(() => {
+            this._saveTimer = null;
+            this.flush();
+        }, this._SAVE_DEBOUNCE_MS);
+    }
+
+    // B-2: 同步 flush 所有 pending（deactivate / deletePlan / 关键路径调用）
+    flush() {
+        if (this._saveTimer) { clearTimeout(this._saveTimer); this._saveTimer = null; }
+        for (const plan of this._pendingPlans.values()) {
+            try {
+                fs.writeFileSync(path.join(this._plansDir, `${plan.id}.json`), JSON.stringify(plan, null, 2), 'utf8');
+            } catch (e) {
+                this._log(`planner: save error ${plan.id} — ${e.message}`);
+            }
+        }
+        this._pendingPlans.clear();
+        if (this._indexDirty) {
+            this._writeIndexNow();
+            this._indexDirty = false;
         }
     }
 
@@ -88,9 +126,10 @@ class PlanManager {
     /**
      * 创建新 Plan（通常由 LLM 生成后调用）
      * @param {object} planData - { title, overview, tasks: [{content, dependencies?, files?}] }
+     * @param {string} sessionId - F-2a: 归属会话 ID（多窗口各自记录自己的 plan）
      * @returns {object} 完整 Plan 对象
      */
-    createPlan(planData) {
+    createPlan(planData, sessionId = null) {
         const id = crypto.randomBytes(6).toString('hex');
         const now = Date.now();
 
@@ -110,6 +149,7 @@ class PlanManager {
 
         const plan = {
             id,
+            sessionId,                  // F-2a: 绑定 session
             title: planData.title || 'Untitled Plan',
             overview: planData.overview || '',
             status: PLAN_STATUS.DRAFT,
@@ -120,13 +160,15 @@ class PlanManager {
 
         // 保存
         this._savePlan(plan);
-        this._index.push({ id, title: plan.title, status: plan.status, createdAt: now, updatedAt: now });
+        this._index.push({ id, sessionId, title: plan.title, status: plan.status, createdAt: now, updatedAt: now });
         this._saveIndex();
-        this._log(`planner: created plan ${id} "${plan.title}" with ${tasks.length} tasks`);
+        this._log(`planner: created plan ${id} "${plan.title}" with ${tasks.length} tasks (session=${sessionId || 'none'})`);
         return plan;
     }
 
     getPlan(id) {
+        // B-2: 优先从 pending 读，保证读到未落盘的最新版
+        if (this._pendingPlans.has(id)) return this._pendingPlans.get(id);
         try {
             const fp = path.join(this._plansDir, `${id}.json`);
             if (fs.existsSync(fp)) {
@@ -139,41 +181,55 @@ class PlanManager {
     }
 
     _savePlan(plan) {
+        // B-2: 放入 pending 后防抖合并写 — plan 是同一实例引用，后续变更自动体现
         plan.updatedAt = Date.now();
-        try {
-            fs.writeFileSync(path.join(this._plansDir, `${plan.id}.json`), JSON.stringify(plan, null, 2), 'utf8');
-        } catch (e) {
-            this._log(`planner: save error ${plan.id} — ${e.message}`);
-        }
+        this._pendingPlans.set(plan.id, plan);
         // 同步 index
         const entry = this._index.find(p => p.id === plan.id);
         if (entry) {
             entry.status = plan.status;
             entry.title = plan.title;
             entry.updatedAt = plan.updatedAt;
-            this._saveIndex();
+            this._indexDirty = true;
         }
+        this._scheduleFlush();
     }
 
     deletePlan(id) {
+        // B-2: 先从 pending 移除，避免后续 flush 误写已删文件
+        this._pendingPlans.delete(id);
         this._index = this._index.filter(p => p.id !== id);
-        this._saveIndex();
+        this._indexDirty = true;
         try {
             const fp = path.join(this._plansDir, `${id}.json`);
             if (fs.existsSync(fp)) fs.unlinkSync(fp);
         } catch (_) {}
+        // 删除是资源释放动作，立即 flush index 以避免后续读到髆数据
+        this.flush();
         this._log(`planner: deleted ${id}`);
     }
 
-    getActivePlan() {
+    getActivePlan(sessionId = null) {
+        // F-2a: 可选按 session 过滤。传 sessionId 时只返回该 session 的活跃 plan
+        const matches = sessionId
+            ? this._index.filter(p => p.sessionId === sessionId)
+            : this._index;
         // 返回正在执行或已批准的计划（优先 executing）
-        const executing = this._index.find(p => p.status === PLAN_STATUS.EXECUTING);
+        const executing = matches.find(p => p.status === PLAN_STATUS.EXECUTING);
         if (executing) return this.getPlan(executing.id);
-        const approved = this._index.find(p => p.status === PLAN_STATUS.APPROVED);
+        const approved = matches.find(p => p.status === PLAN_STATUS.APPROVED);
         if (approved) return this.getPlan(approved.id);
-        const draft = this._index.find(p => p.status === PLAN_STATUS.DRAFT);
+        const draft = matches.find(p => p.status === PLAN_STATUS.DRAFT);
         if (draft) return this.getPlan(draft.id);
         return null;
+    }
+
+    // F-2a: 返回指定 session 的所有 plan（按 updatedAt 降序）
+    getSessionPlans(sessionId, limit = 10) {
+        return this._index
+            .filter(p => p.sessionId === sessionId)
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+            .slice(0, limit);
     }
 
     getRecentPlans(limit = 10) {

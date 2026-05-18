@@ -60,7 +60,68 @@ TOOL STRATEGY (CRITICAL — follow strictly to avoid wasteful loops):
 - When searching a project: list_files FIRST to understand structure, THEN targeted read_file on likely files. Don't guess search terms endlessly.
 - If a file has >200 lines and you need specific content, use search_text with a broad unique term, or read_file with offset/limit.
 - STOP searching after 8 tool calls without progress. Synthesize what you have and tell the user what you couldn't find and why.
-- Each tool call costs real money. Be surgical, not exploratory.`;
+- Each tool call costs real money. Be surgical, not exploratory.
+
+TURN SUMMARY (MANDATORY — for billing transparency):
+- At the very end of EVERY response, append on a NEW line: <turn_summary>one-sentence factual summary of what we just did or solved this turn, ≤200 chars</turn_summary>
+- Write the summary in the SAME language the user used (or the system locale).
+- Be concrete: what file/feature/bug, what was done. Examples:
+  * "Fixed null-pointer in agent.js _flushBilling when turnId missing; added guard clause and unit test"
+  * "修复 chat.html 输入框粘贴大段卡顿，改用 requestAnimationFrame 节流合并 token 预估和自动高度"
+- NEVER include passwords, API keys, tokens, credit card numbers, private keys, or any credentials in the summary.
+- The <turn_summary> tag is REQUIRED — even for trivial replies (e.g. greetings → "Greeting exchange").
+- The tag will be hidden from the user; it is consumed only by the billing ledger.`;
+
+// 流式 turn_summary 剥离器：从 fullContent 中实时分离 <turn_summary>...</turn_summary>
+// 不让用户看到标签内容，但累积到 stripper.summary 用于 billing 上报
+class TurnSummaryStripper {
+    constructor(onToken) {
+        this.onToken = onToken;
+        this.raw = '';            // 完整原始 content（含标签）
+        this.emitted = 0;         // 已 emit 给 UI 的字符数（raw 中的下标）
+        this._OPEN = '<turn_summary';
+        this._CLOSE = '</turn_summary>';
+    }
+    push(chunk) {
+        if (!chunk) return;
+        this.raw += chunk;
+        const openIdx = this.raw.indexOf(this._OPEN);
+        let safeUpTo;
+        if (openIdx >= 0) {
+            // 已找到开始标签：标签前的内容可以全部 emit，标签开始后绝不 emit
+            safeUpTo = openIdx;
+        } else {
+            // 未找到：保留末尾 OPEN.length 字符作为缓冲，以防标签被切碎在 chunk 边界
+            safeUpTo = Math.max(this.emitted, this.raw.length - this._OPEN.length);
+        }
+        if (safeUpTo > this.emitted) {
+            const piece = this.raw.slice(this.emitted, safeUpTo);
+            if (this.onToken) this.onToken(piece);
+            this.emitted = safeUpTo;
+        }
+    }
+    // 返回 { cleanContent, summary, lang }：cleanContent 用于推入 conversation
+    finalize() {
+        // emit 残余（无 tag 的情况）
+        const openIdx = this.raw.indexOf(this._OPEN);
+        if (openIdx < 0 && this.emitted < this.raw.length) {
+            const piece = this.raw.slice(this.emitted);
+            if (this.onToken) this.onToken(piece);
+            this.emitted = this.raw.length;
+        }
+        // 解析 tag
+        let summary = '', lang = '';
+        const m = this.raw.match(/<turn_summary([^>]*)>([\s\S]*?)(?:<\/turn_summary>|$)/);
+        if (m) {
+            summary = (m[2] || '').trim();
+            const langMatch = m[1].match(/lang=["']([^"']+)["']/);
+            if (langMatch) lang = langMatch[1];
+        }
+        // cleanContent：剥离整段 tag
+        const cleanContent = this.raw.replace(/\s*<turn_summary[^>]*>[\s\S]*?(?:<\/turn_summary>|$)\s*$/, '').trim();
+        return { cleanContent, summary, lang };
+    }
+}
 
 // ============================================================
 // 单通道架构：正则→Flash / 其他→Pro+Max
@@ -97,6 +158,24 @@ class Agent {
         };
         // 记忆系统
         this.memory = memory || null;
+        // ━━━ 指标收集系统（缓存命中率 / token 统计 / 性能追踪） ━━━
+        this._metrics = {
+            turn: { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0, toolCount: 0, costGe: 0, durationMs: 0, tier: '—', freeWindow: false, jsonMode: false, retries: 0, tokPerSec: 0, toolAvgMs: 0, toolTotalMs: 0, cnySaved: 0, maxTokens: 32768, ttftMs: 0 },
+            session: { promptTokens: 0, completionTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0, costGe: 0, toolCount: 0, turns: 0, retries: 0, cnySaved: 0, totalDurationMs: 0 },
+            engine: { factsCount: 0, narrativeLen: 0, ctxPct: 0, warmupStatus: 'none', lastCallTs: 0 }
+        };
+        this._onMetrics = null;
+        this._turnStart = 0;
+        this._requestStartMs = 0;
+        this._warmupStatus = 'none';
+        this._lastCallTs = 0;
+        // ━━━ Lifetime 指标持久化（跨 session 累计） ━━━
+        this._lifetime = this.context.globalState.get('qqq-ai.lifetimeMetrics') || {
+            promptTokens: 0, completionTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0,
+            costGe: 0, cnySaved: 0, turns: 0, sessions: 0, retries: 0, durationMs: 0
+        };
+        this._lifetime.sessions += 1;
+        this._persistLifetime();
         this._restoreFromMemory();
     }
 
@@ -120,6 +199,76 @@ class Agent {
     onRageChange(fn) { this._onRageChange = fn; }
     onHpChange(fn) { this._onHpChange = fn; }
     onRageDot(fn) { this._onRageDot = fn; }
+    onMetrics(fn) { this._onMetrics = fn; }
+
+    _emitMetrics() {
+        this._metrics.engine.factsCount = this._ctx.facts.length;
+        this._metrics.engine.narrativeLen = (this._ctx.narrative || '').length;
+        this._metrics.engine.ctxPct = Math.min(100, Math.round((this.totalTokens / 800000) * 100));
+        this._metrics.engine.warmupStatus = this._warmupStatus;
+        this._metrics.engine.lastCallTs = this._lastCallTs;
+        this._metrics.lifetime = { ...this._lifetime };
+        // S-1: 浅拷贝代替 JSON.parse(JSON.stringify) — webview postMessage 会再做结构化克隆
+        if (this._onMetrics) {
+            const m = this._metrics;
+            this._onMetrics({ turn: { ...m.turn }, session: { ...m.session }, engine: { ...m.engine }, lifetime: { ...m.lifetime } });
+        }
+    }
+
+    // S-2: 防抖 2s 持久化（避免每轮同步 IO）
+    _persistLifetime() {
+        if (this._lifetimeTimer) clearTimeout(this._lifetimeTimer);
+        this._lifetimeTimer = setTimeout(() => {
+            this.context.globalState.update('qqq-ai.lifetimeMetrics', this._lifetime);
+        }, 2000);
+    }
+
+    _flushLifetime() {
+        if (this._lifetimeTimer) { clearTimeout(this._lifetimeTimer); this._lifetimeTimer = null; }
+        this.context.globalState.update('qqq-ai.lifetimeMetrics', this._lifetime);
+    }
+
+    /**
+     * 首轮缓存预热（fire-and-forget）
+     * panel 打开后后台发一个轻量请求，让 DeepSeek 端建立 SYSTEM_PROMPT 缓存
+     * 需要才为用户第一轮消息可直接 cache hit，节省20倍费用
+     * 只执行一次，重复调用会被跳过
+     */
+    async warmupCache() {
+        if (this._cacheWarmed) return;
+        this._cacheWarmed = true;
+        this._warmupStatus = 'pending';
+        try {
+            const token = await this._getAuthToken();
+            if (!token) { this._cacheWarmed = false; this._warmupStatus = 'fail'; return; }
+            // 背景预热：发一个 max_tokens=1 的最小请求，不等待响应内容
+            fetch(GATEWAY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({
+                    messages: [
+                        { role: 'system', content: SYSTEM_PROMPT },
+                        { role: 'user', content: 'ping' }
+                    ],
+                    stream: false,
+                    max_tokens: 1,
+                    thinking: { type: 'disabled' },
+                    turn_id: 'warmup'
+                })
+            }).then(r => {
+                this._warmupStatus = r.ok ? 'ok' : 'fail';
+                this._log(`cache warmup: ${r.status} (${this._warmupStatus})`);
+                if (this._onMetrics) this._emitMetrics();
+            }).catch(err => {
+                this._warmupStatus = 'fail';
+                this._log(`cache warmup failed (non-critical): ${err.message}`);
+                if (this._onMetrics) this._emitMetrics();
+            });
+        } catch (err) {
+            this._warmupStatus = 'fail';
+            this._log(`cache warmup error: ${err.message}`);
+        }
+    }
 
     _updateRage(rage) {
         this.currentRage = rage;
@@ -315,12 +464,19 @@ Output ONLY valid JSON:
         this._turnCostWge = 0;
         // 生成本轮 turn_id（用于服务端聚合计费）
         this._turnId = crypto.randomUUID();
+        // 重置本轮 turn_summary（由 LLM 末尾 <turn_summary> 填充，未填则启发式兜底）
+        this._currentTurnSummary = '';
+        this._currentTurnSummaryLang = '';
+        // ━━━ 重置本轮指标 ━━━
+        this._turnStart = Date.now();
+        this._metrics.turn = { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0, toolCount: 0, costGe: 0, durationMs: 0, tier: '—', freeWindow: false, jsonMode: false, retries: 0, tokPerSec: 0, toolAvgMs: 0, toolTotalMs: 0, cnySaved: 0, maxTokens: 32768, ttftMs: 0 };
 
         try {
             // ─── 分流：正则判闲聊 → Flash，其他 → Pro+Max ───
             const isTrivial = TRIVIAL_REGEX.test(doerMessage.trim());
             const isChat = !isTrivial && CHAT_REGEX.test(doerMessage.trim());
             const tier = isTrivial ? TIER_FLASH : TIER_PRO_MAX;
+            this._metrics.turn.tier = tier.label;
             this._log(`◆ ${tier.label} (trivial=${isTrivial}, chat=${isChat})`);
 
             // 多图自动分析（在主调用前，让 Pro 拿到图片描述）
@@ -354,8 +510,43 @@ Output ONLY valid JSON:
             // 成功 → 清除图片缓存
             this._pendingImages = null;
 
-            // ─── 轮次结束：通知服务端 flush 账本（一笔汇总） ───
-            this._flushBilling();
+            // ─── 轮次结束：通知服务端 flush 账本（一笔汇总，携带 turn_summary） ───
+            this._buildAndFlushBilling(doerMessage, result);
+
+            // ━━━ 指标汇总 + 发射 ━━━
+            this._metrics.turn.durationMs = Date.now() - this._turnStart;
+            this._metrics.turn.costGe = this._turnCostWge / 10000;
+            this._metrics.turn.freeWindow = !!this._lastBillingFreeWindow;
+            // ━━━ 派生指标计算 ━━━
+            // tokens/sec：完成 token 速率（衡量模型吞吐量）
+            this._metrics.turn.tokPerSec = this._metrics.turn.durationMs > 0
+                ? Math.round(this._metrics.turn.completionTokens / this._metrics.turn.durationMs * 1000)
+                : 0;
+            // ¥节省：缓存命中省下的钱 = hit * (3 - 0.025) / 1M (CNY)
+            this._metrics.turn.cnySaved = this._metrics.turn.cacheHitTokens * 2.975 / 1000000;
+            // 工具均耗时
+            this._metrics.turn.toolAvgMs = this._metrics.turn.toolCount > 0
+                ? Math.round(this._metrics.turn.toolTotalMs / this._metrics.turn.toolCount)
+                : 0;
+            // Session 累加
+            this._metrics.session.costGe += this._metrics.turn.costGe;
+            this._metrics.session.toolCount += this._metrics.turn.toolCount;
+            this._metrics.session.turns += 1;
+            this._metrics.session.retries += this._metrics.turn.retries;
+            this._metrics.session.cnySaved += this._metrics.turn.cnySaved;
+            this._metrics.session.totalDurationMs += this._metrics.turn.durationMs;
+            // ━ Lifetime 累计 + 持久化 ━
+            this._lifetime.promptTokens += this._metrics.turn.promptTokens;
+            this._lifetime.completionTokens += this._metrics.turn.completionTokens;
+            this._lifetime.cacheHitTokens += this._metrics.turn.cacheHitTokens;
+            this._lifetime.cacheMissTokens += this._metrics.turn.cacheMissTokens;
+            this._lifetime.costGe += this._metrics.turn.costGe;
+            this._lifetime.cnySaved += this._metrics.turn.cnySaved;
+            this._lifetime.retries += this._metrics.turn.retries;
+            this._lifetime.durationMs += this._metrics.turn.durationMs;
+            this._lifetime.turns += 1;
+            this._persistLifetime();
+            this._emitMetrics();
 
             // ─── 费用输出（来自服务端精确值） ───
             if (opts.onCost) {
@@ -404,6 +595,20 @@ Output ONLY valid JSON:
                 // 网关失败（重试耗尽）→ 回滚对话数组，防止残片污染下一轮
                 this.conversation.length = conversationSnapshot;
                 break;
+            }
+
+            // ━━━ 累加 usage 指标 ━━━
+            if (response.usage) {
+                const u = response.usage;
+                this._metrics.turn.promptTokens += u.prompt_tokens || 0;
+                this._metrics.turn.completionTokens += u.completion_tokens || 0;
+                this._metrics.turn.reasoningTokens += (u.completion_tokens_details?.reasoning_tokens) || 0;
+                this._metrics.turn.cacheHitTokens += u.prompt_cache_hit_tokens || 0;
+                this._metrics.turn.cacheMissTokens += u.prompt_cache_miss_tokens || 0;
+                this._metrics.session.promptTokens += u.prompt_tokens || 0;
+                this._metrics.session.completionTokens += u.completion_tokens || 0;
+                this._metrics.session.cacheHitTokens += u.prompt_cache_hit_tokens || 0;
+                this._metrics.session.cacheMissTokens += u.prompt_cache_miss_tokens || 0;
             }
 
             if (response.type === 'message') {
@@ -586,6 +791,7 @@ Output ONLY valid JSON:
         }
 
         if (prepared.length === 0) return;
+        this._metrics.turn.toolCount += prepared.length;
 
         // ─── Step 2: 构建执行层 ───
         const layers = this._buildExecutionLayers(prepared);
@@ -594,7 +800,9 @@ Output ONLY valid JSON:
         // ─── Step 3: 逐层并行执行，渐进式推送结果 ───
         for (const layer of layers) {
             const promises = layer.items.map(async (item) => {
+                const _toolStart = Date.now();
                 const result = await executeTool(item.name, item.args);
+                this._metrics.turn.toolTotalMs += (Date.now() - _toolStart);
                 const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
                 this._log(`← tool result: ${resultStr.slice(0, 120)}`);
 
@@ -640,18 +848,39 @@ Output ONLY valid JSON:
             return null;
         }
         this._log(`→ gateway POST ${GATEWAY_URL}`);
+        // ━ TTFT 起点：记录请求发送时间 ━
+        this._requestStartMs = Date.now();
 
         // 提取当前查询用于语义检索
         const lastDoerMsg = [...messages].reverse().find(m => m.role === 'user');
         const currentQuery = lastDoerMsg?.content || '';
 
+        // ━━━ Prefix Caching Optimization ━━━
+        // messages[0] = static SYSTEM_PROMPT (永不变 → 第2轮起必缓存)
+        // messages[1..N-1] = conversation history (append-only → 自然缓存)
+        // 动态上下文(事实/叙事/scope) → 注入最后一条 user message (不破坏前缀)
+        const dynamicCtx = this._buildDynamicContext(currentQuery);
+        let apiMessages = messages;
+        if (dynamicCtx) {
+            apiMessages = messages.slice();
+            const lastIdx = apiMessages.length - 1;
+            if (lastIdx >= 0 && apiMessages[lastIdx].role === 'user') {
+                apiMessages[lastIdx] = { ...apiMessages[lastIdx], content: apiMessages[lastIdx].content + '\n\n' + dynamicCtx };
+            }
+        }
+
+        // ━━━ 视觉工具按需注入：当前查询含图片相关关键词时才传 analyze_image schema ━━━
+        const VISION_KEYWORDS = /(image|图片|截图|图像|picture|photo|\.png|\.jpe?g|\.gif|\.webp|\.bmp|视觉|分析图|看图)/i;
+        const needsVision = VISION_KEYWORDS.test(currentQuery) || !!(this._pendingImages && this._pendingImages.length > 0);
+
         const body = {
-            messages: [{ role: 'system', content: this._buildSystemPrompt(currentQuery) }, ...messages],
+            messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...apiMessages],
             stream: true,
             stream_options: { include_usage: true },
+            max_tokens: 32768,
             turn_id: this._turnId || ''
         };
-        if (!noTools) body.tools = getTools();
+        if (!noTools) body.tools = getTools(needsVision);
         if (thinking) body.thinking = thinking;
         if (effort) body.reasoning_effort = effort;
 
@@ -681,6 +910,7 @@ Output ONLY valid JSON:
                     }
                     this._log(`  ${resp.status} → retry #${_retryCount + 1} in ${waitSec}s...`);
                     if (onToken && _retryCount === 0) onToken(`\n[网络抖动，${waitSec}s 后自动重试...]\n`);
+                    this._metrics.turn.retries += 1;
                     await new Promise(r => setTimeout(r, waitSec * 1000));
                     return this._callGateway(messages, opts, config, _retryCount + 1);
                 }
@@ -696,6 +926,7 @@ Output ONLY valid JSON:
             }
 
             this._log(`✓ gateway ${resp.status} streaming...`);
+            this._lastCallTs = Date.now();
             return await this._parseSSE(resp.body, onToken);
         } catch (err) {
             if (err.name === 'AbortError') {
@@ -707,6 +938,7 @@ Output ONLY valid JSON:
                 const waitSec = 2 * Math.pow(2, _retryCount);
                 this._log(`  fetch error → retry #${_retryCount + 1} in ${waitSec}s (${err.message})`);
                 if (onToken && _retryCount === 0) onToken(`\n[网络错误，${waitSec}s 后自动重试...]\n`);
+                this._metrics.turn.retries += 1;
                 await new Promise(r => setTimeout(r, waitSec * 1000));
                 return this._callGateway(messages, opts, config, _retryCount + 1);
             }
@@ -717,16 +949,18 @@ Output ONLY valid JSON:
     }
 
     /**
-     * 解析 SSE 流（识别 billing 事件 + 提取 usage）
+     * 解析 SSE 流（识别 billing 事件 + 提取 usage + 缓存命中统计）
      */
     async _parseSSE(body, onToken) {
         const reader = body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-        let fullContent = '';
         let reasoningContent = '';
         let toolCalls = [];
-        let usage = null; // {reasoning_tokens, completion_tokens, prompt_tokens, total_tokens}
+        let usage = null;
+        let firstTokenSeen = false;
+        // turn_summary 流式剥离器：包装 onToken，使 <turn_summary>...</turn_summary> 不流到 UI
+        const stripper = new TurnSummaryStripper(onToken);
 
         while (true) {
             const { done, value } = await reader.read();
@@ -752,6 +986,7 @@ Output ONLY valid JSON:
                     }
 
                     // 提取 usage（通常在最后一个 chunk）
+                    // DeepSeek V4 返回: prompt_cache_hit_tokens, prompt_cache_miss_tokens
                     if (chunk.usage) {
                         usage = chunk.usage;
                     }
@@ -759,13 +994,19 @@ Output ONLY valid JSON:
                     const delta = chunk.choices?.[0]?.delta;
                     if (!delta) continue;
 
+                    // ━ TTFT 打点：第一个有效 token 到达时计算延迟 ━
+                    if (!firstTokenSeen && (delta.content || delta.reasoning_content || delta.tool_calls)) {
+                        firstTokenSeen = true;
+                        this._metrics.turn.ttftMs = Date.now() - this._requestStartMs;
+                    }
+
                     if (delta.reasoning_content) {
                         reasoningContent += delta.reasoning_content;
                     }
 
                     if (delta.content) {
-                        fullContent += delta.content;
-                        if (onToken) onToken(delta.content);
+                        // 流式剥离 turn_summary 标签 — 标签内容不会发给 UI
+                        stripper.push(delta.content);
                     }
 
                     if (delta.tool_calls) {
@@ -783,11 +1024,19 @@ Output ONLY valid JSON:
             }
         }
 
+        // finalize：抽取 turn_summary，得到剥离后的 cleanContent
+        const { cleanContent, summary, lang } = stripper.finalize();
+        // 累积到本轮 summary（最后一次工具调用循环的 message 才是终结摘要，所以覆盖式赋值）
+        if (summary) {
+            this._currentTurnSummary = summary;
+            if (lang) this._currentTurnSummaryLang = lang;
+        }
+
         if (toolCalls.length > 0) {
             return { type: 'tool_calls', tool_calls: toolCalls.filter(Boolean), usage, reasoning_content: reasoningContent || undefined };
         }
-        if (fullContent) {
-            return { type: 'message', content: fullContent, usage, reasoning_content: reasoningContent || undefined };
+        if (cleanContent) {
+            return { type: 'message', content: cleanContent, usage, reasoning_content: reasoningContent || undefined };
         }
         return null;
     }
@@ -822,30 +1071,58 @@ Output ONLY valid JSON:
     /**
      * 轮次结束后通知服务端 flush 账本（火并忘，不阻塞 UI）
      * 服务端汇总本轮所有 API 调用的 wge → 写一笔 PG 账本
+     * 携带 turn_summary + lang：账本 description 将记录本轮沟通主题（可追溯、可审计）
      */
-    async _flushBilling() {
+    async _flushBilling(summary, lang) {
         if (!this._turnId || this._turnCostWge <= 0) return;
         try {
             const token = await this._getAuthToken();
             if (!token) return;
+            const body = { turn_id: this._turnId };
+            if (summary) body.summary = String(summary).slice(0, 222);
+            if (lang) body.lang = String(lang).slice(0, 8);
             fetch(BILLING_FLUSH_URL, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify({ turn_id: this._turnId })
+                body: JSON.stringify(body)
             }).catch(() => {}); // fire-and-forget
         } catch (_) {}
     }
 
-    _buildSystemPrompt(currentQuery = '') {
-        let prompt = SYSTEM_PROMPT;
+    /**
+     * 汇总本轮 summary（优先 LLM 标签 → 启发式兜底）后上报
+     * lang 来源优先级：LLM 标签属性 > vscode.env.language > 'en'
+     */
+    _buildAndFlushBilling(userMessage, assistantResult) {
+        let summary = (this._currentTurnSummary || '').trim();
+        // 启发式兜底：LLM 未输出 <turn_summary>（或输出为空）
+        if (!summary) {
+            const u = (userMessage || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+            const a = (assistantResult || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+            summary = u && a ? `${u} | ${a}` : (u || a || '').slice(0, 200);
+        }
+        // 客户端轻量脱敏（服务端会再做一道硬脱敏）
+        summary = summary
+            .replace(/(sk-[A-Za-z0-9_-]{16,})/g, '[REDACTED_KEY]')
+            .replace(/(ghp_[A-Za-z0-9]{16,})/g, '[REDACTED_TOKEN]')
+            .replace(/(AKIA[0-9A-Z]{12,})/g, '[REDACTED_AK]')
+            .replace(/(?:password|passwd|pwd)\s*[:=]\s*\S+/gi, '[REDACTED_PWD]')
+            .replace(/-----BEGIN[\s\S]+?-----END[^-]*-----/g, '[REDACTED_PEM]')
+            .slice(0, 200);
+        const lang = this._currentTurnSummaryLang
+            || ((vscode.env && vscode.env.language) ? vscode.env.language : 'en');
+        this._flushBilling(summary, lang);
+    }
 
-        // ━━━ 完美上下文引擎注入 ━━━
+    _buildDynamicContext(currentQuery = '') {
+        let ctx = '';
+
         // 1. 全局叙事（连贯性）
         if (this._ctx.narrative) {
-            prompt += `\n\nCONVERSATION CONTEXT (compressed history):\n${this._ctx.narrative}`;
+            ctx += `CONVERSATION CONTEXT (compressed history):\n${this._ctx.narrative}`;
         }
 
         // 2. 语义检索相关事实（精准注入）
@@ -853,19 +1130,19 @@ Output ONLY valid JSON:
             const relevant = this._retrieveRelevantFacts(currentQuery, 15);
             if (relevant.length > 0) {
                 const factsBlock = relevant.map(f => `- [${f.type}] ${f.content}`).join('\n');
-                prompt += `\n\nRELEVANT FACTS FROM EARLIER (${relevant.length}/${this._ctx.facts.length} total):\n${factsBlock}`;
+                ctx += `\n\nRELEVANT FACTS FROM EARLIER (${relevant.length}/${this._ctx.facts.length} total):\n${factsBlock}`;
             }
         } else if (this._ctx.facts.length > 0) {
             // 无查询时注入最近 10 条事实
             const recent = this._ctx.facts.slice(-10);
             const factsBlock = recent.map(f => `- [${f.type}] ${f.content}`).join('\n');
-            prompt += `\n\nRECENT CONTEXT FACTS:\n${factsBlock}`;
+            ctx += `\n\nRECENT CONTEXT FACTS:\n${factsBlock}`;
         }
 
         // L1: 注入历史摘要（跨会话）
         if (this.memory) {
             const memorySuffix = this.memory.formatSummariesForPrompt(10);
-            if (memorySuffix) prompt += memorySuffix;
+            if (memorySuffix) ctx += memorySuffix;
         }
         try {
             const qqqExt = vscode.extensions.getExtension('gh555.qqq');
@@ -877,17 +1154,17 @@ Output ONLY valid JSON:
                         const eye = f.visible ? '\u{1F441}' : '\u{1F6AB}';
                         return `  ${eye} ${f.name} (${f.path})`;
                     }).join('\n');
-                    prompt += `\n\nCURRENT VISION SCOPE:\n${list}`;
+                    ctx += `\n\nCURRENT VISION SCOPE:\n${list}`;
                 }
             } else {
                 const wf = vscode.workspace.workspaceFolders;
                 if (wf && wf.length > 0) {
                     const list = wf.map(f => `  ${f.name} (${f.uri.fsPath})`).join('\n');
-                    prompt += `\n\nCURRENT WORKSPACE:\n${list}`;
+                    ctx += `\n\nCURRENT WORKSPACE:\n${list}`;
                 }
             }
         } catch (_) {}
-        return prompt;
+        return ctx.trim() ? `[DYNAMIC CONTEXT]\n${ctx}` : '';
     }
 
     async _getAuthToken() {
@@ -911,10 +1188,11 @@ Output ONLY valid JSON:
     /**
      * ━━━ Plan 执行入口 ━━━
      * 被 PlanExecutor 调用，执行单个 task
-     * 与 sendMessage 类似，但:
-     * - 不触发计划检测（避免递归）
-     * - 不推入 conversation（每个 task 独立上下文窗口轻量化）
-     * - 使用独立的 mini conversation 执行
+     * F-1：使用跨 task 累积的 _planConversation，让 LLM 能看到前面 task 的完整工具调用历史
+     * — 避免“做完第 1、2 个 task 后忘了重新规划”问题
+     * 不污染主对话 this.conversation。生命周期由 plan-executor 控制：
+     *   - execute 开始时：agent._planConversation = []
+     *   - execute 结束时：agent._planConversation = null
      */
     async executeTask(taskPrompt, opts = {}) {
         this._log(`→ executeTask: ${taskPrompt.slice(0, 80)}`);
@@ -922,22 +1200,27 @@ Output ONLY valid JSON:
         // 重置本轮费用
         this._turnCostWge = 0;
         this._turnId = crypto.randomUUID();
+        // 重置本轮 turn_summary（task 也按一轮一笔扣费，需要 summary）
+        this._currentTurnSummary = '';
+        this._currentTurnSummaryLang = '';
 
-        // 构建独立的 mini conversation（不污染主对话）
-        const taskConversation = [
-            { role: 'user', content: taskPrompt }
-        ];
+        // F-1: 如果 plan-executor 未初始化（兼容直接调用），恶補一个空数组
+        if (!Array.isArray(this._planConversation)) {
+            this._planConversation = [];
+        }
+        // 追加当前 task 的 user prompt（历史不清）
+        this._planConversation.push({ role: 'user', content: taskPrompt });
 
-        // 临时替换 conversation
+        // 临时将 conversation 指向 plan 对话 — _executeWithTools 内部 push 的 assistant/tool 会自然累积
         const savedConversation = this.conversation;
-        this.conversation = taskConversation;
+        this.conversation = this._planConversation;
 
         try {
             const tier = TIER_PRO_MAX;
             const result = await this._executeWithTools(opts, tier, { noTools: false });
 
-            // flush billing
-            this._flushBilling();
+            // flush billing（task 也带 turn_summary）
+            this._buildAndFlushBilling(taskPrompt, result);
 
             return result;
         } catch (err) {
@@ -945,7 +1228,7 @@ Output ONLY valid JSON:
             if (opts.onError) opts.onError(err.message);
             throw err;
         } finally {
-            // 恢复主对话
+            // 恢复主对话 — 但 _planConversation 保留，供下一个 task 累积
             this.conversation = savedConversation;
         }
     }
@@ -959,34 +1242,45 @@ Output ONLY valid JSON:
         const token = await this._getAuthToken();
         if (!token) return null;
 
-        const planPrompt = `You are a task planner for qqq IDE. Analyze this user request and create a structured execution plan.
+        const planPrompt = `You are a task planner for qqq IDE. Decide if this user request needs a multi-step Plan.
 
 User request:
 "${userMessage}"
 
-If this is a COMPLEX task (3+ steps, multiple files, architectural decisions), output a JSON plan:
+# DEFAULT: { "needs_plan": false }
+
+Only create a plan if the request CLEARLY requires ALL of these:
+- 3+ distinct sequential steps that depend on each other
+- AND modifying 3+ files OR major architectural change OR multi-stage migration
+- AND the user is explicitly asking for a structured execution
+
+# Output { "needs_plan": false } for:
+- Single-file edits (any size)
+- Bug fixes, even non-trivial ones
+- Adding/modifying a function/class/component
+- Configuration tweaks
+- Adding logging/comments/types
+- Style/format changes
+- Code review, questions, explanations
+- Refactoring within one file
+- Anything that one focused edit-and-verify cycle can solve
+- When in doubt, output { "needs_plan": false }
+
+# Output a Plan JSON only when needed:
 {
   "needs_plan": true,
   "title": "short title (Chinese ok)",
-  "overview": "1-2 sentence summary of what will be done",
+  "overview": "1-2 sentence summary",
   "tasks": [
-    {
-      "content": "具体步骤描述",
-      "files": ["file paths if known"],
-      "dependencies": []  // task indices (0-based) this depends on
-    }
+    { "content": "具体步骤描述", "files": ["file paths if known"], "dependencies": [] }
   ]
 }
 
-If this is SIMPLE (1-2 steps, single file, trivial change), output:
-{ "needs_plan": false }
-
 Rules:
-- Tasks should be verifiable (each has a clear done condition)
+- Tasks should be verifiable
 - Group related file changes into one task
-- Include a verification task after major implementation steps
-- Max 8 tasks (break larger plans into phases)
-- Output ONLY the JSON, nothing else.`;
+- Max 6 tasks (the user can always ask for sub-plans)
+- Output ONLY JSON, nothing else.`;
 
         try {
             const resp = await fetch(GATEWAY_URL, {
@@ -999,17 +1293,16 @@ Rules:
                     ],
                     stream: true,
                     stream_options: { include_usage: true },
-                    thinking: { type: 'disabled' }
+                    thinking: { type: 'disabled' },
+                    response_format: { type: 'json_object' }
                 })
             });
 
             if (!resp.ok) return null;
 
-            // 流式收集完整响应（gateway 只支持 SSE）
             const fullText = await this._collectSSEContent(resp.body);
             if (!fullText) return null;
 
-            // 提取 JSON（可能被 ```json 包裹）
             const jsonMatch = fullText.match(/\{[\s\S]*\}/);
             if (!jsonMatch) return null;
 
@@ -1020,6 +1313,77 @@ Rules:
             return parsed;
         } catch (e) {
             this._log(`planner: generation failed — ${e.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * 修订现有 Plan：用户通过聊天反馈修改计划
+     * Flash 模式（省钱），保留主干，精细调整
+     */
+    async revisePlan(currentPlan, userFeedback) {
+        const token = await this._getAuthToken();
+        if (!token) return null;
+
+        const taskList = currentPlan.tasks.map((t, i) => `${i + 1}. ${t.content}`).join('\n');
+
+        const revisePrompt = `You are revising an existing execution plan based on user feedback.
+
+Current plan:
+Title: ${currentPlan.title}
+Overview: ${currentPlan.overview}
+Tasks:
+${taskList}
+
+User feedback:
+"${userFeedback}"
+
+Revise the plan based on the feedback. Keep the main structure intact unless the user explicitly wants to change it. Make minimal, surgical changes.
+
+Output the revised plan as JSON:
+{
+  "title": "...",
+  "overview": "...",
+  "tasks": [
+    { "content": "...", "files": [...], "dependencies": [] }
+  ]
+}
+
+Rules:
+- Preserve unchanged tasks exactly as-is
+- Only modify/add/remove tasks as requested
+- Keep max 8 tasks
+- Output ONLY the JSON, nothing else.`;
+
+        try {
+            const resp = await fetch(GATEWAY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({
+                    messages: [
+                        { role: 'system', content: 'You are a precise JSON-only task planner. Output valid JSON only.' },
+                        { role: 'user', content: revisePrompt }
+                    ],
+                    stream: true,
+                    stream_options: { include_usage: true },
+                    thinking: { type: 'disabled' },
+                    response_format: { type: 'json_object' }
+                })
+            });
+
+            if (!resp.ok) return null;
+
+            const fullText = await this._collectSSEContent(resp.body);
+            if (!fullText) return null;
+
+            const jsonMatch = fullText.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) return null;
+
+            const parsed = JSON.parse(jsonMatch[0]);
+            this._log(`planner: revised plan "${parsed.title}" → ${parsed.tasks?.length || 0} tasks`);
+            return parsed;
+        } catch (e) {
+            this._log(`planner: revision failed — ${e.message}`);
             return null;
         }
     }

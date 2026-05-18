@@ -260,7 +260,9 @@ def _play_radio(m3u8_url, timeout_sec=0, stream_url=""):
                 pass
             _AUDIO_CURRENT_TOKEN = None
 
-        _AUDIO_CURRENT_TOKEN = engine.play_radio_stream(stream_url) if use_stream else engine.play_radio_hls(m3u8_url)
+        # ★ Pass live_check so worker can skip retries when radio goes offline
+        # (avoids hung connections to a stale URL after server stopped broadcasting)
+        _AUDIO_CURRENT_TOKEN = engine.play_radio_stream(stream_url, live_check=lambda: _RADIO_LIVE) if use_stream else engine.play_radio_hls(m3u8_url)
         _AUDIO_IS_LOOPING = True
         _AUDIO_CURRENT_FILE = "Radio"
         _AUDIO_LOOP_COUNT = 0

@@ -8,6 +8,12 @@ const { PlanManager, PLAN_STATUS, TASK_STATUS } = require('../planner');
 const { PlanExecutor } = require('../plan-executor');
 const { setPanelRef, setAuthTokenRef } = require('../tools');
 
+// F-3: 前置 Plan 过滤正则（与 agent.js 同款但独立维护，避免跨文件依赖）
+// trivial：问候/语气词/表情
+// chat：聊天/情感表达
+const PLAN_TRIVIAL_REGEX = /^\s*(hi|hello|hey|ok|好的?|谢谢|嗯|哦|行|对|是的?|no|yes|yeah|thx|thanks|bye|再见|晚安|早|\p{Emoji_Presentation}{1,3})\s*[!！.。~？?]*\s*$/iu;
+const PLAN_CHAT_REGEX = /^[^\n]{0,30}(爱|喜欢|想你|想我|帅|美|漂亮|可爱|笨|傻|无聊|寂寞|陪我|聊天|心情|感觉怎样|你好吗|开心|难过|生气|讨厌|恨|朋友|宝贝|亲爱|老公|老婆|哈哈|呵呵|嘻嘻|累了|困了|饿了|冷了|热了)[^\n]{0,20}$/iu;
+
 class ChatPanelProvider {
     constructor(context, logFn) {
         this.context = context;
@@ -44,6 +50,8 @@ class ChatPanelProvider {
     }
 
     _createAgent(sessionId) {
+        // S-2: 切换 session 前 flush 旧 agent 的 lifetime
+        if (this.agent && this.agent._flushLifetime) this.agent._flushLifetime();
         const memory = new MemoryManager(this._sessionManager, sessionId, this._log);
         this.agent = new Agent(this.context, this._log, memory);
 
@@ -57,6 +65,13 @@ class ChatPanelProvider {
         this.agent.onRageDot((rage, usage) => {
             this._postMessage({ type: 'rageDot', rage, usage });
         });
+        this.agent.onMetrics((metrics) => {
+            this._postMessage({ type: 'metrics', metrics });
+        });
+
+        // ━━━ 首轮缓存预热：后台建立 SYSTEM_PROMPT 缓存，让用户第一轮消息直接 hit ━━━
+        // fire-and-forget，失败不影响主流程
+        setTimeout(() => { this.agent.warmupCache(); }, 500);
 
         // 初始化 PlanExecutor
         this._planExecutor = new PlanExecutor(this._planManager, this.agent, this._log);
@@ -184,15 +199,67 @@ class ChatPanelProvider {
 
         this._postMessage({ type: 'start' });
 
+        // ─── Plan 修订：如果当前有 draft plan，用户消息视为修改反馈 ───
+        // F-2b: 按 session 过滤，避免互相串台
+        const activePlan = this._planManager.getActivePlan(this._activeSessionId);
+        if (activePlan && activePlan.status === 'draft') {
+            this._postMessage({ type: 'planRevising', planId: activePlan.id });
+            const revisedData = await this.agent.revisePlan(activePlan, finalText);
+            if (revisedData) {
+                // 更新 plan 数据
+                activePlan.title = revisedData.title;
+                activePlan.overview = revisedData.overview;
+                activePlan.tasks = revisedData.tasks.map((t, i) => ({
+                    id: require('crypto').randomBytes(8).toString('hex'),
+                    content: t.content,
+                    files: t.files || [],
+                    dependencies: t.dependencies || [],
+                    status: 'pending',
+                    order: i + 1
+                }));
+                this._planManager._savePlan(activePlan);
+
+                // 发送更新后的 plan 卡片到 UI
+                this._postMessage({
+                    type: 'planRevised',
+                    action: 'revise',
+                    analysis: `根据你的反馈修订了计划`,
+                    planId: activePlan.id,
+                    plan: {
+                        id: activePlan.id,
+                        title: activePlan.title,
+                        overview: activePlan.overview,
+                        tasks: activePlan.tasks.map(t => ({ id: t.id, content: t.content, order: t.order, status: t.status }))
+                    }
+                });
+
+                // 显示修订后的概览
+                const taskList = activePlan.tasks.map((t, i) => `${i + 1}. ${t.content}`).join('\n');
+                const summary = `✅ **计划已修订: ${activePlan.title}**\n\n${activePlan.overview}\n\n**执行步骤:**\n${taskList}\n\n_满意请点「执行计划」，或继续对话再次修改。_`;
+                this._postMessage({ type: 'done', content: summary });
+            } else {
+                this._postMessage({ type: 'done', content: '修订失败，请再试一次或直接执行原计划。' });
+            }
+            return;
+        }
+
         // ─── Plan 检测：复杂任务自动生成计划 ───
-        // 条件：无图片、非闲聊、不在执行中、消息非 trivial
-        const shouldPlan = !images && finalText.length > 10 && !this._planExecutor?.isRunning;
+        // F-3: 加强前置过滤，避免小问题也强生成 plan
+        // 条件：无图片、不在执行中、长度 ≥ 30 字、非 trivial/chat 闲聊
+        const trimmed = finalText.trim();
+        const isTrivial = PLAN_TRIVIAL_REGEX.test(trimmed);
+        const isChat = !isTrivial && PLAN_CHAT_REGEX.test(trimmed);
+        const shouldPlan = !images
+            && trimmed.length >= 30
+            && !isTrivial
+            && !isChat
+            && !this._planExecutor?.isRunning;
         if (shouldPlan) {
             // LLM 判定是否需要 plan（Flash 模式，~0.5s）
             const planData = await this.agent.generatePlan(finalText);
             if (planData) {
-                // 创建 Plan 并发送给 UI 等待用户批准
-                const plan = this._planManager.createPlan(planData);
+                // F-2a: 创建 Plan 时绑定当前 session
+                const plan = this._planManager.createPlan(planData, this._activeSessionId);
                 this._postMessage({
                     type: 'planDraft',
                     plan: {
@@ -292,6 +359,15 @@ class ChatPanelProvider {
         this.agent.clearConversation().then(() => {
             this._postMessage({ type: 'cleared' });
         });
+    }
+
+    flushLifetime() {
+        if (this.agent && this.agent._flushLifetime) this.agent._flushLifetime();
+    }
+
+    // B-2: 供 extension deactivate 调用，flush planner 未落盘的 plan
+    flushPlanner() {
+        if (this._planManager && this._planManager.flush) this._planManager.flush();
     }
 
     requestConfirm(message, actions = ['Apply', 'Reject']) {
@@ -400,7 +476,8 @@ class ChatPanelProvider {
         }
 
         // ━━━ 恢复活跃 Plan 卡片 ━━━
-        const activePlan = this._planManager.getActivePlan();
+        // F-2b: 按当前 session 过滤，避免跨会话串台
+        const activePlan = this._planManager.getActivePlan(this._activeSessionId);
         if (activePlan) {
             this._postMessage({
                 type: 'planDraft',

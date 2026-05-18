@@ -25,6 +25,10 @@ function activate(context) {
             webviewOptions: { retainContextWhenHidden: true }
         })
     );
+    // S-2: deactivate 时刷新 lifetime 指标
+    context.subscriptions.push({ dispose: () => chatProvider.flushLifetime && chatProvider.flushLifetime() });
+    // B-2: deactivate 时 flush planner 未落盘的 plan
+    context.subscriptions.push({ dispose: () => chatProvider.flushPlanner && chatProvider.flushPlanner() });
 
     // 注册命令
     context.subscriptions.push(
