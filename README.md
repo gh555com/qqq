@@ -16,6 +16,7 @@ qqq turns VS Code, Cursor, Antigravity, Code-OSS, and VSCodium into an all-media
 - Project discussion and roadmap: https://github.com/gh555com/qqq/discussions/6
 - Official download: https://www.gh555.com/qqq
 - Source code: https://github.com/gh555com/qqq
+- qqq IDE Development Progress since 2026.05.16: https://github.com/gh555com/qqq/discussions/7
 
 Original **name**: qqq [![GitHub stars](https://img.shields.io/github/stars/gh555com/qqq?style=social)](https://github.com/gh555com/qqq)
 
