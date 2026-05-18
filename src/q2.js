@@ -2495,6 +2495,20 @@ function performCopyAction(item){
   // Allow copying parent dir in single-select; this is considered the user's explicit intent
   vscode.postMessage({ command: 'copy', paths: [item.path] });
 }
+function performCopyPathAction(){
+  let paths = [];
+  if (selectedItems.length > 1) {
+    paths = selectedItems
+      .filter(item => item.name !== '..')
+      .map(item => item.path);
+  } else if (selectedItem && selectedItem.name !== '..') {
+    paths = [selectedItem.path];
+  }
+  if (paths.length > 0) {
+    roamTick('x');
+    navigator.clipboard.writeText(paths.join('\n')).catch(() => { });
+  }
+}
 function performPasteAction(){
   vscode.postMessage({ command: 'paste', destDir: currentPath });
 }

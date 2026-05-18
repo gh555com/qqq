@@ -4,22 +4,40 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
+        :root {
+            --base03: #002b36; --base02: #073642; --base01: #586e75; --base00: #657b83;
+            --base0: #839496; --base1: #93a1a1; --base2: #fdf6e3; --base3: #eee8d5;
+            --yellow: #b58900; --orange: #cb4b16; --red: #dc322f; --magenta: #d33682;
+            --violet: #6c71c4; --blue: #268bd2; --cyan: #2aa198; --green: #859900;
+            --primary-color: var(--yellow); --background-color: var(--base3);
+            --card-bg: var(--base2); --text-primary: #2a211c; --border-color: #d3c6aa;
+        }
+        [data-theme="dark"] {
+            --base03: #fdf6e3; --base02: #eee8d5; --base01: #93a1a1; --base00: #c8c4b8;
+            --base0: #a8a49c; --base1: #6a6660; --base2: #2a2a2a; --base3: #1e1e1e;
+            --yellow: #d4a017; --orange: #e07020; --red: #ff4444; --magenta: #c06080;
+            --violet: #a08060; --blue: #d4a017; --cyan: #5abfb5; --green: #8fbc5a;
+            --primary-color: var(--yellow); --background-color: #1e1e1e;
+            --card-bg: #2a2a2a; --text-primary: #d4d0c8; --border-color: #444;
+        }
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { forced-color-adjust: none !important; }
         body {
             font-family: var(--vscode-font-family, system-ui);
             font-size: var(--vscode-font-size, 13px);
-            color: var(--vscode-foreground);
-            background: var(--vscode-sideBar-background);
+            color: var(--text-primary);
+            background: var(--background-color);
             height: 100vh;
             display: flex;
             flex-direction: column;
-            overflow: hidden;
+            overflow-x: hidden;
         }
 
         #status-bar {
             padding: 4px 10px;
             font-size: 10px;
-            border-bottom: 1px solid var(--vscode-panel-border);
+            border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             gap: 8px;
@@ -28,7 +46,7 @@
         .bar-wrap {
             flex: 1;
             height: 6px;
-            background: var(--vscode-input-background);
+            background: var(--card-bg);
             border-radius: 3px;
             overflow: hidden;
             position: relative;
@@ -38,8 +56,8 @@
             border-radius: 3px;
             transition: width 0.3s ease;
         }
-        #hp-fill { background: var(--vscode-terminal-ansiGreen, #4ec9b0); width: 0%; }
-        #rage-fill { background: var(--vscode-terminal-ansiRed, #f14c4c); width: 0%; }
+        #hp-fill { background: var(--green); width: 0%; }
+        #rage-fill { background: var(--red); width: 0%; }
 
         /* 底边上下文血条 */
         #ctx-bar {
@@ -47,7 +65,7 @@
             bottom: 0;
             left: 0;
             height: 4px;
-            background: var(--vscode-terminal-ansiGreen, #4ec9b0);
+            background: var(--green);
             width: 0%;
             min-width: 0;
             z-index: 9998;
@@ -79,7 +97,7 @@
         #tab-bar {
             display: flex;
             align-items: center;
-            border-bottom: 1px solid var(--vscode-panel-border);
+            border-bottom: 1px solid var(--border-color);
             overflow-x: hidden;
             min-height: 26px;
             flex-shrink: 0;
@@ -90,7 +108,7 @@
             font-size: 11px;
             cursor: pointer;
             white-space: nowrap;
-            border-right: 1px solid var(--vscode-panel-border);
+            border-right: 1px solid var(--border-color);
             opacity: 0.6;
             position: relative;
             max-width: 120px;
@@ -98,8 +116,8 @@
             text-overflow: ellipsis;
             flex-shrink: 0;
         }
-        .tab-item:hover { opacity: 0.9; background: var(--vscode-list-hoverBackground); }
-        .tab-item.active { opacity: 1; background: var(--vscode-editor-background); font-weight: bold; }
+        .tab-item:hover { opacity: 0.9; background: var(--card-bg); }
+        .tab-item.active { opacity: 1; background: var(--background-color); font-weight: bold; }
         .tab-item .tab-close {
             display: none;
             position: absolute;
@@ -113,7 +131,7 @@
             border-radius: 2px;
         }
         .tab-item:hover .tab-close { display: inline; }
-        .tab-item .tab-close:hover { opacity: 1; background: var(--vscode-terminal-ansiRed, #c93c37); color: #fff; }
+        .tab-item .tab-close:hover { opacity: 1; background: var(--red); color: #fff; }
         #tab-new {
             padding: 4px 8px;
             font-size: 13px;
@@ -126,14 +144,14 @@
         /* 左上角费用标签 */
         #cost-label {
             font-weight: bold;
-            color: var(--vscode-foreground);
+            color: var(--text-primary);
             opacity: 0.9;
         }
 
         /* 怒气值 K线图 */
         .chart-wrap {
-            background: var(--vscode-input-background);
-            border-bottom: 1px solid var(--vscode-panel-border);
+            background: var(--card-bg);
+            border-bottom: 1px solid var(--border-color);
             position: relative;
             flex-shrink: 0;
         }
@@ -156,14 +174,19 @@
             display: flex;
             overflow: hidden;
             position: relative;
+            min-height: 0;
         }
         #ge-bar-track {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
             width: 4px;
             min-width: 4px;
-            background: var(--vscode-terminal-ansiRed, #f14c4c);
-            position: relative;
-            flex-shrink: 0;
+            background: var(--red);
+            z-index: 1;
             cursor: pointer;
+            flex-shrink: 0;
         }
         #ge-bar-track:hover::after {
             content: attr(data-tip);
@@ -171,8 +194,8 @@
             left: 8px;
             top: 50%;
             transform: translateY(-50%);
-            background: var(--vscode-editorWidget-background);
-            border: 1px solid var(--vscode-editorWidget-border);
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
             padding: 2px 6px;
             font-size: 11px;
             white-space: nowrap;
@@ -181,10 +204,10 @@
         }
         #ge-bar-fill {
             position: absolute;
-            bottom: 0;
             left: 0;
-            width: 100%;
-            height: 100%;
+            right: 0;
+            top: 0;
+            bottom: 0;
         }
         #ge-bar-fill.animating {
             animation: geBarPulse 2s ease-in-out infinite;
@@ -201,17 +224,19 @@
             overflow-x: hidden;
             padding: 12px;
             scrollbar-width: thin;
+            margin-left: 4px;
+            min-height: 0;
         }
         #messages::-webkit-scrollbar { width: 6px; }
-        #messages::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 3px; }
-        #messages::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground); }
+        #messages::-webkit-scrollbar-thumb { background: var(--base01); border-radius: 3px; }
+        #messages::-webkit-scrollbar-thumb:hover { background: var(--base00); }
 
         .msg {
             margin-bottom: 12px;
             line-height: 1.5;
         }
         .msg-doer {
-            background: var(--vscode-input-background);
+            background: var(--card-bg);
             border-radius: 8px;
             padding: 8px 12px;
         }
@@ -237,7 +262,7 @@
             user-select: none;
             z-index: 1;
         }
-        .msg-img-badge:hover { background: var(--vscode-terminal-ansiGreen, #4ec9b0); }
+        .msg-img-badge:hover { background: var(--green); }
         .msg-ai {
             padding: 8px 0;
             word-break: break-word;
@@ -251,7 +276,7 @@
         .msg-ai ul, .msg-ai ol { margin: 4px 0 4px 20px; }
         .msg-ai li { margin: 2px 0; }
         .msg-ai code {
-            background: var(--vscode-textCodeBlock-background, rgba(127,127,127,0.15));
+            background: var(--base02);
             padding: 1px 4px;
             border-radius: 3px;
             font-family: var(--vscode-editor-font-family, monospace);
@@ -259,7 +284,7 @@
             word-break: break-all;
         }
         .msg-ai pre {
-            background: var(--vscode-textCodeBlock-background, rgba(0,0,0,0.2));
+            background: var(--base02);
             padding: 8px 10px;
             border-radius: 4px;
             overflow: hidden;
@@ -269,12 +294,12 @@
         }
         .msg-ai pre code { background: none; padding: 0; }
         .msg-ai blockquote {
-            border-left: 3px solid var(--vscode-textBlockQuote-border, #555);
+            border-left: 3px solid var(--border-color);
             padding-left: 10px;
             margin: 4px 0;
             opacity: 0.85;
         }
-        .msg-ai hr { border: none; border-top: 1px solid var(--vscode-panel-border); margin: 8px 0; }
+        .msg-ai hr { border: none; border-top: 1px solid var(--border-color); margin: 8px 0; }
         .msg-ai a { color: var(--vscode-textLink-foreground, #3794ff); text-decoration: none; }
         .msg-ai a:hover { text-decoration: underline; }
         .msg-ai strong { font-weight: bold; }
@@ -284,7 +309,7 @@
             opacity: 0.5;
             padding: 2px 0;
             font-style: italic;
-            color: var(--vscode-descriptionForeground, #888);
+            color: var(--base00);
         }
         .msg-tool-details {
             font-size: 11px;
@@ -327,7 +352,7 @@
             border-radius: 6px;
             padding: 10px;
             margin: 8px 0;
-            background: var(--vscode-editor-background);
+            background: var(--background-color);
         }
         .plan-header {
             display: flex;
@@ -341,13 +366,13 @@
             font-size: 9px;
             padding: 1px 5px;
             border-radius: 3px;
-            background: var(--vscode-badge-background, #444);
-            color: var(--vscode-badge-foreground, #fff);
+            background: var(--base01);
+            color: var(--base3);
             text-transform: uppercase;
         }
-        .plan-badge.executing { background: var(--vscode-terminal-ansiGreen, #2d7d46); }
-        .plan-badge.complete { background: var(--vscode-terminal-ansiGreen, #1a7f37); }
-        .plan-badge.failed { background: var(--vscode-terminal-ansiRed, #c93c37); }
+        .plan-badge.executing { background: var(--green); }
+        .plan-badge.complete { background: var(--green); }
+        .plan-badge.failed { background: var(--red); }
         .plan-overview {
             font-size: 11px;
             opacity: 0.8;
@@ -366,9 +391,9 @@
             text-align: center;
             font-size: 12px;
         }
-        .task-active .task-icon { color: var(--vscode-terminal-ansiYellow, #cca700); }
-        .task-done .task-icon { color: var(--vscode-terminal-ansiGreen, #4ec9b0); }
-        .task-failed .task-icon { color: var(--vscode-terminal-ansiRed, #f14c4c); }
+        .task-active .task-icon { color: var(--yellow); }
+        .task-done .task-icon { color: var(--green); }
+        .task-failed .task-icon { color: var(--red); }
         .plan-actions {
             display: flex;
             gap: 6px;
@@ -378,27 +403,27 @@
             padding: 4px 12px;
             font-size: 11px;
             border-radius: 3px;
-            border: 1px solid var(--vscode-button-border, #555);
+            border: 1px solid var(--border-color);
             cursor: pointer;
-            background: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
+            background: var(--card-bg);
+            color: var(--text-primary);
         }
         .plan-btn:hover { opacity: 0.8; }
-        .plan-btn-exec { background: var(--vscode-terminal-ansiGreen, #2d7d46); border-color: var(--vscode-terminal-ansiGreen, #2d7d46); }
+        .plan-btn-exec { background: var(--green); border-color: var(--green); }
         .plan-btn-abort { background: #6c6c6c; }
-        .plan-btn-rollback { background: var(--vscode-terminal-ansiRed, #c93c37); border-color: var(--vscode-terminal-ansiRed, #c93c37); }
-        .plan-done-text { font-size: 11px; color: var(--vscode-terminal-ansiGreen, #4ec9b0); }
+        .plan-btn-rollback { background: var(--red); border-color: var(--red); }
+        .plan-done-text { font-size: 11px; color: var(--green); }
         .msg-plan-progress {
             font-size: 11px;
             opacity: 0.7;
             padding: 2px 8px;
-            border-left: 2px solid var(--vscode-terminal-ansiGreen, #2d7d46);
+            border-left: 2px solid var(--green);
             margin: 4px 0;
         }
 
         /* 输入区域 */
         #input-area {
-            border-top: 1px solid var(--vscode-panel-border);
+            border-top: 1px solid var(--border-color);
             padding: 8px;
             display: flex;
             flex-direction: column;
@@ -414,7 +439,7 @@
             gap: 6px;
         }
         #image-strip::-webkit-scrollbar { height: 4px; }
-        #image-strip::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 2px; }
+        #image-strip::-webkit-scrollbar-thumb { background: var(--base01); border-radius: 2px; }
         .img-thumb-wrap {
             display: inline-block;
             position: relative;
@@ -422,7 +447,7 @@
             height: 96px;
             border-radius: 4px;
             overflow: hidden;
-            border: 1px solid var(--vscode-panel-border);
+            border: 1px solid var(--border-color);
             margin-right: 6px;
             vertical-align: top;
         }
@@ -441,12 +466,12 @@
             user-select: none;
             z-index: 2;
         }
-        .img-thumb-num:hover { background: var(--vscode-terminal-ansiGreen, #4ec9b0); }
+        .img-thumb-num:hover { background: var(--green); }
         .img-thumb-del {
             position: absolute;
             top: 2px;
             right: 2px;
-            background: var(--vscode-terminal-ansiRed, #c93c37);
+            background: var(--red);
             color: #fff;
             border: none;
             border-radius: 50%;
@@ -464,7 +489,7 @@
             bottom: 2px;
             left: 50%;
             transform: translateX(-50%);
-            background: var(--vscode-terminal-ansiBlue, #0078d4);
+            background: var(--blue);
             color: #fff;
             border: none;
             border-radius: 3px;
@@ -482,20 +507,20 @@
             justify-content: flex-end;
             padding: 0 4px;
             font-size: 9px;
-            color: var(--vscode-descriptionForeground);
+            color: var(--base00);
             opacity: 0.6;
             font-family: var(--vscode-editor-font-family, monospace);
             user-select: none;
         }
         #input-est { cursor: help; }
-        #input-est.warn { color: var(--vscode-terminal-ansiYellow, #cca700); opacity: 0.85; }
-        #input-est.bad { color: var(--vscode-terminal-ansiRed, #f14c4c); opacity: 0.95; }
+        #input-est.warn { color: var(--yellow); opacity: 0.85; }
+        #input-est.bad { color: var(--red); opacity: 0.95; }
 
         #input {
             flex: 1;
-            background: var(--vscode-input-background);
-            color: var(--vscode-input-foreground);
-            border: 1px solid var(--vscode-input-border, transparent);
+            background: var(--card-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
             border-radius: 4px;
             padding: 8px 10px;
             font-size: 13px;
@@ -504,25 +529,25 @@
             min-height: 36px;
             max-height: 120px;
         }
-        #input:focus { outline: 1px solid var(--vscode-focusBorder); }
+        #input:focus { outline: 1px solid var(--blue); }
 
         #send-btn {
-            background: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
+            background: var(--card-bg);
+            color: var(--text-primary);
             border: none;
             border-radius: 4px;
             padding: 0 14px;
             cursor: pointer;
             font-size: 13px;
         }
-        #send-btn:hover { background: var(--vscode-button-hoverBackground); }
+        #send-btn:hover { background: var(--base2); }
         #send-btn:disabled { opacity: 0.5; cursor: default; }
         #send-btn.stop-mode {
-            background: var(--vscode-terminal-ansiRed, #c74040);
+            background: var(--red);
             opacity: 1;
             cursor: pointer;
         }
-        #send-btn.stop-mode:hover { background: var(--vscode-terminal-ansiBrightRed, #e04545); }
+        #send-btn.stop-mode:hover { background: var(--orange); }
 
         /* Lightbox */
         #lightbox {
@@ -532,7 +557,7 @@
             background: rgba(0,0,0,0.88);
             z-index: 9999;
             cursor: grab;
-            overflow: hidden;
+            overflow-x: hidden;
         }
         #lightbox.active { display: block; }
         #lightbox.dragging { cursor: grabbing; }
@@ -579,7 +604,7 @@
             flex-wrap: wrap;
             gap: 2px 3px;
             padding: 3px 6px;
-            border-bottom: 1px solid var(--vscode-panel-border);
+            border-bottom: 1px solid var(--border-color);
             font-size: 10px;
             font-family: var(--vscode-editor-font-family, monospace);
             align-items: center;
@@ -592,19 +617,19 @@
             gap: 2px;
             padding: 1px 4px;
             border-radius: 3px;
-            background: var(--vscode-input-background);
+            background: var(--card-bg);
             cursor: default;
             white-space: nowrap;
             opacity: 0.65;
             transition: opacity 0.15s;
         }
-        .mc:hover { opacity: 1; background: var(--vscode-list-hoverBackground); }
+        .mc:hover { opacity: 1; background: var(--card-bg); }
         .mc-i { font-size: 9px; opacity: 0.8; }
         .mc-v { font-weight: 600; min-width: 16px; text-align: right; }
         .mc-sep {
             width: 1px;
             height: 14px;
-            background: var(--vscode-panel-border);
+            background: var(--border-color);
             margin: 0 1px;
             opacity: 0.5;
         }
@@ -613,9 +638,9 @@
             font-size: 9px;
             margin-right: 1px;
         }
-        .mc-hi { color: var(--vscode-terminal-ansiGreen, #4ec9b0); }
-        .mc-warn { color: var(--vscode-terminal-ansiYellow, #cca700); }
-        .mc-bad { color: var(--vscode-terminal-ansiRed, #f14c4c); }
+        .mc-hi { color: var(--green); }
+        .mc-warn { color: var(--yellow); }
+        .mc-bad { color: var(--red); }
 
         /* ═══ 整体缩放按钮 ═══ */
         #zoom-ctrl {
@@ -630,9 +655,9 @@
         }
         #zoom-ctrl:hover { opacity: 1; }
         #zoom-ctrl button {
-            background: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
-            border: 1px solid var(--vscode-button-border, #555);
+            background: var(--card-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
             border-radius: 3px;
             width: 22px;
             height: 22px;
@@ -644,10 +669,10 @@
             padding: 0;
             line-height: 1;
         }
-        #zoom-ctrl button:hover { background: var(--vscode-button-hoverBackground); }
+        #zoom-ctrl button:hover { background: var(--base2); }
         #zoom-label {
             font-size: 9px;
-            color: var(--vscode-descriptionForeground);
+            color: var(--base00);
             min-width: 28px;
             text-align: center;
             align-self: center;
@@ -656,16 +681,16 @@
 
         /* ═══ 一问一答 tofu 块 ═══ */
         .turn-block {
-            border: 2px dashed var(--vscode-panel-border);
+            border: 2px dashed var(--border-color);
             border-radius: 8px;
             padding: 8px 8px 4px 8px;
             margin: 10px 0;
             position: relative;
         }
-        .turn-block.tb-c0 { border-color: color-mix(in srgb, var(--vscode-terminal-ansiGreen, #4ec9b0) 38%, transparent); }
-        .turn-block.tb-c1 { border-color: color-mix(in srgb, var(--vscode-terminal-ansiCyan, #00bcd4) 38%, transparent); }
-        .turn-block.tb-c2 { border-color: color-mix(in srgb, var(--vscode-terminal-ansiMagenta, #c586c0) 38%, transparent); }
-        .turn-block.tb-c3 { border-color: color-mix(in srgb, var(--vscode-terminal-ansiYellow, #cca700) 38%, transparent); }
+        .turn-block.tb-c0 { border-color: color-mix(in srgb, var(--green) 38%, transparent); }
+        .turn-block.tb-c1 { border-color: color-mix(in srgb, var(--cyan) 38%, transparent); }
+        .turn-block.tb-c2 { border-color: color-mix(in srgb, var(--magenta) 38%, transparent); }
+        .turn-block.tb-c3 { border-color: color-mix(in srgb, var(--yellow) 38%, transparent); }
         .turn-block .msg { margin-bottom: 6px; }
     </style>
 </head>
@@ -1464,7 +1489,7 @@
                         for (const action of msg.actions) {
                             const btn = document.createElement('button');
                             btn.textContent = action;
-                            btn.style.cssText = 'padding:3px 10px;font-size:11px;cursor:pointer;border:1px solid var(--vscode-button-border,#555);border-radius:3px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);';
+                            btn.style.cssText = 'padding:3px 10px;font-size:11px;cursor:pointer;border:1px solid var(--vscode-button-border,#555);border-radius:3px;background:var(--card-bg);color:var(--text-primary);';
                             btn.onclick = () => {
                                 vscode.postMessage({ type: 'confirmResponse', id: msg.id, action });
                                 box.remove();
@@ -1502,7 +1527,7 @@
                                 <button class="plan-btn plan-btn-exec" onclick="vscode.postMessage({type:'planExecute',planId:'${msg.plan.id}'})">▉ 执行计划</button>
                                 <button class="plan-btn plan-btn-cancel" onclick="this.closest('.plan-card').remove()">取消</button>
                             </div>
-                            <div class="plan-hint" style="font-size:11px;color:var(--vscode-descriptionForeground);margin-top:6px;padding:4px 8px;border-top:1px solid var(--vscode-editorWidget-border,#333);">
+                            <div class="plan-hint" style="font-size:11px;color:var(--base00);margin-top:6px;padding:4px 8px;border-top:1px solid var(--vscode-editorWidget-border,#333);">
                                 💬 继续对话即可修改计划 — 说“把第3步去掉”“加个测试”“先做B再做A”
                             </div>
                         `;

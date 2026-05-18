@@ -214,6 +214,10 @@ class Agent {
             this.totalTokens = saved.totalTokens;
             this.currentRage = saved.currentRage;
             this._ctx = saved.ctx || { facts: [], narrative: '', turnSummaries: [], treasures: [], totalTurns: 0 };
+            // 向后兼容：老版本 _ctx 可能缺少 turnSummaries/treasures 字段
+            if (!Array.isArray(this._ctx.turnSummaries)) this._ctx.turnSummaries = [];
+            if (!Array.isArray(this._ctx.treasures)) this._ctx.treasures = [];
+            if (typeof this._ctx.totalTurns !== 'number') this._ctx.totalTurns = this._ctx.totalTurns || 0;
             this._log(`memory: restored ${saved.conversation.length} msgs, rage=${saved.currentRage}, facts=${this._ctx.facts.length}, narrative=${this._ctx.narrative.length}c`);
         }
     }
@@ -310,6 +314,7 @@ class Agent {
 
     _pushConversation(msg) {
         this.conversation.push(msg);
+        if (msg.role === 'user') this._ctx.totalTurns++;
         // 增量 HP：粗估 token = 字符数/4
         const content = msg.content || '';
         this._updateHp(Math.round(content.length / 4));
