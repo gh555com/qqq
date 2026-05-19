@@ -73,7 +73,7 @@ jobs:
           CL $wb 'contrib/inlineChat/' 'InlineChat imports'
 
           Write-Host "=== 3b. Remove unwanted extensions ==="
-          @('github-authentication','microsoft-authentication','github','ipynb','tunnel-forwarding') | ForEach-Object {
+          @('github-authentication','microsoft-authentication','github','tunnel-forwarding') | ForEach-Object {
             $dir = "$d/extensions/$_"
             if (Test-Path $dir) { Remove-Item $dir -Recurse -Force; Write-Host "  deleted $_" }
           }
