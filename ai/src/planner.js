@@ -270,6 +270,12 @@ class PlanManager {
     completePlan(id) {
         const plan = this.getPlan(id);
         if (!plan) return null;
+        // 防御：仍有 pending/in-progress task 时拒绝完成
+        const pending = plan.tasks.filter(t => t.status === TASK_STATUS.PENDING || t.status === TASK_STATUS.IN_PROGRESS).length;
+        if (pending > 0) {
+            this._log(`planner: REFUSED completePlan for ${id} — ${pending} tasks still pending/in-progress`);
+            return null;
+        }
         plan.status = PLAN_STATUS.COMPLETE;
         this._savePlan(plan);
         this._log(`planner: completed ${id}`);

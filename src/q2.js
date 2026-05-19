@@ -2521,7 +2521,9 @@ function handleContextMenuAction(action){
 
   if (selectedItems.length > 1) {
     // Multi-select case
-    if (action === 'delete') {
+    if (action === 'copyPath') {
+      performCopyPathAction();
+    } else if (action === 'delete') {
       // Filter out parent directory, strictly forbid delete
       const targets = selectedItems.filter(item => item.name !== '..');
       if (targets.length === 0) return;
@@ -2557,6 +2559,7 @@ function handleContextMenuAction(action){
       case 'open': performOpenAction(item); break;
       case 'delete': performDeleteAction(item); break;
       case 'code': performCodeAction(item); break;
+      case 'copyPath': performCopyPathAction(); break;
     }
   }
 }
@@ -2970,7 +2973,7 @@ function isInputFocused() {
   return tag === 'input' || tag === 'textarea' || active.isContentEditable || active.classList.contains('rename-input');
 }
 
-// ★ Roam interaction tracking: q=edit, w=open, x=total shortcuts+clicks, k=left-click
+// ★ Roam interaction tracking: q=edit, w=open, z=copy-path, x=total shortcuts+clicks, k=left-click
 function roamTick(t) { vscode.postMessage({ command: 'roamTick', t: t }); }
 
 document.addEventListener('keydown', (e) => {
@@ -3126,6 +3129,10 @@ document.addEventListener('keydown', (e) => {
         performEditAction(selectedItem);
         vscode.postMessage({ command: 'playEnterSfx' }); // ★ Keypress SFX
     }
+  } else if (key === 'z') {
+    e.preventDefault(); e.stopPropagation();
+    performCopyPathAction();
+    vscode.postMessage({ command: 'playEnterSfx' }); // ★ Keypress SFX
   } else if (e.key === 'Delete' && e.shiftKey) {
     // Shift+Delete: permanent delete, no confirmation prompt
     e.preventDefault(); e.stopPropagation();
@@ -5699,7 +5706,7 @@ function showSaveAsDialog() {
       }
 
       case "roamTick": {
-        // ★ Roam interaction tracking: q=edit, w=open, x=total, k=click
+        // ★ Roam interaction tracking: q=edit, w=open, z=copy-path, x=total, k=click
         try {
           const cm = global.clipboardHistoryManager;
           if (cm && typeof cm.recordRoamTick === 'function') {

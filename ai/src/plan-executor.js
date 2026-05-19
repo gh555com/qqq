@@ -85,14 +85,20 @@ class PlanExecutor {
             while (!this._aborted) {
                 const task = this._planManager.getNextTask(planId);
                 if (!task) {
-                    // 没有更多可执行的 task
+                    // 没有更多可执行的 task — 但必须确认是否真的全部完成
                     const progress = this._planManager.getProgress(planId);
                     if (progress.failed > 0) {
                         this._planManager.failPlan(planId, `${progress.failed} task(s) failed`);
                         if (this._onPlanFail) this._onPlanFail(plan, progress);
-                    } else {
+                    } else if (progress.pending === 0 && progress.inProgress === 0) {
+                        // 真·全部完成
                         this._planManager.completePlan(planId);
                         if (this._onPlanComplete) this._onPlanComplete(plan, progress);
+                    } else {
+                        // 有 PENDING task 但 getNextTask 返回 null → 依赖死锁或状态异常
+                        this._log(`executor: deadlock — ${progress.pending} pending, ${progress.inProgress} in-progress, but none executable`);
+                        this._planManager.pausePlan(planId);
+                        if (this._onPlanFail) this._onPlanFail(plan, { ...progress, reason: 'dependency deadlock' });
                     }
                     break;
                 }

@@ -29,9 +29,11 @@
             color: var(--text-primary);
             background: var(--background-color);
             height: 100vh;
+            margin: 0;
+            padding: 0;
             display: flex;
             flex-direction: column;
-            overflow-x: hidden;
+            overflow: hidden;
         }
 
         #status-bar {
@@ -41,7 +43,6 @@
             display: flex;
             align-items: center;
             gap: 8px;
-            flex-shrink: 0;
         }
         .bar-wrap {
             flex: 1;
@@ -100,7 +101,6 @@
             border-bottom: 1px solid var(--border-color);
             overflow-x: hidden;
             min-height: 26px;
-            flex-shrink: 0;
         }
         #tab-bar::-webkit-scrollbar { display: none; }
         .tab-item {
@@ -153,7 +153,6 @@
             background: var(--card-bg);
             border-bottom: 1px solid var(--border-color);
             position: relative;
-            flex-shrink: 0;
         }
         #rage-chart {
             width: 100%;
@@ -168,25 +167,18 @@
             min-width: 50px;
         }
 
-        /* 左侧 ge 进度条容器 */
-        #msg-area {
-            flex: 1;
-            display: flex;
-            overflow: hidden;
-            position: relative;
-            min-height: 0;
-        }
+
+
         #ge-bar-track {
-            position: absolute;
+            position: fixed;
             left: 0;
             top: 0;
             bottom: 0;
             width: 4px;
             min-width: 4px;
             background: var(--red);
-            z-index: 1;
+            z-index: 10000;
             cursor: pointer;
-            flex-shrink: 0;
         }
         #ge-bar-track:hover::after {
             content: attr(data-tip);
@@ -206,8 +198,10 @@
             position: absolute;
             left: 0;
             right: 0;
-            top: 0;
             bottom: 0;
+            width: 100%;
+            background: var(--red);
+            transition: height 0.3s ease;
         }
         #ge-bar-fill.animating {
             animation: geBarPulse 2s ease-in-out infinite;
@@ -219,13 +213,13 @@
             100% { height: 0%; }
         }
         #messages {
-            flex: 1;
+            flex: 1 1 0;
+            min-height: 0;
             overflow-y: auto;
             overflow-x: hidden;
+            margin-left: 4px;
             padding: 12px;
             scrollbar-width: thin;
-            margin-left: 4px;
-            min-height: 0;
         }
         #messages::-webkit-scrollbar { width: 6px; }
         #messages::-webkit-scrollbar-thumb { background: var(--base01); border-radius: 3px; }
@@ -300,7 +294,7 @@
             opacity: 0.85;
         }
         .msg-ai hr { border: none; border-top: 1px solid var(--border-color); margin: 8px 0; }
-        .msg-ai a { color: var(--vscode-textLink-foreground, #3794ff); text-decoration: none; }
+        .msg-ai a { color: var(--blue); text-decoration: none; }
         .msg-ai a:hover { text-decoration: underline; }
         .msg-ai strong { font-weight: bold; }
         .msg-ai em { font-style: italic; }
@@ -315,7 +309,7 @@
             font-size: 11px;
             margin: 2px 0;
             opacity: 0.55;
-            border-left: 2px solid var(--vscode-panel-border, #333);
+            border-left: 2px solid var(--border-color);
             padding-left: 8px;
         }
         .msg-tool-details summary {
@@ -337,7 +331,7 @@
             opacity: 0.8;
         }
         .msg-error {
-            color: var(--vscode-errorForeground, #f44);
+            color: var(--red);
             padding: 4px 0;
         }
         .msg-cost {
@@ -348,7 +342,7 @@
 
         /* ═══ Plan Card UI ═══ */
         .plan-card {
-            border: 1px solid var(--vscode-editorWidget-border, #444);
+            border: 1px solid var(--border-color);
             border-radius: 6px;
             padding: 10px;
             margin: 8px 0;
@@ -423,12 +417,14 @@
 
         /* 输入区域 */
         #input-area {
+            flex-shrink: 0;
+            margin-left: 4px;
             border-top: 1px solid var(--border-color);
             padding: 8px;
             display: flex;
             flex-direction: column;
             gap: 6px;
-            flex-shrink: 0;
+            background: var(--background-color);
         }
         /* 多图预览条 */
         #image-strip {
@@ -598,6 +594,13 @@
             pointer-events: none;
         }
 
+
+        /* === top zone (fixed, no scroll) === */
+        #top-zone {
+            flex-shrink: 0;
+            margin-left: 4px;
+        }
+
         /* ═══ Metrics Dashboard (Tofu Blocks) ═══ */
         #metrics-panel {
             display: flex;
@@ -609,7 +612,6 @@
             font-family: var(--vscode-editor-font-family, monospace);
             align-items: center;
             min-height: 20px;
-            flex-shrink: 0;
         }
         .mc {
             display: inline-flex;
@@ -695,7 +697,9 @@
     </style>
 </head>
 <body>
-    <div id="tab-bar"><span id="tab-new" title="新建会话" onclick="vscode.postMessage({type:'newTab'})">+</span></div>
+    <div id="ge-bar-track"><div id="ge-bar-fill"></div></div>
+    <div id="top-zone">
+        <div id="tab-bar"><span id="tab-new" title="新建会话" onclick="vscode.postMessage({type:'newTab'})">+</span></div>
     <div id="status-bar">
         <span class="bar-label" id="cost-label">0 ge</span>
         <span class="bar-label" id="rage-label">&#128293; 0</span>
@@ -754,10 +758,7 @@
         <div class="mc" title="Lifetime：跨 IDE 重启累计总重试次数"><span class="mc-lbl">∞ret</span><span class="mc-v" id="mv-lret">—</span></div>
         <div class="mc" title="Lifetime：跨 IDE 重启累计总耗时（你在 qqq 上花了多少时间）"><span class="mc-lbl">∞⏱</span><span class="mc-v" id="mv-ldur">—</span></div>
     </div>
-    <div id="msg-area">
-        <div id="ge-bar-track"><div id="ge-bar-fill"></div></div>
-        <div id="messages"></div>
-    </div>
+    <div id="messages"></div>
     <div id="input-area">
         <div id="image-strip"></div>
         <div id="input-est-row"><span id="input-est" title="预估当前输入将使用的 token 量（按 chars÷4 估算）。中文需乘上 1.5–2倍。越多 tokens = 越贵，如果上下文也充足，本轮费用估计也会高">— tok</span></div>
@@ -830,10 +831,17 @@
 
         function _applyZoom() {
             const level = ZOOM_LEVELS[_zoomIdx];
-            document.body.style.transform = "scale(" + level + ")";
-            document.body.style.transformOrigin = "top left";
-            document.body.style.width = (100 / level).toFixed(1) + "%";
-            document.body.style.height = (100 / level).toFixed(1) + "%";
+            if (level === 1.0) {
+                document.body.style.transform = '';
+                document.body.style.transformOrigin = '';
+                document.body.style.width = '';
+                document.body.style.height = '';
+            } else {
+                document.body.style.transform = "scale(" + level + ")";
+                document.body.style.transformOrigin = "top left";
+                document.body.style.width = (100 / level).toFixed(1) + "%";
+                document.body.style.height = (100 / level).toFixed(1) + "%";
+            }
             const label = document.getElementById("zoom-label");
             if (label) label.textContent = Math.round(level * 100) + "%";
             try { localStorage.setItem("qqq-ai-zoom", _zoomIdx); } catch(_) {}
@@ -1469,9 +1477,10 @@
                         ctxBar.style.width = w + '%';
                         document.getElementById('ctx-bar-tooltip').textContent = msg.percent + '% (~' + Math.round(msg.tokens / 1000) + 'K tokens)';
                         // 颜色渐变：绿→黄→红
-                        if (msg.percent > 80) ctxBar.style.background = '#f14c4c';
-                        else if (msg.percent > 50) ctxBar.style.background = '#cca700';
-                        else ctxBar.style.background = '#4ec9b0';
+                        const s = getComputedStyle(document.documentElement);
+                        if (msg.percent > 80) ctxBar.style.background = s.getPropertyValue('--red').trim();
+                        else if (msg.percent > 50) ctxBar.style.background = s.getPropertyValue('--yellow').trim();
+                        else ctxBar.style.background = s.getPropertyValue('--green').trim();
                     }
                     break;
 
@@ -1479,7 +1488,7 @@
                     {
                         const box = document.createElement('div');
                         box.className = 'msg msg-confirm';
-                        box.style.cssText = 'border:1px solid var(--vscode-editorWidget-border,#444);border-radius:4px;padding:8px;margin:4px 0;';
+                        box.style.cssText = 'border:1px solid var(--border-color);border-radius:4px;padding:8px;margin:4px 0;';
                         const label = document.createElement('div');
                         label.textContent = msg.message;
                         label.style.cssText = 'margin-bottom:6px;font-size:12px;';
@@ -1489,7 +1498,7 @@
                         for (const action of msg.actions) {
                             const btn = document.createElement('button');
                             btn.textContent = action;
-                            btn.style.cssText = 'padding:3px 10px;font-size:11px;cursor:pointer;border:1px solid var(--vscode-button-border,#555);border-radius:3px;background:var(--card-bg);color:var(--text-primary);';
+                            btn.style.cssText = 'padding:3px 10px;font-size:11px;cursor:pointer;border:1px solid var(--border-color);border-radius:3px;background:var(--card-bg);color:var(--text-primary);';
                             btn.onclick = () => {
                                 vscode.postMessage({ type: 'confirmResponse', id: msg.id, action });
                                 box.remove();
@@ -1527,7 +1536,7 @@
                                 <button class="plan-btn plan-btn-exec" onclick="vscode.postMessage({type:'planExecute',planId:'${msg.plan.id}'})">▉ 执行计划</button>
                                 <button class="plan-btn plan-btn-cancel" onclick="this.closest('.plan-card').remove()">取消</button>
                             </div>
-                            <div class="plan-hint" style="font-size:11px;color:var(--base00);margin-top:6px;padding:4px 8px;border-top:1px solid var(--vscode-editorWidget-border,#333);">
+                            <div class="plan-hint" style="font-size:11px;color:var(--base00);margin-top:6px;padding:4px 8px;border-top:1px solid var(--border-color);">
                                 💬 继续对话即可修改计划 — 说“把第3步去掉”“加个测试”“先做B再做A”
                             </div>
                         `;
@@ -1716,8 +1725,19 @@
                         }
                     }
                     break;
+
+                case 'setTheme':
+                    document.documentElement.setAttribute('data-theme', msg.theme);
+                    break;
             }
         });
+
+        // ━━ 主题初始化：跟随 VS Code body class ━━
+        (function() {
+            if (document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+        })();
 
         function appendMessage(role, text) {
             const el = document.createElement('div');
