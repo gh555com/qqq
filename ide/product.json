@@ -1,0 +1,98 @@
+{
+  "nameShort": "qqq",
+  "nameLong": "qqq IDE",
+  "applicationName": "qqq",
+  "dataFolderName": ".qqq",
+  "win32MutexName": "qqqide",
+  "win32DirName": "qqq IDE",
+  "win32NameVersion": "qqq IDE",
+  "win32RegValueName": "qqqIDE",
+  "win32AppId": "{{A7F5E3C1-2B4D-4E8F-9C1A-3D5E7F9B2C4A}}",
+  "win32x64AppId": "{{B8G6F4D2-3C5E-5F9G-0D2B-4E6F8G0C3D5B}}",
+  "darwinBundleIdentifier": "com.gh555.qqqide",
+  "urlProtocol": "qqq",
+  "serverApplicationName": "qqq-server",
+  "serverDataFolderName": ".qqq-server",
+  "quality": "stable",
+
+  "updateUrl": "https://gh555.com/api/v3/qqq/update",
+  "commit": "",
+  "date": "",
+
+  "extensionsGallery": {
+    "serviceUrl": "https://marketplace.qoder.sh/_apis/public/gallery",
+    "itemUrl": "https://marketplace.qoder.sh/items",
+    "resourceUrlTemplate": "https://marketplace.qoder.sh/assets/{publisher}/{name}/{version}/{path}",
+    "controlUrl": "",
+    "recommendationsUrl": ""
+  },
+
+  "extensionEnabledApiProposals": {
+    "gh555.qqq-ai": ["contribAuxiliaryBarEntries"]
+  },
+
+  "builtInExtensions": [
+    {
+      "name": "gh555.qqq",
+      "version": "16.5.1",
+      "repo": "https://github.com/gh555/qqq",
+      "metadata": { "id": "gh555.qqq", "publisherDisplayName": "gh555" }
+    },
+    {
+      "name": "gh555.qqq-ai",
+      "version": "0.1.0",
+      "repo": "https://github.com/gh555/qqq",
+      "metadata": { "id": "gh555.qqq-ai", "publisherDisplayName": "gh555" }
+    }
+  ],
+
+  "configurationDefaults": {
+    "workbench.activityBar.location": "top",
+    "workbench.sideBar.location": "left",
+    "workbench.auxiliaryBar.visible": true,
+    "workbench.startupEditor": "none",
+    "workbench.tips.enabled": false,
+    "workbench.welcomePage.walkthroughs.openOnInstall": false,
+    "editor.fontLigatures": true,
+    "editor.inlineSuggest.showToolbar": "never",
+    "extensions.autoCheckUpdates": false,
+    "extensions.autoUpdate": false,
+    "telemetry.telemetryLevel": "off",
+    "update.mode": "none",
+    "update.showReleaseNotes": false,
+    "workbench.enableExperiments": false
+  },
+
+  "defaultLayout": {
+    "editors": [],
+    "layout": {
+      "editors": { "orientation": 0, "groups": [{ "size": 1 }] }
+    },
+    "force": false
+  },
+
+  "linkProtectionTrustedDomains": [
+    "https://gh555.com",
+    "https://marketplace.qoder.sh"
+  ],
+
+  "enableTelemetry": false,
+
+  "reportIssueUrl": "https://gh555.com/feedback",
+  "requestFeatureUrl": "https://gh555.com/feedback",
+
+  "documentationUrl": "https://gh555.com/docs",
+  "releaseNotesUrl": "https://gh555.com/changelog",
+
+  "checksumFailMoreInfoUrl": "https://gh555.com/integrity",
+
+  "settingsSearchUrl": "https://gh555.com/settings-search",
+
+  "npsSurveyUrl": "",
+  "cesSurveyUrl": "",
+
+  "sendASmile": {
+    "reportIssueUrl": "https://gh555.com/feedback",
+    "requestFeatureUrl": "https://gh555.com/feedback"
+  }
+}

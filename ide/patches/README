@@ -1,0 +1,51 @@
+# patches/ — Code-OSS source patches for qqq IDE fork
+#
+# 历史说明：
+# 此目录曾存放 .patch 占位文件，现已被 build.ps1 的程序化手术替代。
+# 程序化方式比 .patch 文件更健壮 — 不会因 VS Code 小版本变动而失效。
+#
+# build.ps1 Step [3] 执行以下手术项：
+#
+#   3a  去 Chat / InlineChat / AI UI
+#       → 注释掉 workbench 入口文件中的 chat/inlineChat import
+#       → 使微软 AI 对话框架完全不加载
+#
+#   3b  清除不需要的内置扩展
+#       → github-authentication / microsoft-authentication / github / ipynb / tunnel-forwarding
+#       → 直接删除 extensions/ 下的对应目录
+#
+#   3c  去遥测代码（防御纵深）
+#       → stub telemetryService.ts 的 publicLog / publicLog2 / publicLogError
+#       → stub 1dsAppender.ts 的 log / flush
+#       → 配合 product.json enableTelemetry:false 双重保险
+#
+#   3d  去实验框架
+#       → 注释掉 experiments.contribution import
+#       → 阻断 A/B testing 联络微软服务器
+#
+#   3e  右侧边栏解锁
+#       → 将 contribAuxiliaryBarEntries proposal 检查替换为 always-true
+#       → 配合 product.json extensionEnabledApiProposals 双重保险
+#
+#   3f  去崩溃报告上传
+#       → Code-OSS 开源版默认不含，product.json 不配置 crashReporter = 不上传
+#
+#   3g  去 Getting Started 自动弹出
+#       → product.json configurationDefaults: startupEditor=none
+#
+#   3h  去内置 AI 提示
+#       → 删除 vscode-copilot-walkthrough 扩展
+#
+# product.json 覆盖层（不通过源码修改，而是 merge 覆盖）：
+#   enableTelemetry: false
+#   telemetry.telemetryLevel: off
+#   npsSurveyUrl / cesSurveyUrl: ""
+#   update.mode: none
+#   workbench.enableExperiments: false
+#   extensions.autoCheckUpdates / autoUpdate: false
+#   editor.inlineSuggest.showToolbar: never
+#   extensionsGallery → 指向自家 marketplace
+#   builtInExtensions → 只含 qqq + qqq-ai
+#
+# 如果将来需要添加新的手术项，直接修改 build.ps1 的 Step [3] 区域。
+# 不再使用 .patch 文件。
