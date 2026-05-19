@@ -41,7 +41,6 @@ jobs:
         run: |
           $d = "${{ env.CODE_DIR }}"
           $wb = "$d/src/vs/workbench/workbench.desktop.main.ts"
-          $tel = "$d/src/vs/platform/telemetry/common/telemetryService.ts"
 
           function CL([string]$f, [string]$p, [string]$desc) {
             $l = Get-Content $f -Encoding UTF8; $h = 0
@@ -64,11 +63,7 @@ jobs:
             if (Test-Path $dir) { Remove-Item $dir -Recurse -Force; Write-Host "  deleted $_" }
           }
 
-          Write-Host "=== 3c. Gut telemetry ==="
-          CL $tel '_appenders\.forEach' 'telemetry send'
-          CL $tel '_log\(errorEventName' 'error telemetry'
-
-          Write-Host "=== Surgery complete ==="
+          Write-Host "=== Surgery complete (telemetry disabled via product.json overlay) ==="
 
       - name: Compile vscode-win32-x64
         working-directory: ${{ env.CODE_DIR }}
