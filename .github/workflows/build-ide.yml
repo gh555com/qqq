@@ -1,0 +1,83 @@
+name: Build qqq IDE Shell
+
+on:
+  workflow_dispatch:
+    inputs:
+      vscode_tag:
+        description: 'VS Code version tag to build from'
+        default: '1.96.4'
+        type: string
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      CODE_DIR: ide/.build/code-oss
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Clone Code-OSS ${{ inputs.vscode_tag }}
+        run: git clone --depth 1 --branch ${{ inputs.vscode_tag }} https://github.com/microsoft/vscode.git ${{ env.CODE_DIR }}
+
+      - name: Overlay product.json
+        run: python ide/scripts/merge_product.py ${{ env.CODE_DIR }}/product.json ide/product.json ${{ env.CODE_DIR }}/product.json
+
+      - name: Source surgery
+        shell: pwsh
+        run: |
+          $d = "${{ env.CODE_DIR }}"
+          $wb = "$d/src/vs/workbench/workbench.desktop.main.ts"
+          $tel = "$d/src/vs/platform/telemetry/common/telemetryService.ts"
+
+          function CL([string]$f, [string]$p, [string]$desc) {
+            $l = Get-Content $f -Encoding UTF8; $h = 0
+            for ($i=0; $i -lt $l.Count; $i++) {
+              if ($l[$i] -match $p -and $l[$i] -notmatch '^//') {
+                $l[$i] = "// qqq: removed -- " + $l[$i].TrimStart(); $h++
+              }
+            }
+            $l | Set-Content $f -Encoding UTF8
+            Write-Host "  $desc : $h hits"
+          }
+
+          Write-Host "=== 3a. Remove Chat / InlineChat ==="
+          CL $wb 'contrib/chat/' 'Chat imports'
+          CL $wb 'contrib/inlineChat/' 'InlineChat imports'
+
+          Write-Host "=== 3b. Remove unwanted extensions ==="
+          @('github-authentication','microsoft-authentication','github','ipynb','tunnel-forwarding') | ForEach-Object {
+            $dir = "$d/extensions/$_"
+            if (Test-Path $dir) { Remove-Item $dir -Recurse -Force; Write-Host "  deleted $_" }
+          }
+
+          Write-Host "=== 3c. Gut telemetry ==="
+          CL $tel '_appenders\.forEach' 'telemetry send'
+          CL $tel '_log\(errorEventName' 'error telemetry'
+
+          Write-Host "=== Surgery complete ==="
+
+      - name: npm install
+        working-directory: ${{ env.CODE_DIR }}
+        run: npm ci
+
+      - name: Compile vscode-win32-x64
+        working-directory: ${{ env.CODE_DIR }}
+        run: npm run gulp -- vscode-win32-x64
+
+      - name: Upload qqq IDE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qqq-ide-win32-x64
+          path: ide/.build/VSCode-win32-x64/
+          retention-days: 90
+          compression-level: 6
