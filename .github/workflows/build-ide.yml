@@ -32,7 +32,11 @@ jobs:
       - name: Overlay product.json
         run: python ide/scripts/merge_product.py ${{ env.CODE_DIR }}/product.json ide/product.json ${{ env.CODE_DIR }}/product.json
 
-      - name: Source surgery
+      - name: npm install
+        working-directory: ${{ env.CODE_DIR }}
+        run: npm ci
+
+      - name: Source surgery (after npm install to avoid postinstall conflicts)
         shell: pwsh
         run: |
           $d = "${{ env.CODE_DIR }}"
@@ -65,10 +69,6 @@ jobs:
           CL $tel '_log\(errorEventName' 'error telemetry'
 
           Write-Host "=== Surgery complete ==="
-
-      - name: npm install
-        working-directory: ${{ env.CODE_DIR }}
-        run: npm ci
 
       - name: Compile vscode-win32-x64
         working-directory: ${{ env.CODE_DIR }}
