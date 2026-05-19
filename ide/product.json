@@ -27,24 +27,7 @@
     "recommendationsUrl": ""
   },
 
-  "extensionEnabledApiProposals": {
-    "gh555.qqq-ai": ["contribAuxiliaryBarEntries"]
-  },
-
-  "builtInExtensions": [
-    {
-      "name": "gh555.qqq",
-      "version": "16.5.1",
-      "repo": "https://github.com/gh555/qqq",
-      "metadata": { "id": "gh555.qqq", "publisherDisplayName": "gh555" }
-    },
-    {
-      "name": "gh555.qqq-ai",
-      "version": "0.1.0",
-      "repo": "https://github.com/gh555/qqq",
-      "metadata": { "id": "gh555.qqq-ai", "publisherDisplayName": "gh555" }
-    }
-  ],
+  "builtInExtensions": [],
 
   "configurationDefaults": {
     "workbench.activityBar.location": "top",

@@ -1,5 +1,6 @@
 const esbuild = require('esbuild');
 const fs = require('fs');
+const path = require('path');
 
 async function build() {
     console.log('qqq-ai: building...');
@@ -19,10 +20,16 @@ async function build() {
         loader: { '.html': 'text' }
     });
 
-    // 拷贝 chat.html 到 dist（WebView 需要运行时读取）
-    fs.copyFileSync('./src/chat/chat.html', './dist/chat.html');
+    // ━━━ 组装 chat.html：模板 + CSS + JS 内联为单文件 ━━━
+    const chatDir = path.join(__dirname, 'src', 'chat');
+    let html = fs.readFileSync(path.join(chatDir, 'chat.html'), 'utf8');
+    const css = fs.readFileSync(path.join(chatDir, 'chat.css'), 'utf8');
+    const js  = fs.readFileSync(path.join(chatDir, 'chat.js'), 'utf8');
+    html = html.replace('/* INJECT_CSS */', css);
+    html = html.replace('/* INJECT_JS */', js);
+    fs.writeFileSync('./dist/chat.html', html, 'utf8');
 
-    console.log('qqq-ai: build complete → dist/extension.js');
+    console.log('qqq-ai: build complete → dist/extension.js + dist/chat.html');
 }
 
 build().catch(e => { console.error(e); process.exit(1); });

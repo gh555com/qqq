@@ -3458,12 +3458,15 @@ document.addEventListener('DOMContentLoaded', () => {
         vscode.postMessage({ command: 'getHistory', key: 'fileFilter' });
       }
 
-      // Apply filter
+      // Apply filter — split on any whitespace (incl. NBSP / 全角空格) → AND match
+      // ★ FIX: regex literal must be /\s+/ not /\\s+/ (literal backslash-s was a bug
+      //   that caused "h ot" to be treated as one token "h ot" and never match)
       const filterText = fileFilterInput.value.trim().toLowerCase();
-      const keywords = filterText.split(/\\s+/).filter(Boolean);
+      const keywords = filterText ? filterText.split(/\s+/).filter(Boolean) : [];
       const fileItems = document.querySelectorAll('.file-item');
 
       fileItems.forEach(item => {
+        if (keywords.length === 0) { item.style.display = ''; return; }
         const itemName = (item.dataset.name || '').toLowerCase();
         const isMatch = keywords.every(kw => itemName.includes(kw));
         item.style.display = isMatch ? '' : 'none';

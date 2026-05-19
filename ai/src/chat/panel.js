@@ -105,9 +105,10 @@ class ChatPanelProvider {
     }
 
     resolveWebviewView(webviewView) {
-        // P1: 仅首次加载设置 HTML。retainContextWhenHidden 下重新 resolve 时
-        // HTML 仍存活，重置会清空正在流式输出的文本 + 销毁 JS 上下文。
-        const isReconnect = this._view !== null;
+        // P1: retainContextWhenHidden 复用同一个 webviewView 实例（隐藏/显示时）→ 不重置 HTML。
+        // 但"移到面板"会销毁旧实例并创建新实例 → 必须重新初始化，否则白屏。
+        // 正确判断：仅当 _view 是同一个实例时才算"重连"。
+        const isReconnect = this._view !== null && this._view === webviewView;
         this._view = webviewView;
 
         webviewView.webview.options = {
@@ -116,15 +117,18 @@ class ChatPanelProvider {
         };
 
         if (!isReconnect) {
+            // 同步加载（缓存命中或本地文件），绝不白屏
             webviewView.webview.html = this._getHtml(webviewView.webview);
+            // 后台异步检查服务器是否有新版 UI，供下次打开使用
+            this._refreshUiCache();
         }
 
-        // 处理来自 WebView 的消息
+        // 每次 resolve 都重新注册消息处理（移到新容器后旧监听器失效）
         webviewView.webview.onDidReceiveMessage(async (msg) => {
             this._handleWebviewMessage(msg);
         });
 
-        // 仅首次恢复会话（非重连时 HTML 是新的，需要重建 UI）
+        // 非重连时 HTML 是全新的，需要重建会话 UI
         if (!isReconnect) {
             setTimeout(() => {
                 this._syncSessionList();
@@ -451,12 +455,37 @@ class ChatPanelProvider {
     }
 
     _getHtml(webview) {
+        // 优先使用服务器缓存的最新 UI（热更新通道）
+        const cached = this.context.globalState.get('qqq-ai.uiCache');
+        if (cached) return cached;
+
+        // 兜底：本地 bundled chat.html
         const htmlPath = path.join(this.context.extensionPath, 'src', 'chat', 'chat.html');
         try {
             return fs.readFileSync(htmlPath, 'utf8');
         } catch {
             return `<!DOCTYPE html><html><body><p>Error: chat.html not found</p></body></html>`;
         }
+    }
+
+    // 后台静默拉取服务器最新 UI，缓存供下次 resolveWebviewView 使用
+    // 服务端端点: GET /api/v3/qqq-ai/ui  响应头含 ETag
+    // Phase C 实装：服务端实现该端点后热更新自动生效，无需用户重装扩展
+    _refreshUiCache() {
+        const GAEA_URL = 'https://gh555.com';
+        const cachedVer = this.context.globalState.get('qqq-ai.uiVersion') || '0';
+        fetch(`${GAEA_URL}/api/v3/qqq-ai/ui`, {
+            headers: { 'If-None-Match': cachedVer }
+        }).then(async (resp) => {
+            if (resp.status === 200) {
+                const html = await resp.text();
+                const ver = resp.headers.get('etag') || String(Date.now());
+                this.context.globalState.update('qqq-ai.uiCache', html);
+                this.context.globalState.update('qqq-ai.uiVersion', ver);
+                this._log('[panel] UI cache refreshed from server, ver=' + ver);
+            }
+            // 304 = 无变化，304 或网络失败都静默忽略
+        }).catch(() => { /* offline or endpoint not yet deployed */ });
     }
 
     _restoreConversationToUI() {

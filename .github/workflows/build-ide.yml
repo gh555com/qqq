@@ -32,6 +32,21 @@ jobs:
       - name: Overlay product.json
         run: python ide/scripts/merge_product.py ${{ env.CODE_DIR }}/product.json ide/product.json ${{ env.CODE_DIR }}/product.json
 
+      - name: Sanity check merged product.json (fail-fast before 45min compile)
+        shell: pwsh
+        run: |
+          $p = Get-Content "${{ env.CODE_DIR }}/product.json" -Raw | ConvertFrom-Json
+          Write-Host "nameShort        = $($p.nameShort)"
+          Write-Host "applicationName  = $($p.applicationName)"
+          Write-Host "quality          = $($p.quality)"
+          Write-Host "builtInExtensions count = $($p.builtInExtensions.Count)"
+          if ($p.builtInExtensions.Count -gt 0) {
+            Write-Host "::error::builtInExtensions is non-empty; bundle-marketplace-extensions-build will fetch and likely fail."
+            $p.builtInExtensions | ForEach-Object { Write-Host "  - $($_.name)@$($_.version)" }
+            exit 1
+          }
+          Write-Host "OK: no marketplace fetches will be attempted."
+
       - name: npm install
         working-directory: ${{ env.CODE_DIR }}
         run: npm ci

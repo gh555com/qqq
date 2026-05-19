@@ -1,0 +1,3 @@
+20c1a8f ci: drop telemetry source surgery (caused noUnusedLocals; product.json already disables it)
+b667c1f ci: move surgery after npm install (postinstall needs extensions/github)
+347e735 ci: use windows-2022 runner (node-gyp needs VS2022)

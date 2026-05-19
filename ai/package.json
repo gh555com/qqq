@@ -20,12 +20,26 @@
           "title": "qqq AI",
           "icon": "res/icon.png"
         }
+      ],
+      "auxiliarybar": [
+        {
+          "id": "qqqAiViewAux",
+          "title": "qqq AI",
+          "icon": "res/icon.png"
+        }
       ]
     },
     "views": {
       "qqqAiView": [
         {
           "id": "qqq-ai.chatPanel",
+          "name": "Ask qqq",
+          "type": "webview"
+        }
+      ],
+      "qqqAiViewAux": [
+        {
+          "id": "qqq-ai.chatPanelAux",
           "name": "Ask qqq",
           "type": "webview"
         }
