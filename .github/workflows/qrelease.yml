@@ -167,6 +167,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # ★ i18n-lint：errors 阻塞（JSON 损坏 / 占位符不一致），warnings 不阻塞
+      - name: i18n lint (block on errors)
+        run: npm run i18n:lint
+
       # ★ 将 4 个 Rust 产物复制到 assets/（Universal 包全部包含）
       - name: Prepare Rust artifacts
         run: |

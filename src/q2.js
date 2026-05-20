@@ -3109,6 +3109,14 @@ document.addEventListener('keydown', (e) => {
   } else if (key === 'w') {
     e.preventDefault(); e.stopPropagation();
     roamTick('wx');
+    // ★ W-key diagnostic log (frontend)
+    try {
+      var __siP = selectedItem && selectedItem.path;
+      var __siN = selectedItem && selectedItem.name;
+      var __siT = selectedItem && selectedItem.type;
+      vscode.postMessage({ command: 'logFromWebview', tag: 'w-open-fe',
+        msg: 'key=w fired, selectedItem path=' + __siP + ' name=' + __siN + ' type=' + __siT });
+    } catch (e2) {}
     performOpenAction(selectedItem);
     vscode.postMessage({ command: 'playEnterSfx' }); // ★ Keypress SFX
   } else if (key === 'd') {
@@ -5058,6 +5066,10 @@ function showSaveAsDialog() {
     const currentConfig = getConfig();
 
     switch (message.command) {
+      case "logFromWebview":
+        // ★ W-key diagnostic: receive log from webview
+        try { global.logMessage(`[${message.tag || 'webview'}] ${message.msg || ''}`, "INFO"); } catch {}
+        break;
       case "getHistory":
         if (message.key) {
           const history = await getCommandHistory(message.key);
@@ -5452,7 +5464,12 @@ function showSaveAsDialog() {
       }
 
       case "openWithDefault": {
-        const p = canonicalizeExistingPath(message.path);
+        const rawIn = message.path;
+        const p = canonicalizeExistingPath(rawIn);
+        // ★ W-key diagnostic log (entry)
+        try {
+          global.logMessage(`[w-open] raw="${rawIn}" canon="${p}" exists=${fs.existsSync(p)} type=${message.type}`, "INFO");
+        } catch {}
         // ★ Record parent directory to qqiq (not the item itself)
         // Logic: user pressed w in this directory, so record where they were working
         recordDirHistory(path.dirname(p));
@@ -5480,8 +5497,15 @@ function showSaveAsDialog() {
           }
         }
         try {
-          global.openExternal(vscode.Uri.file(p));
+          try { global.logMessage(`[w-open] calling openExternal: ${p}`, "INFO"); } catch {}
+          const r = global.openExternal(vscode.Uri.file(p));
+          try { global.logMessage(`[w-open] openExternal returned (sync ok) for: ${p}`, "INFO"); } catch {}
+          if (r && typeof r.then === 'function') {
+            r.then(() => { try { global.logMessage(`[w-open] openExternal promise resolved: ${p}`, "INFO"); } catch {}; },
+                   (err) => { try { global.logMessage(`[w-open] openExternal promise rejected: ${err && err.message}`, "ERROR"); } catch {}; });
+          }
         } catch (error) {
+          try { global.logMessage(`[w-open] openExternal threw: ${error && error.message}`, "ERROR"); } catch {}
           global.showAutoCloseNotification('error', q('q2.error.openFileError', error.message));
         }
         break;

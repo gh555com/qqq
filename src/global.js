@@ -2660,16 +2660,33 @@ function showTextDocument(document, column, preserveFocus) {
 
 function openExternal(uri) {
 	const filePath = uri.fsPath;
+	// ★ W-key diagnostic
+	try { logMessage(`[w-open-be] openExternal entry: ${filePath}`, "INFO"); } catch {}
+
+	// ★ KEY FIX: Always pass cwd = file's parent directory (mimic Explorer/Finder double-click).
+	// Without this, Electron-based .exe (e.g. qqq.exe portable build) cannot find their
+	// resources/locales/*.pak relative to cwd and crash silently right after launch.
+	let _spawnCwd = undefined;
+	try {
+		const fsLocal = require('fs');
+		if (filePath && fsLocal.existsSync(filePath)) {
+			const stat = fsLocal.statSync(filePath);
+			_spawnCwd = stat.isDirectory() ? filePath : require('path').dirname(filePath);
+		}
+	} catch {}
 
 	// First try opening via Node.js engine
 	try {
 		if (process.platform === 'win32') {
 			// Windows: use start
-			require('child_process').execSync(`start "" "${filePath.replace(/"/g, '""')}"`, { stdio: 'ignore' });
+			const cmdLine = `start "" "${filePath.replace(/"/g, '""')}"`;
+			try { logMessage(`[w-open-be] win32 execSync (cwd=${_spawnCwd}): ${cmdLine}`, "INFO"); } catch {}
+			require('child_process').execSync(cmdLine, { stdio: 'ignore', cwd: _spawnCwd });
+			try { logMessage(`[w-open-be] win32 execSync returned ok`, "INFO"); } catch {}
 			return Promise.resolve();
 		} else if (process.platform === 'darwin') {
 			// macOS: use open
-			require('child_process').execSync(`open "${filePath.replace(/"/g, '""')}"`, { stdio: 'ignore' });
+			require('child_process').execSync(`open "${filePath.replace(/"/g, '""')}"`, { stdio: 'ignore', cwd: _spawnCwd });
 			return Promise.resolve();
 		} else {
 			// ★ Linux: use spawn (non-blocking!) with gio open → xdg-open fallback chain
@@ -2678,7 +2695,7 @@ function openExternal(uri) {
 			const isDir = require('fs').existsSync(filePath) && require('fs').statSync(filePath).isDirectory();
 
 			const _tryOpen = (cmd, args, onFail) => {
-				const child = cp.spawn(cmd, args, { detached: true, stdio: 'ignore' });
+				const child = cp.spawn(cmd, args, { detached: true, stdio: 'ignore', cwd: _spawnCwd });
 				child.unref();
 				child.on('error', () => { if (onFail) onFail(); });
 			};

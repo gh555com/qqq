@@ -1,0 +1,74 @@
+# i18n.toml — 仓库根唯一接入文件（gaea i18n 真理机器入口）
+# 文档：ignore/qqq 拓扑/arc/我们到底要做什吗 §18
+#
+# 一个仓库可以有多个翻译调用（[[calls]]）。
+# CI 跑一行：gaea-i18n sync
+#   → CLI 读取本文件
+#   → 对每个 [[calls]] 调一次 POST /api/v3/i18n/translate
+#   → 把结果写回 output_dir
+#
+# qqq IDE 有两个调用：
+#   A 主翻：zh → 12 种自有 UI
+#   B 缺口：en → 4 种 vscode workbench 缺口（ar/hi/vi/pt-br）
+#     —— 因 vscode-loc 官方仅 9 种，缺这 4 种由我们补齐
+
+# ============================================================
+# 调用 A — 自有 UI 主翻
+# ============================================================
+[[calls]]
+name = "qqq-ide-self"
+
+  [calls.truth]
+  source_lang = "zh"
+  source_file = "src/i18n/zh.json"
+
+  [calls.targets]
+  langs = ["zh-tw", "en", "ja", "de", "ru", "ar", "ko", "es", "fr", "pt-br", "hi", "vi"]
+  output_dir = "src/i18n"
+  output_template = "{output_dir}/{lang}.json"
+
+  [calls.domain]
+  type = "ui"          # ui | doc | game | legal | code
+  style = "concise"    # concise | natural | formal
+
+  [calls.glossary]
+  id = "qqq-ide"
+  extra = []
+
+  [calls.tm]
+  namespace = "qqq-ide-self"
+
+# ============================================================
+# 调用 B — vscode workbench 缺口补齐
+# ============================================================
+# 真理源是 staging/vscode-loc/en.json（由 scripts/fetch-vscode-loc.js 拉来 +
+# 9 种官方 workbench 翻译），调用 B 让机器用 en 翻成 4 种官方未覆盖语言。
+# 输出位置：用于 ide/ 编译期注入到 .nls.<lang>.json
+[[calls]]
+name = "qqq-ide-vscode-workbench"
+
+  [calls.truth]
+  source_lang = "en"
+  source_file = "staging/vscode-loc/en.json"
+
+  [calls.targets]
+  langs = ["ar", "hi", "vi", "pt-br"]   # vscode-loc 官方缺这 4 种
+  output_dir = "staging/vscode-loc"
+  output_template = "{output_dir}/{lang}.json"
+
+  [calls.domain]
+  type = "ui"
+  style = "concise"
+
+  [calls.glossary]
+  id = "vscode"        # 共用 vscode 术语表（File/Edit/View/...）
+  extra = []
+
+  [calls.tm]
+  namespace = "qqq-ide-vscode-workbench"
+
+# ============================================================
+# 占位符约定（机器铁律）
+# ============================================================
+# 只允许 {0}{1}{2}…，不允许 %s / %d / {{name}} / $1 等其他变体。
+# 见 ignore/qqq 拓扑/arc/铁律 §11.⑤

@@ -16,8 +16,6 @@
   "config.language.enum.es": "Español (Spanish)",
   "config.language.enum.fr": "Français (French)",
   "config.language.enum.pt-br": "Português BR (Portuguese)",
-  "config.language.enum.hi": "हिन्दी (Hindi)",
-  "config.language.enum.vi": "Tiếng Việt (Vietnamese)",
   "config.performanceMode.desc": "☀️ Performance Mode:",
   "config.performanceMode.enum.extreme": "Extreme: Keep first frame only, quality 47.",
   "config.performanceMode.enum.accelerated": "Accelerated: Keep at most the first 2 seconds for both GIFs and videos, 7fps, quality 47, no progress bar.",

@@ -68,7 +68,9 @@
               "한국어",
               "Español",
               "Français",
-              "Português BR"
+              "Português BR",
+              "हिन्दी",
+              "Tiếng Việt"
             ],
             "markdownEnumDescriptions": [
               "%config.language.enum.zh%",
@@ -81,7 +83,9 @@
               "%config.language.enum.ko%",
               "%config.language.enum.es%",
               "%config.language.enum.fr%",
-              "%config.language.enum.pt-br%"
+              "%config.language.enum.pt-br%",
+              "%config.language.enum.hi%",
+              "%config.language.enum.vi%"
             ],
             "markdownDescription": "%config.language.desc%"
           },
@@ -474,7 +478,14 @@
     "package": "node qqqworkflow/git_help.js package",
     "publish": "npx @vscode/vsce publish --allow-star-activation",
     "q": "npx @vscode/vsce publish patch --allow-star-activation",
-    "pub": "yes | npx vsce publish patch"
+    "pub": "yes | npx vsce publish patch",
+    "i18n:lint": "node scripts/i18n-lint.js",
+    "i18n:lint:strict": "node scripts/i18n-lint.js --strict",
+    "i18n:fetch": "node scripts/fetch-vscode-loc.js",
+    "i18n:validate": "node scripts/gaea-i18n.js validate",
+    "i18n:dry-run": "node scripts/gaea-i18n.js dry-run",
+    "i18n:mock": "node scripts/gaea-i18n.js mock",
+    "i18n:sync": "node scripts/gaea-i18n.js sync"
   },
   "repository": {
     "type": "git",

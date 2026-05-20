@@ -1291,10 +1291,12 @@ async function revealFileOrFolder(filePath) {
 
 function openFile(filePath) {
     if (!fs.existsSync(filePath)) return;
+    // ★ cwd = file's parent dir (mimic Explorer/Finder double-click) so Electron portable .exe can find resources
+    const _cwd = fs.statSync(filePath).isDirectory() ? filePath : path.dirname(filePath);
     try {
-        if (process.platform === "win32") cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
-        else if (process.platform === "darwin") cp.exec(`open "${filePath}"`);
-        else cp.exec(`xdg-open "${filePath}"`);
+        if (process.platform === "win32") cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`, { cwd: _cwd });
+        else if (process.platform === "darwin") cp.exec(`open "${filePath}"`, { cwd: _cwd });
+        else cp.exec(`xdg-open "${filePath}"`, { cwd: _cwd });
     } catch {
         global.openExternal(vscode.Uri.file(filePath));
     }

@@ -3358,17 +3358,19 @@ function fetchFolderSizeInternal(folderPath, fromWatcher) {
 // ==================== Commands ====================
 function openFileCommand(filePath) {
 	if (!fs.existsSync(filePath)) return;
+	// ★ cwd = file's parent dir (mimic Explorer/Finder double-click) so Electron portable .exe can find resources
+	const _cwd = fs.statSync(filePath).isDirectory() ? filePath : path.dirname(filePath);
 	try {
 		if (process.platform === "win32") {
-			cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
+			cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`, { cwd: _cwd });
 		} else if (process.platform === "darwin") {
-			cp.exec(`open "${filePath}"`);
+			cp.exec(`open "${filePath}"`, { cwd: _cwd });
 		} else {
 			// ★ Linux: gio open → xdg-open → VS Code editor fallback
 			// Use spawn (non-blocking) instead of exec to avoid hanging
 			const isDir = fs.statSync(filePath).isDirectory();
 			const _tryLinuxOpen = (cmd, args, fallback) => {
-				const child = cp.spawn(cmd, args, { detached: true, stdio: 'ignore' });
+				const child = cp.spawn(cmd, args, { detached: true, stdio: 'ignore', cwd: _cwd });
 				child.unref();
 				child.on('error', () => { if (fallback) fallback(); });
 			};
