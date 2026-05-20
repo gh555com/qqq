@@ -2678,7 +2678,35 @@ function openExternal(uri) {
 	// First try opening via Node.js engine
 	try {
 		if (process.platform === 'win32') {
-			// Windows: use start
+			// ★ For .exe/.bat/.cmd: spawn directly (bypasses `start` ShellExecuteEx quirks
+			// that silently fail on paths containing dot-prefixed directories like .dist)
+			const ext = require('path').extname(filePath).toLowerCase();
+			if (ext === '.exe' || ext === '.bat' || ext === '.cmd') {
+				// Clean env: strip Electron/VS Code vars so child Electron apps
+				// won't inherit ELECTRON_RUN_AS_NODE=1 (runs headless) or debug ports
+				const cleanEnv = Object.fromEntries(
+					Object.entries(process.env).filter(([k]) =>
+						!/^(ELECTRON_|VSCODE_|NODE_OPTIONS$)/i.test(k)
+					)
+				);
+				try { logMessage(`[w-open-be] win32 spawn direct (cwd=${_spawnCwd}): ${filePath}`, "INFO"); } catch {}
+				const child = require('child_process').spawn(filePath, [], {
+					detached: true, stdio: 'ignore', cwd: _spawnCwd, windowsHide: false,
+					env: cleanEnv
+				});
+				child.unref();
+				child.on('error', (err) => {
+					try { logMessage(`[w-open-be] spawn error, falling back to start: ${err.message}`, "WARN"); } catch {}
+					// Fallback to start command
+					try {
+						const cmdLine = `start "" "${filePath.replace(/"/g, '""')}"`;
+						require('child_process').execSync(cmdLine, { stdio: 'ignore', cwd: _spawnCwd, env: cleanEnv });
+					} catch {}
+				});
+				try { logMessage(`[w-open-be] win32 spawn returned ok`, "INFO"); } catch {}
+				return Promise.resolve();
+			}
+			// Non-executable files: use start to invoke default handler
 			const cmdLine = `start "" "${filePath.replace(/"/g, '""')}"`;
 			try { logMessage(`[w-open-be] win32 execSync (cwd=${_spawnCwd}): ${cmdLine}`, "INFO"); } catch {}
 			require('child_process').execSync(cmdLine, { stdio: 'ignore', cwd: _spawnCwd });

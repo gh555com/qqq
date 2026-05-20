@@ -1626,6 +1626,7 @@ async function getDirectoryContents(dirPath, sortBy = "name", szDisplayMode = "n
 function generateWebviewScript(currentPath, sidebarRatio) {
   const escapedCurrentPath = escapeJsStringLiteral(currentPath);
   const escapedSidebarRatio = Number(sidebarRatio || 0.2).toFixed(4);
+  const config = getConfig();
 
   return `
 const vscode = acquireVsCodeApi();
@@ -1641,6 +1642,8 @@ let sidebarRatio = ${escapedSidebarRatio};
 
 let sessionSizeCache = new Map(); // path -> { text, gbPart, restPart }
 let currentSizeMode = 'nothing'; // Current sz-area display mode
+let globalDefaultSzMode = '${escapeJsStringLiteral(config.szDisplayMode || "nothing")}'; // Global default from VS Code settings
+let globalDefaultSortBy = '${escapeJsStringLiteral(config.sortBy || "name")}'; // Global default from VS Code settings
 
 let resizeObserver = null;
 const MIN_RESPONSIVE_WIDTH = 240;
@@ -1795,10 +1798,9 @@ function showHistoryDropdown(inputEl, dropdownEl, history) {
 
 
 function updateFineSCMButtons() {
-  // Determine effective values (fineSCM overrides config defaults)
-  const config = getConfig();
-  const effectiveSzMode = currentFineSCM.szMode || config.szDisplayMode;
-  const effectiveSortBy = currentFineSCM.sortBy || config.sortBy;
+  // Determine effective values (fineSCM overrides global defaults)
+  const effectiveSzMode = currentFineSCM.szMode || globalDefaultSzMode;
+  const effectiveSortBy = currentFineSCM.sortBy || globalDefaultSortBy;
 
   // Update left szMode buttons
   const szModeGroup = document.getElementById('szModeGroup');
@@ -2519,7 +2521,7 @@ function performCopyPathAction(){
   }
   if (paths.length > 0) {
     roamTick('x');
-    navigator.clipboard.writeText(paths.join('\n')).catch(() => { });
+    navigator.clipboard.writeText(paths.join('\\n')).catch(() => { });
   }
 }
 function performPasteAction(){
@@ -2663,6 +2665,10 @@ window.addEventListener('message', event => {
       // Update current mode
       currentSizeMode = newSizeMode;
       currentPath = message.currentPath || '';
+
+      // ★ Update global defaults from backend (config may change at runtime)
+      if (message.globalSzMode) globalDefaultSzMode = message.globalSzMode;
+      if (message.globalSortBy) globalDefaultSortBy = message.globalSortBy;
 
       // ★ Update fine-grained SCM state
       currentFineSCM = {
@@ -3761,8 +3767,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const emptyMenu = document.getElementById('emptyContextMenu');
 
       if (itemElement && itemMenu) {
-        // If there are selected items and you right-click one of them, keep selection
-        if (selectedItems.length === 0) {
+        // ★ Right-click behavior: always select the target item
+        // If right-clicking an already-selected item (multi-select), keep selection
+        // If right-clicking an unselected item, select it (clear previous selection)
+        const isAlreadySelected = itemElement.classList.contains('selected');
+        if (!isAlreadySelected) {
           selectFileItem(itemElement, false);
         }
 
@@ -4859,6 +4868,8 @@ function showSaveAsDialog() {
         items,
         sizeMode: szDisplayMode,
         fineSCM: fineSCM,
+        globalSzMode: config.szDisplayMode,
+        globalSortBy: config.sortBy,
       });
 
       // ★ Update sidebar synchronously (history qq iq + pinned history)
