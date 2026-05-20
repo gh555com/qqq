@@ -1,11 +1,12 @@
 # ==============================================================================
 # qqq IDE Build Script
-# Usage: .\build.ps1 [-Target win32-x64] [-VscodeTag 1.96.4]
-# Requires: node 20+, npm, git, python3, Visual Studio Build Tools (C++)
+# Usage: .\build.ps1 [-Target win32-x64] [-VscodeTag 1.77.5]
+# Requires: node 16.14.x, yarn 1.22.x, git, python 3.10, Visual Studio Build Tools (C++)
+# Why 1.77: last Electron 19 line = naturally Win7 compatible; auxiliary bar API stable since 1.74.
 # ==============================================================================
 param(
     [string]$Target = "win32-x64",
-    [string]$VscodeTag = "1.96.4"
+    [string]$VscodeTag = "1.77.5"
 )
 $ErrorActionPreference = "Stop"
 
@@ -34,6 +35,7 @@ foreach ($d in @("yarn-cache","npm-cache","temp","electron")) {
     New-Item -ItemType Directory -Force (Join-Path $CacheBase $d) | Out-Null
 }
 $env:npm_config_cache       = Join-Path $CacheBase "npm-cache"
+$env:YARN_CACHE_FOLDER      = Join-Path $CacheBase "yarn-cache"
 $env:TEMP                   = Join-Path $CacheBase "temp"
 $env:TMP                    = Join-Path $CacheBase "temp"
 $env:ELECTRON_CACHE         = Join-Path $CacheBase "electron"
@@ -111,14 +113,13 @@ Write-Host "  [3a] Remove Chat / InlineChat"
 Comment-Lines -File $WbDesktop -Pattern "contrib/chat/" -Desc "Chat imports"
 Comment-Lines -File $WbDesktop -Pattern "contrib/inlineChat/" -Desc "InlineChat imports"
 
-# -- 3b. Remove unwanted built-in extensions -----------------------------------
+# -- 3b. Remove unwanted built-in extensions (keep ipynb to be safe in 1.77 build pipeline) --
 Write-Host "  [3b] Remove unwanted extensions"
 $extBase = Join-Path $BuildDir "extensions"
 $killExts = @(
     @("github-authentication",   "GitHub OAuth"),
     @("microsoft-authentication","Microsoft auth"),
     @("github",                  "GitHub integration"),
-    @("ipynb",                   "Jupyter Notebook"),
     @("tunnel-forwarding",       "Remote Tunnel")
 )
 foreach ($e in $killExts) {
@@ -186,11 +187,11 @@ if (Test-Path $QqqAi) {
 }
 
 # ==============================================================================
-# 5. Install dependencies (npm, NOT yarn)
+# 5. Install dependencies (yarn for vscode 1.77; npm switch came in 1.94)
 # ==============================================================================
-Write-Host "`n[5/7] npm install ..." -ForegroundColor Yellow
+Write-Host "`n[5/7] yarn install ..." -ForegroundColor Yellow
 Push-Location $BuildDir
-npm ci
+yarn --frozen-lockfile --network-timeout 600000
 Pop-Location
 
 # ==============================================================================
@@ -198,7 +199,7 @@ Pop-Location
 # ==============================================================================
 Write-Host "`n[6/7] Compiling for $Target ..." -ForegroundColor Yellow
 Push-Location $BuildDir
-npm run gulp -- "vscode-$Target"
+yarn gulp "vscode-$Target"
 Pop-Location
 
 # ==============================================================================
@@ -216,6 +217,15 @@ if (Test-Path $OutDir) {
     } else {
         Write-Host "    [ok] output dir: $OutDir" -ForegroundColor Green
     }
+
+    # Trigger VS Code portable mode: mkdir data/ in artifact root
+    $dataDir = Join-Path $OutDir "data"
+    New-Item -ItemType Directory -Force $dataDir | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $dataDir "user-data") | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $dataDir "extensions") | Out-Null
+    "qqq-ide portable build $(Get-Date -Format o) tag=$VscodeTag" `
+        | Out-File -FilePath (Join-Path $dataDir ".qqq-portable") -Encoding utf8
+    Write-Host "    [ok] portable data/ folder created at: $dataDir" -ForegroundColor Green
 } else {
     Write-Warning "    output dir not found. Check: dir $($ScriptDir)\.build\ -Directory"
 }
