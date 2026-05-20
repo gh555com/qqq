@@ -32,7 +32,7 @@
   "config.szDisplayMode.enum.mtime": "Show modification time",
   "config.sortBy.desc": "🛸 ↑↓",
   "config.sortBy.enum.name": "Sort by name",
-  "config.sortBy.enum.size": "Sort by size (folders not ranked, files descending by size)",
+  "config.sortBy.enum.size": "Sort by size (folders with known sizes participate, files descending by size)",
   "config.sortBy.enum.ctime": "Sort by creation time (folders descending separately, files descending separately)",
   "config.sortBy.enum.mtime": "Sort by modification time (folders descending separately, files descending separately)",
   "config.autoWatchChanges.desc": "🛸 Checked: Automatically refresh the file list (including sz column and sort order) when external programs modify files in the current directory.\n Unchecked: Zero performance overhead, zero visual jitter. Unchecked by default. ",

@@ -78,3 +78,4 @@ Tue, Feb 17, 2026  3:21:37 PM
 
 # IDE build artifacts
 ide/.build/
+ide/.dist/

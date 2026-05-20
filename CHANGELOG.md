@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [16.5.3] - 2026-05-20
+
+### Improved
+- **S sort now ranks folders by size**: After pressing Space to compute folder sizes, clicking the S button now sorts folders by their computed size (largest first) instead of alphabetically. Files continue to sort by size as before.
+
+---
+
 ## [16.5.2] - 2026-05-20
 
 ### Added

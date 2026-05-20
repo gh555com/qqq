@@ -36,7 +36,9 @@ const LANG_MAP = {
     '한국어': 'ko',
     'Español': 'es',
     'Français': 'fr',
-    'Português BR': 'pt-br'
+    'Português BR': 'pt-br',
+    'हिन्दी': 'hi',
+    'Tiếng Việt': 'vi'
 };
 
 // VS Code 语言 → 我们的语言代码
@@ -55,7 +57,9 @@ const VSCODE_LANG_MAP = {
     'es': 'es',
     'fr': 'fr',
     'pt-br': 'pt-br',
-    'pt': 'pt-br'
+    'pt': 'pt-br',
+    'hi': 'hi',
+    'vi': 'vi'
 };
 
 /**

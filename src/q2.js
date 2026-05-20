@@ -161,6 +161,7 @@ let globalRefreshWebview = null;
 
 let cachedInMemoryConfig = null; // Add in-memory cache to prevent read delay/conflicts caused by globalState debounce
 let lastResourceExplorerPath = ""; // Record last path used to update the resource display area, used to clear size cache
+const _folderSizeCache = new Map(); // ★ Cache computed folder sizes for S sort, populated by sRequest, cleared on dir change
 
 // ==================== IO / Path: match latest engine logic (key) ====================
 
@@ -867,7 +868,9 @@ async function getSizeForSRequest(itemPath, isFolder) {
   try {
     const result = await geq().getPathSize(canon);
     if (result && result.success) {
-      return Number(result.total_size) || 0;
+      const size = Number(result.total_size) || 0;
+      _folderSizeCache.set(canon, size); // ★ Cache for S sort
+      return size;
     }
     return 0;
   } catch (error) {
@@ -1595,8 +1598,13 @@ async function getDirectoryContents(dirPath, sortBy = "name", szDisplayMode = "n
       contents.dirs.sort((a, b) => collator.compare(a.name, b.name));
       contents.files.sort((a, b) => collator.compare(a.name, b.name));
     } else if (sortBy === "size") {
-      // size: folders on top (sorted by name), files below (sorted by size desc, larger first)
-      contents.dirs.sort((a, b) => collator.compare(a.name, b.name));
+      // size: folders sorted by cached recursive size (if available), then by name fallback; files by size desc
+      contents.dirs.sort((a, b) => {
+        const aSize = _folderSizeCache.get(a.path) ?? (a.size || 0);
+        const bSize = _folderSizeCache.get(b.path) ?? (b.size || 0);
+        // Larger first (desc); tie-break by name
+        return (bSize - aSize) || collator.compare(a.name, b.name);
+      });
       contents.files.sort((a, b) => (b.size || 0) - (a.size || 0));
     } else if (sortBy === "ctime") {
       // ctime: folders on top (time desc, newer first), files below (time desc)
@@ -4740,6 +4748,8 @@ function showSaveAsDialog() {
       // Record current directory for detecting directory changes
       if (currentPath !== lastResourceExplorerPath) {
         lastResourceExplorerPath = currentPath;
+        // ★ Clear folder size cache on directory change (stale sizes from previous dir)
+        _folderSizeCache.clear();
         // ★ Save last visited directory immediately (can restore even if crashed)
         saveLastVisitedDir(currentPath);
       }

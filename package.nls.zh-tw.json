@@ -32,7 +32,7 @@
   "config.szDisplayMode.enum.mtime": "顯示修改時間",
   "config.sortBy.desc": "🛸 ↑↓",
   "config.sortBy.enum.name": "按名稱排序",
-  "config.sortBy.enum.size": "按大小排序（資料夾不參與排序，檔案按大小倒序）",
+  "config.sortBy.enum.size": "按大小排序（資料夾參與排序，已求出大小的資料夾在前，檔案按大小倒序）",
   "config.sortBy.enum.ctime": "按建立時間排序（資料夾單獨按時間倒序，檔案單獨按時間倒序）",
   "config.sortBy.enum.mtime": "按修改時間排序（資料夾單獨按時間倒序，檔案單獨按時間倒序）",
   "config.autoWatchChanges.desc": "🛸 自動感知外部變化。\n  勾選：當外部程式修改當前目錄中的檔案時，自動更新檔案列表（包括 sz 區和排序）。\n 不勾選：0效能開銷、0視界抖動。預設不勾選。 ",
