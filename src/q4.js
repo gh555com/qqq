@@ -39,7 +39,6 @@ const CONSTANTS = Object.freeze({
 
     // Limits
     MAX_HISTORY_ITEMS: 2000,
-    CLEANUP_BATCH_SIZE: 1000,
     UI_HISTORY_LIMIT: 30,
     MAX_CONTENT_LENGTH: 100000,
     PREVIEW_LENGTH: 200,
@@ -528,7 +527,10 @@ class ClipboardHistoryManager {
                 let cur = this._tail;
                 while (cur && this._size > CONSTANTS.MAX_HISTORY_ITEMS) {
                     const prev = cur.prev;
-                    if (!cur.pinned) this._removeNode(cur);
+                    if (!cur.pinned) {
+                        if (cur.hash) this._sessionRemovedHashes.add(cur.hash);
+                        this._removeNode(cur);
+                    }
                     cur = prev;
                 }
             }
@@ -801,19 +803,14 @@ class ClipboardHistoryManager {
                 this._idMap.set(node.id, node);
                 this._hashMap.set(hash, node);
 
-                // Batch capacity cleanup: when reaching 2000, remove the oldest 1000 (skip pinned)
-                if (this._size >= CONSTANTS.MAX_HISTORY_ITEMS) {
-                    console.log('[Q4]', q('log.capacityFuse'));
-                    let removed = 0;
+                // Capacity enforcement: evict oldest non-pinned item(s) to stay at MAX
+                while (this._size > CONSTANTS.MAX_HISTORY_ITEMS) {
+                    // Find oldest non-pinned from tail
                     let cur = this._tail;
-                    while (cur && removed < CONSTANTS.CLEANUP_BATCH_SIZE) {
-                        const prev = cur.prev;
-                        if (!cur.pinned) {
-                            this._removeNode(cur);
-                            removed++;
-                        }
-                        cur = prev;
-                    }
+                    while (cur && cur.pinned) cur = cur.prev;
+                    if (!cur) break; // all items are pinned, can't evict
+                    if (cur.hash) this._sessionRemovedHashes.add(cur.hash);
+                    this._removeNode(cur);
                 }
             }
             this._lastClipboardContent = text;
