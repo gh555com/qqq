@@ -6,6 +6,23 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [16.5.2] - 2026-05-20
+
+### Added
+- **Roam copy path (`z` key)**: Press `z` or right-click → "copy path" to copy the full file path(s) to clipboard. Multi-select joins paths with newlines — paste anywhere instantly.
+- **Roam N button for name sort**: The right-side sort group now has all four options (n/s/c/m) — sort by name with the same per-folder independent memory as the other sort modes. The N button is checked by default since name sort is the global default.
+- **qqq Vision workspace manager**: Two new commands (`qqq.addToVision` / `qqq.toggleVisionFolder`) let AI (and you) control which folders are visible. Add a folder → AI sees it. Remove → AI no longer sees it. Unsaved file detection prevents accidental data loss on removal.
+
+### Fixed
+- **Radio streaming reliability**: Embedded Python's HTTPS requests previously failed with "unknown url type: https" — now uses native HTTP client. Radio also no longer hangs on stale connections after the server stops broadcasting, and device creation properly times out (8s) after wake-from-sleep instead of freezing indefinitely.
+- **File filter multi-keyword search**: Space-separated keywords in the Roam filter box now correctly split on all whitespace types (including NBSP and full-width spaces) for reliable AND matching.
+- **Paste no longer delays on plain HTML**: Rich text copied from browsers (without embedded images) now pastes instantly — no unnecessary download wait or anchor placeholder.
+
+### Improved
+- **Sort button defaults**: The sort and display-mode buttons now reflect the active setting even before you click any — no more "nothing looks selected" confusion on fresh folders.
+
+---
+
 ## [16.5.1] - 2026-05-12
 
 ### Added

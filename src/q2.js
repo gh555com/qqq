@@ -1787,12 +1787,17 @@ function showHistoryDropdown(inputEl, dropdownEl, history) {
 
 
 function updateFineSCMButtons() {
+  // Determine effective values (fineSCM overrides config defaults)
+  const config = getConfig();
+  const effectiveSzMode = currentFineSCM.szMode || config.szDisplayMode;
+  const effectiveSortBy = currentFineSCM.sortBy || config.sortBy;
+
   // Update left szMode buttons
   const szModeGroup = document.getElementById('szModeGroup');
   if (szModeGroup) {
     szModeGroup.querySelectorAll('.scm-btn').forEach(btn => {
       const mode = btn.dataset.mode;
-      if (currentFineSCM.szMode === mode) {
+      if (effectiveSzMode === mode) {
         btn.classList.add('active');
       } else {
         btn.classList.remove('active');
@@ -1805,7 +1810,7 @@ function updateFineSCMButtons() {
   if (sortByGroup) {
     sortByGroup.querySelectorAll('.scm-btn').forEach(btn => {
       const sort = btn.dataset.sort;
-      if (currentFineSCM.sortBy === sort) {
+      if (effectiveSortBy === sort) {
         btn.classList.add('active');
       } else {
         btn.classList.remove('active');
@@ -4343,6 +4348,7 @@ function getWebviewContent(currentPath) {
     .replace("{{I18N_SZ_SIZE}}", q('q2.ui.szSize'))
     .replace("{{I18N_SZ_CTIME}}", q('q2.ui.szCtime'))
     .replace("{{I18N_SZ_MTIME}}", q('q2.ui.szMtime'))
+    .replace("{{I18N_SORT_NAME}}", q('q2.ui.sortName'))
     .replace("{{I18N_SORT_SIZE}}", q('q2.ui.sortSize'))
     .replace("{{I18N_SORT_CTIME}}", q('q2.ui.sortCtime'))
     .replace("{{I18N_SORT_MTIME}}", q('q2.ui.sortMtime'))

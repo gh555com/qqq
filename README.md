@@ -3,7 +3,7 @@
   © 2005 <a href="https://www.gh555.com">gh555.com</a> All Rights Reserved.
 </p>
 
-# qqq IDE: Paste Everything into VS Code / Code-OSS / VSCodium
+# qqq IDE: Paste Everything into VS Code / Code-OSS / VSCodium (Project started in October 2025)
 
 **Make everything pasteable. Orchestrate ideas. Turn the IDE into an operating system.**
 
@@ -22,7 +22,7 @@ Original **name**: qqq [![GitHub stars](https://img.shields.io/github/stars/gh55
 
 **qqq 16.5.1+ is required for Linux / macOS.** [Details](#how-to-install)
 
-![](https://gh555.com/px?g=qqq&s=keeleylednergz.qqq.readme)
+![](https://gh555.com/px?g=qqq&s=gh555.qqq.readme)
 
 ## Why qqq IDE
 
@@ -272,3 +272,13 @@ https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md
 - Reply on the same day: ky@gh555.com
 
 <a href="https://www.gh555.com">GH Health</a> All Rights Reserved.
+
+
+
+
+
+
+
+
+ Keywords: Paste image,File Explorer,Rich Media,WYSIWYG,Preview,Image preview,Navigator,stream detection,html sniffing,粘贴图片,文件管理器,富媒体,所见即所得,预览,图片预览,导航器,流检测,HTML嗅探,画像の貼り付け,ファイルマネージャー,リッチメディア,WYSIWYG,プレビュー,画像プレビュー,ナビゲーター,ストリーム検出,HTMLスニッフィング,Bild einfügen,Dateimanager,Rich-Media,WYSIWYG,Vorschau,Bildvorschau,Navigator,Stream-Erkennung,HTML-Sniffing,이미지 붙여넣기,파일 관리자,리치 미디어,WYSIWYG,미리보기,이미지 미리보기,네비게이터,스트림 감지,HTML 스니핑,Вставить изображение,Диспетчер файлов,Рич-медиа,WYSIWYG,Предварительный просмотр,Предварительный просмотр изображения,Навигатор,обнаружение потока,HTML-анализ,لصق الصورة,مدير الملفات,وسائط غنية,WYSIWYG,معاينة,معاينة الصورة,ملاحظ,كشف التدفق,استكشاف HTML,Pegar imagen,Administrador de archivos,Medios enriquecidos,WYSIWYG,Vista previa,Vista previa de imagen,Navegador,detección de flujo,olfateo HTML,Coller une image,Gestionnaire de fichiers,Médias riches,WYSIWYG,Aperçu,Aperçu de l'image,Navigateur,détection de flux,reniflage HTML,Colar imagem,Gerenciador de arquivos,Mídia rica,WYSIWYG,Pré-visualização,Pré-visualização de imagem,Navegador,detecção de fluxo,farejamento HTML,छवि चिपकाएं,फ़ाइल प्रबंधक,समृद्ध मीडिया,WYSIWYG,पूर्वावलोकन,छवि का पूर्वावलोकन,नेविगेटर,स्ट्रीम का पता लगाना,HTML स्निफिंग,Dán hình ảnh,Trình quản lý tệp,Phương tiện đa dạng,WYSIWYG,Xem trước,Xem trước hình ảnh,Trình điều hướng,phát hiện luồng,ngửi HTML,Incolla immagine,Esplora file,Media ricchi,WYSIWYG,Anteprima,Anteprima immagine,Navigatore,rilevamento di flusso,sniffing HTML
+

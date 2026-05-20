@@ -135,6 +135,7 @@
             "szSize": "sz区显示: 文件大小",
             "szCtime": "sz区显示: 创建时间",
             "szMtime": "sz区显示: 修改时间",
+            "sortName": "排序: 按名称",
             "sortSize": "排序: 按文件大小",
             "sortCtime": "排序: 按创建时间",
             "sortMtime": "排序: 按修改时间",
