@@ -1,12 +1,12 @@
 # ==============================================================================
 # qqq IDE Build Script
-# Usage: .\build.ps1 [-Target win32-x64] [-VscodeTag 1.77.5]
+# Usage: .\build.ps1 [-Target win32-x64] [-VscodeTag 1.77.3]
 # Requires: node 16.14.x, yarn 1.22.x, git, python 3.10, Visual Studio Build Tools (C++)
 # Why 1.77: last Electron 19 line = naturally Win7 compatible; auxiliary bar API stable since 1.74.
 # ==============================================================================
 param(
     [string]$Target = "win32-x64",
-    [string]$VscodeTag = "1.77.5"
+    [string]$VscodeTag = "1.77.3"
 )
 $ErrorActionPreference = "Stop"
 

@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       vscode_tag:
-        description: 'VS Code version tag (1.77.x = last Win7-compatible Electron 19 line)'
-        default: '1.77.5'
+        description: 'VS Code version tag (1.77.3 = last patch of 1.77, last Win7-compatible Electron 19 line)'
+        default: '1.77.3'
         type: string
 
 jobs:
