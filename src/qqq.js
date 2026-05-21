@@ -1606,6 +1606,11 @@ async function _delayedActivate(context) {
 	global.initStatusBar();
 	updateStatusBarThrottled();
 
+	// ★ ghrun bridge — when running inside qqq IDE, ensure components via ghrun
+	setTimeout(() => {
+		_ghrunEnsure().catch(() => {});
+	}, 2500);
+
 	// ★ startDaemons delayed 6 seconds (relative to _delayedActivate start, delay 3 seconds = total 3+3=6 seconds)
 	setTimeout(() => {
 		global.logMessage(q('qqq.log.daemonsStart'), "INFO");
@@ -2307,6 +2312,73 @@ function setIconCache(filePath, iconB64) {
 		cacheMeta.icons[filePath] = { hash, mtime };
 		saveCacheMeta();
 	} catch (e) { }
+}
+
+// ★ ghrun bridge — QDIR dual-track component management
+// Inside qqq IDE (QDIR set): spawn ghrun ensure to download/verify components.
+// Standalone extension (no QDIR): skip entirely, existing dow.js handles everything.
+async function _ghrunEnsure() {
+	const qdir = process.env.QDIR;
+	if (!qdir) return; // standalone qqq extension — no ghrun available
+
+	const ghrunExe = process.platform === 'win32' ? 'ghrun.exe' : 'ghrun';
+	const ghrunPath = path.join(qdir, 'f', ghrunExe);
+	if (!fs.existsSync(ghrunPath)) {
+		global.logMessage(`[ghrun] binary not found: ${ghrunPath}`, 'WARN');
+		return;
+	}
+
+	global.logMessage(`[ghrun] QDIR=${qdir}, ensuring components...`, 'INFO');
+
+	try {
+		const proc = cp.spawn(ghrunPath, ['ensure', 'ffmpeg', 'python', 'ytdlp'], {
+			stdio: ['ignore', 'pipe', 'pipe'],
+			windowsHide: true,
+			cwd: qdir
+		});
+
+		let errBuf = '';
+		proc.stderr.on('data', d => { errBuf += d; });
+
+		// Parse newline-delimited JSON progress from ghrun stdout
+		let buf = '';
+		proc.stdout.on('data', chunk => {
+			buf += chunk;
+			let nl;
+			while ((nl = buf.indexOf('\n')) !== -1) {
+				const line = buf.slice(0, nl).trim();
+				buf = buf.slice(nl + 1);
+				if (!line) continue;
+				try {
+					const msg = JSON.parse(line);
+					if (msg.type === 'progress') {
+						global.logMessage(`[ghrun] ${msg.component}: ${msg.pct}%`, 'INFO');
+					} else if (msg.type === 'ok') {
+						global.logMessage(`[ghrun] ${msg.component} ready: ${msg.path}`, 'INFO');
+					} else if (msg.type === 'error') {
+						global.logMessage(`[ghrun] ${msg.component} failed: ${msg.msg}`, 'WARN');
+					}
+				} catch { /* non-JSON line, ignore */ }
+			}
+		});
+
+		await new Promise((ok) => {
+			proc.on('close', code => {
+				if (code !== 0) {
+					global.logMessage(`[ghrun] ensure exited ${code}: ${errBuf.slice(0, 200)}`, 'WARN');
+				} else {
+					global.logMessage('[ghrun] all components ensured', 'INFO');
+				}
+				ok();
+			});
+			proc.on('error', err => {
+				global.logMessage(`[ghrun] spawn error: ${err.message}`, 'WARN');
+				ok();
+			});
+		});
+	} catch (e) {
+		global.logMessage(`[ghrun] bridge error: ${e.message}`, 'WARN');
+	}
 }
 
 const exported = {

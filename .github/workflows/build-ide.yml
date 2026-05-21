@@ -71,20 +71,23 @@ jobs:
       # ============================================================
       # Phase 2.5: Build ghrun (component manager)
       # ============================================================
-      - name: Build ghrun
+      - name: Build ghrun + watchdog
         shell: pwsh
         run: |
           Push-Location ide/ghrun
           # Use stable Rust from the runner
           rustup target add x86_64-pc-windows-msvc
           cargo build --release --target x86_64-pc-windows-msvc
-          $bin = "target/x86_64-pc-windows-msvc/release/ghrun.exe"
-          if (Test-Path $bin) {
-            Copy-Item $bin "../../dist/ghrun.exe" -Force
-            Write-Host "ghrun.exe: $([math]::Round((Get-Item $bin).Length/1KB,0)) KB" -ForegroundColor Green
-          } else {
-            Write-Host "::error::ghrun.exe not found"
-            exit 1
+          $target = "target/x86_64-pc-windows-msvc/release"
+          foreach ($bin in @("ghrun.exe", "watchdog.exe")) {
+            $src = "$target/$bin"
+            if (Test-Path $src) {
+              Copy-Item $src "../../dist/$bin" -Force
+              Write-Host "$bin`: $([math]::Round((Get-Item $src).Length/1KB,0)) KB" -ForegroundColor Green
+            } else {
+              Write-Host "::error::$bin not found"
+              exit 1
+            }
           }
           Pop-Location
 
@@ -131,20 +134,18 @@ jobs:
 
           # Check portable f/ structure (QDIR protocol)
           if (Test-Path "$art/f/.qqq-portable") {
-            Write-Host "QDIR portable: f/a/e OK"
-          } elseif (Test-Path "$art/data/.qqq-portable") {
-            Write-Host "Stock portable: data/ OK (3g patch may not have applied)"
+            Write-Host "QDIR portable: f/ OK"
           } else {
             Write-Host "::warning::portable marker not found"
           }
 
           # Check pre-installed extensions
-          $extDir = if (Test-Path "$art/f/e") { "$art/f/e" } else { "$art/data/extensions" }
+          $extDir = if (Test-Path "$art/f/extensions") { "$art/f/extensions" } else { "$art/data/extensions" }
           if (Test-Path "$extDir/qqq-core") { Write-Host "qqq-core: pre-installed" }
           if (Test-Path "$extDir/qqq-ai") { Write-Host "qqq-ai: pre-installed" }
 
           # Check settings seed
-          $settingsPath = if (Test-Path "$art/f/a/User/settings.json") { "$art/f/a/User/settings.json" } else { "$art/data/user-data/User/settings.json" }
+          $settingsPath = if (Test-Path "$art/f/user-data/User/settings.json") { "$art/f/user-data/User/settings.json" } else { "$art/data/user-data/User/settings.json" }
           if (Test-Path $settingsPath) { Write-Host "settings.json: seeded" }
 
           $sz = (Get-ChildItem $art -Recurse -File | Measure-Object Length -Sum).Sum

@@ -57,7 +57,7 @@ pub fn install_good_from_url(ctx: &Ctx, manifest_url: &str) -> Result<(), String
 /// Install a good from a parsed GaeaManifest.
 pub fn install_good(ctx: &Ctx, manifest: &GaeaManifest) -> Result<(), String> {
     let target = match manifest.install.target_dir.as_deref() {
-        Some("QDIR_BUILTIN") => ctx.builtin.join(&manifest.id),
+        Some("QDIR_BUILTIN") => ctx.extensions.join(&manifest.id),
         _                    => ctx.goods.join(&manifest.id),
     };
 
@@ -99,7 +99,7 @@ pub fn install_good(ctx: &Ctx, manifest: &GaeaManifest) -> Result<(), String> {
 
 pub fn list_goods(ctx: &Ctx) {
     let dirs = [
-        ("builtin", &ctx.builtin),
+        ("builtin", &ctx.extensions),
         ("goods",   &ctx.goods),
     ];
     for (label, dir) in &dirs {

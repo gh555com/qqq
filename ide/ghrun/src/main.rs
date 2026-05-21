@@ -133,7 +133,7 @@ fn cmd_info(ctx: &Ctx) -> Result<(), String> {
         "f":          ctx.f.to_string_lossy().to_string(),
         "components": ctx.components.to_string_lossy().to_string(),
         "goods":      ctx.goods.to_string_lossy().to_string(),
-        "builtin":    ctx.builtin.to_string_lossy().to_string(),
+        "builtin":    ctx.extensions.to_string_lossy().to_string(),
         "platform":   manifest::current_platform(),
     }));
     Ok(())

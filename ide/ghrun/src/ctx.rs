@@ -2,6 +2,19 @@
 // ghrun.exe lives at: <QDIR>/f/ghrun.exe
 // Auto-infers QDIR from its own location, no env var required.
 // But respects QDIR env var if explicitly set (e.g. during dev/CI).
+//
+// QDIR layout:
+//   QDIR/
+//   ├── qqq.exe
+//   └── f/                    ← VS Code portable data (dataFolderName = "f")
+//       ├── ghrun.exe          ← THIS BINARY
+//       ├── user-data/         ← VS Code user settings/keybindings
+//       ├── extensions/        ← pre-installed + user extensions
+//       ├── components/        ← python/ffmpeg/yt-dlp/git
+//       ├── goods/             ← gaea goods
+//       ├── tmp/               ← scratch space
+//       ├── cache/             ← download cache
+//       └── logs/              ← runtime logs
 
 use std::path::PathBuf;
 
@@ -9,18 +22,22 @@ use std::path::PathBuf;
 pub struct Ctx {
     /// IDE portable root, e.g. /path/to/qqq-ide/
     pub qdir: PathBuf,
-    /// f/ — portable data root (triggers VS Code portable mode)
+    /// f/ — VS Code portable data folder (triggers portable mode)
     pub f: PathBuf,
-    /// f/a/ — user data (settings, keybindings …)
-    pub data: PathBuf,
-    /// f/e/ — first-party extensions (qqq-core, qqq-ai …)
-    pub builtin: PathBuf,
+    /// f/user-data/ — VS Code user settings, keybindings, state
+    pub user_data: PathBuf,
+    /// f/extensions/ — pre-installed first-party + user extensions
+    pub extensions: PathBuf,
     /// f/components/ — python / ffmpeg / yt-dlp / git
     pub components: PathBuf,
     /// f/goods/ — installed gaea goods
     pub goods: PathBuf,
     /// f/tmp/ — scratch space for downloads / extractions
     pub tmp: PathBuf,
+    /// f/cache/ — download cache, ETag cache
+    pub cache: PathBuf,
+    /// f/logs/ — ghrun + component logs
+    pub logs: PathBuf,
 }
 
 impl Ctx {
@@ -28,11 +45,13 @@ impl Ctx {
         let qdir = Self::infer_qdir();
         let f = qdir.join("f");
         Ctx {
-            data:       f.join("a"),
-            builtin:    f.join("e"),
+            user_data:  f.join("user-data"),
+            extensions: f.join("extensions"),
             components: f.join("components"),
             goods:      f.join("goods"),
             tmp:        f.join("tmp"),
+            cache:      f.join("cache"),
+            logs:       f.join("logs"),
             f,
             qdir,
         }
@@ -59,7 +78,11 @@ impl Ctx {
 
     /// Ensure all QDIR directories exist.
     pub fn init_dirs(&self) -> std::io::Result<()> {
-        for d in [&self.f, &self.data, &self.builtin, &self.components, &self.goods, &self.tmp] {
+        for d in [
+            &self.f, &self.user_data, &self.extensions,
+            &self.components, &self.goods, &self.tmp,
+            &self.cache, &self.logs,
+        ] {
             std::fs::create_dir_all(d)?;
         }
         Ok(())

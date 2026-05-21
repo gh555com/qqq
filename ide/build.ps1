@@ -240,46 +240,11 @@ Comment-Lines -File $WbDesktop -Pattern "contrib/welcomeViews/" -Desc "Welcome V
 Comment-Lines -File $WbDesktop -Pattern "contrib/update/" -Desc "Update notifications"
 Write-Host "    Brand: clean" -ForegroundColor Magenta
 
-# -- 3g. Patch portable data directory: data/ -> f/, user-data -> a, extensions -> e --
-Write-Host "  [3g] Patch portable dir names (QDIR: f/a/e)"
-$portableFile = Join-Path $BuildDir "src\vs\base\node\userDataPath.js"
-if (-not (Test-Path $portableFile)) {
-    # 1.77 may use .ts extension
-    $portableFile = Join-Path $BuildDir "src\vs\base\node\userDataPath.ts"
-}
-if (-not (Test-Path $portableFile)) {
-    # fallback: search in platform/environment
-    $portableFile = Get-ChildItem $BuildDir -Recurse -Filter "*.ts" | Select-String -Pattern "'data'" -List | Where-Object { $_.Line -match "portable" } | Select-Object -First 1 -ExpandProperty Path
-}
-# Also patch the product.ts / environmentService for portable paths
-$filesToPatch = @(
-    (Join-Path $BuildDir "src\vs\platform\environment\node\environmentService.ts"),
-    (Join-Path $BuildDir "src\vs\base\node\userDataPath.ts"),
-    (Join-Path $BuildDir "src\vs\base\node\userDataPath.js"),
-    (Join-Path $BuildDir "src\vs\code\electron-main\app.ts")
-)
-$portablePatched = 0
-foreach ($pf in $filesToPatch) {
-    if (Test-Path $pf) {
-        $content = Get-Content $pf -Raw -Encoding UTF8
-        $newContent = $content
-        # Replace portable folder name: 'data' -> 'f'
-        $newContent = $newContent -replace "'data'", "'f'"
-        $newContent = $newContent -replace '"data"', '"f"'
-        # Replace user-data -> a
-        $newContent = $newContent -replace "'user-data'", "'a'"
-        $newContent = $newContent -replace '"user-data"', '"a"'
-        # Replace extensions subfolder in portable context
-        if ($newContent -ne $content) {
-            Set-Content $pf $newContent -Encoding UTF8
-            $portablePatched++
-            Write-Host "    [ok] patched: $(Split-Path $pf -Leaf)" -ForegroundColor Green
-        }
-    }
-}
-if ($portablePatched -eq 0) {
-    Write-Warning "    [x] no portable path files found to patch"
-}
+# -- 3g. Portable dir names ---------------------------------------------------
+# product.json dataFolderName="f" already makes VS Code use f/ as portable root.
+# VS Code standard subdirs (f/user-data/, f/extensions/) are correct as-is.
+# No source patching needed — dataFolderName handles everything.
+Write-Host "  [3g] Portable dir: dataFolderName=f in product.json (no source patch needed)" -ForegroundColor DarkGray
 
 Write-Host "`n  Surgery complete." -ForegroundColor Cyan
 
@@ -338,33 +303,39 @@ if (Test-Path $OutDir) {
         Write-Host "    [ok] output dir: $OutDir" -ForegroundColor Green
     }
 
-    # Trigger VS Code portable mode: mkdir f/ in artifact root (QDIR protocol: f/a/e)
+    # Trigger VS Code portable mode: mkdir f/ in artifact root (dataFolderName=f in product.json)
+    # VS Code creates f/user-data/ and f/extensions/ automatically.
     $dataDir = Join-Path $OutDir "f"
     New-Item -ItemType Directory -Force $dataDir | Out-Null
-    New-Item -ItemType Directory -Force (Join-Path $dataDir "a") | Out-Null
-    New-Item -ItemType Directory -Force (Join-Path $dataDir "a\User") | Out-Null
-    New-Item -ItemType Directory -Force (Join-Path $dataDir "e") | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $dataDir "user-data") | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $dataDir "user-data\User") | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $dataDir "extensions") | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $dataDir "components") | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $dataDir "goods") | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $dataDir "tmp") | Out-Null
     "qqq-ide portable build $(Get-Date -Format o) tag=$VscodeTag" `
         | Out-File -FilePath (Join-Path $dataDir ".qqq-portable") -Encoding utf8
-    Write-Host "    [ok] portable f/ folder created (QDIR: f=data, a=user-data, e=extensions)" -ForegroundColor Green
+    Write-Host "    [ok] portable f/ created (user-data/extensions/components/goods/tmp)" -ForegroundColor Green
 
-    # -- Copy ghrun.exe into f/ (QDIR_GHRUN location) --
-    $ghrunSrc = Join-Path $RepoRoot "dist\ghrun.exe"
-    if (Test-Path $ghrunSrc) {
-        Copy-Item $ghrunSrc (Join-Path $dataDir "ghrun.exe") -Force
-        Write-Host "    [ok] ghrun.exe -> f/ghrun.exe" -ForegroundColor Green
-    } else {
-        Write-Warning "    dist/ghrun.exe not found (build ghrun first: cd ide/ghrun && cargo build --release)"
+    # -- Copy ghrun.exe + watchdog.exe into f/ (QDIR runtime) --
+    foreach ($bin in @("ghrun.exe", "watchdog.exe")) {
+        $src = Join-Path $RepoRoot "dist\$bin"
+        if (Test-Path $src) {
+            Copy-Item $src (Join-Path $dataDir $bin) -Force
+            Write-Host "    [ok] $bin -> f/$bin" -ForegroundColor Green
+        } else {
+            Write-Warning "    dist/$bin not found"
+        }
     }
 
-    # -- Pre-install vsix into f/e/ (QDIR: e=extensions) --
+    # -- Pre-install vsix into f/extensions/ (VS Code portable extensions dir) --
     # qqq-core: look for *universal*.vsix or qqq-*.vsix in dist/
     $vsixFile = Get-ChildItem (Join-Path $RepoRoot "dist") -Filter "*universal*.vsix" | Select-Object -First 1
     if (-not $vsixFile) {
         $vsixFile = Get-ChildItem (Join-Path $RepoRoot "dist") -Filter "qqq-*.vsix" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     }
     if ($vsixFile) {
-        $extInstallDir = Join-Path $dataDir "e\qqq-core"
+        $extInstallDir = Join-Path $dataDir "extensions\qqq-core"
         New-Item -ItemType Directory -Force $extInstallDir | Out-Null
         $tmpExtract = Join-Path $dataDir "_vsix_tmp"
         Expand-Archive -Path $vsixFile.FullName -DestinationPath $tmpExtract -Force
@@ -382,7 +353,7 @@ if (Test-Path $OutDir) {
     # qqq-ai: from ai/dist/
     $aiDistDir = Join-Path $RepoRoot "ai\dist"
     if (Test-Path (Join-Path $aiDistDir "extension.js")) {
-        $aiInstallDir = Join-Path $dataDir "e\qqq-ai"
+        $aiInstallDir = Join-Path $dataDir "extensions\qqq-ai"
         New-Item -ItemType Directory -Force $aiInstallDir | Out-Null
         Copy-Item "$aiDistDir\*" $aiInstallDir -Recurse -Force
         Copy-Item (Join-Path $RepoRoot "ai\package.json") $aiInstallDir -Force
@@ -499,7 +470,7 @@ if (Test-Path $OutDir) {
     Write-Host "    [ok] qqq-defaults.json generated" -ForegroundColor Green
 
     # -- Seed initial settings.json (same content for instant first-launch experience) --
-    $settingsDir = Join-Path $dataDir "a\User"
+    $settingsDir = Join-Path $dataDir "user-data\User"
     $settingsFile = Join-Path $settingsDir "settings.json"
     if (-not (Test-Path $settingsFile)) {
         $defaults = Get-Content $defaultsFile -Raw | ConvertFrom-Json

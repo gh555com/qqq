@@ -8,6 +8,10 @@ description = "qqq IDE component manager and goods installer"
 name = "ghrun"
 path = "src/main.rs"
 
+[[bin]]
+name = "watchdog"
+path = "src/bin/watchdog.rs"
+
 [profile.release]
 strip = true
 lto = true
