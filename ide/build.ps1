@@ -210,11 +210,10 @@ if (Test-Path $layoutFile) {
     Set-Content $layoutFile $layContent -Encoding UTF8
     Write-Host "    [ok] auxiliary bar default visible" -ForegroundColor Green
 }
-# Patch 3: Remove composite drag-drop to prevent moving views out of aux bar
-$compositeBar = Join-Path $BuildDir "src\vs\workbench\browser\parts\compositeBar.ts"
-if (Test-Path $compositeBar) {
-    Comment-Lines -File $compositeBar -Pattern "startDrag|onDragStart|onDragOver|onDrop" -Desc "composite drag handlers"
-}
+# Patch 3: Drag-drop prevention (TODO: needs surgical per-method no-op, not line commenting)
+# Comment-Lines on compositeBar.ts destroys TS structure (comments declaration but leaves body)
+# Skipped for now — publisher lock (3i Patch 4+5, pending) is the real defense
+Write-Host "    [skip] composite drag-drop (TODO: surgical fix)" -ForegroundColor DarkGray
 Write-Host "    Auxiliary bar: hijacked" -ForegroundColor Magenta
 
 # -- 3j. Brand cleanup (ensure no Code-OSS / VS Code text leaks) ---------------------
