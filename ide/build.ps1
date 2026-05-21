@@ -129,19 +129,24 @@ foreach ($e in $killExts) {
 # -- 3c. Gut telemetry ---------------------------------------------------------
 Write-Host "  [3c] Gut telemetry"
 $telFile = Join-Path $BuildDir "src\vs\platform\telemetry\common\telemetryService.ts"
-# Strategy: comment out the line that actually sends data to appenders
-Comment-Lines -File $telFile `
-    -Pattern '_appenders\.forEach' `
-    -Desc "telemetry _appenders.forEach (data send)"
-# Also gut the error telemetry send
-Comment-Lines -File $telFile `
-    -Pattern '_log\(errorEventName' `
-    -Desc "telemetry error _log call"
+if (Test-Path $telFile) {
+    $telContent = Get-Content $telFile -Raw -Encoding UTF8
+    # Replace data-send calls with no-op (avoid unused-variable from Comment-Lines)
+    $telContent = $telContent -replace 'this\._appenders\.forEach\([^)]*\)\s*=>\s*[^;]+;', '/* qqq: telemetry gutted */'
+    $telContent = $telContent -replace 'this\._appenders\.forEach\([^)]+\{[^}]+\}\)', '/* qqq: telemetry gutted */'
+    # Also blank out the error log send
+    $telContent = $telContent -replace 'this\._log\(errorEventName[^;]+;', '/* qqq: error telemetry gutted */'
+    Set-Content $telFile $telContent -Encoding UTF8
+    Write-Host "    [ok] telemetry data send gutted" -ForegroundColor Green
+}
 
 # 1DS Appender - gut the actual post
 $odsFile = Join-Path $BuildDir "src\vs\platform\telemetry\common\1dsAppender.ts"
 if (Test-Path $odsFile) {
-    Comment-Lines -File $odsFile -Pattern 'this\.appender' -Desc "1DS appender calls"
+    $odsContent = Get-Content $odsFile -Raw -Encoding UTF8
+    $odsContent = $odsContent -replace 'this\.appender\.', '// qqq: removed -- this.appender.'
+    Set-Content $odsFile $odsContent -Encoding UTF8
+    Write-Host "    [ok] 1DS appender gutted" -ForegroundColor Green
 }
 
 # -- 3d. Unlock auxiliary sidebar -----------------------------------------------
