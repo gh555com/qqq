@@ -348,6 +348,15 @@ if (Test-Path $OutDir) {
         | Out-File -FilePath (Join-Path $dataDir ".qqq-portable") -Encoding utf8
     Write-Host "    [ok] portable f/ folder created (QDIR: f=data, a=user-data, e=extensions)" -ForegroundColor Green
 
+    # -- Copy ghrun.exe into f/ (QDIR_GHRUN location) --
+    $ghrunSrc = Join-Path $RepoRoot "dist\ghrun.exe"
+    if (Test-Path $ghrunSrc) {
+        Copy-Item $ghrunSrc (Join-Path $dataDir "ghrun.exe") -Force
+        Write-Host "    [ok] ghrun.exe -> f/ghrun.exe" -ForegroundColor Green
+    } else {
+        Write-Warning "    dist/ghrun.exe not found (build ghrun first: cd ide/ghrun && cargo build --release)"
+    }
+
     # -- Pre-install vsix into f/e/ (QDIR: e=extensions) --
     # qqq-core: look for *universal*.vsix or qqq-*.vsix in dist/
     $vsixFile = Get-ChildItem (Join-Path $RepoRoot "dist") -Filter "*universal*.vsix" | Select-Object -First 1

@@ -69,6 +69,26 @@ jobs:
           }
 
       # ============================================================
+      # Phase 2.5: Build ghrun (component manager)
+      # ============================================================
+      - name: Build ghrun
+        shell: pwsh
+        run: |
+          Push-Location ide/ghrun
+          # Use stable Rust from the runner
+          rustup target add x86_64-pc-windows-msvc
+          cargo build --release --target x86_64-pc-windows-msvc
+          $bin = "target/x86_64-pc-windows-msvc/release/ghrun.exe"
+          if (Test-Path $bin) {
+            Copy-Item $bin "../../dist/ghrun.exe" -Force
+            Write-Host "ghrun.exe: $([math]::Round((Get-Item $bin).Length/1KB,0)) KB" -ForegroundColor Green
+          } else {
+            Write-Host "::error::ghrun.exe not found"
+            exit 1
+          }
+          Pop-Location
+
+      # ============================================================
       # Phase 3: Build IDE Shell (Code-OSS 1.77.3 + all patches)
       # ============================================================
       - name: Run IDE build script
