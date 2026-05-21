@@ -170,6 +170,76 @@ if (Test-Path $updateContrib) {
     Write-Warning "    [x] update.contribution.ts not found"
 }
 
+# -- 3h. KILL Marketplace + VSIX install (nuclear) -----------------------------------
+Write-Host "  [3h] Kill Marketplace / VSIX install"
+# Comment out ALL contrib/extensions imports -> kills extensions viewlet, install-from-vsix,
+# recommendations, extension search, gallery commands. Extension HOST still works (separate service).
+Comment-Lines -File $WbDesktop -Pattern "contrib/extensions/" -Desc "Marketplace UI imports"
+# Also kill the electron-sandbox contrib (if any)
+$WbElectron = Join-Path $BuildDir "src\vs\workbench\workbench.sandbox.main.ts"
+if (Test-Path $WbElectron) {
+    Comment-Lines -File $WbElectron -Pattern "contrib/extensions/" -Desc "Marketplace UI imports (sandbox)"
+}
+# Kill marketplace keybinding (Ctrl+Shift+X)
+$kbFile = Join-Path $BuildDir "src\vs\workbench\browser\actions\workbenchActions.ts"
+if (Test-Path $kbFile) {
+    Comment-Lines -File $kbFile -Pattern "EXTENSIONS_VIEWLET_ID" -Desc "Extensions keybinding"
+}
+Write-Host "    Marketplace and VSIX install: DEAD" -ForegroundColor Magenta
+
+# -- 3i. Auxiliary bar hijack (5-patch) -----------------------------------------------
+Write-Host "  [3i] Auxiliary bar hijack"
+# Patch 1: Default auxiliary bar width = 380px
+$auxBarPart = Join-Path $BuildDir "src\vs\workbench\browser\parts\auxiliarybar\auxiliaryBarPart.ts"
+if (Test-Path $auxBarPart) {
+    $auxContent = Get-Content $auxBarPart -Raw -Encoding UTF8
+    # Look for default width constant (usually 200-300)
+    if ($auxContent -match 'DEFAULT.*?=\s*(\d+)') {
+        $auxContent = $auxContent -replace '(DEFAULT.*?=\s*)\d+', '${1}380'
+        Set-Content $auxBarPart $auxContent -Encoding UTF8
+        Write-Host "    [ok] auxiliary bar default width -> 380px" -ForegroundColor Green
+    }
+}
+# Patch 2: Force auxiliary bar visible on fresh install (layout.ts)
+$layoutFile = Join-Path $BuildDir "src\vs\workbench\browser\layout.ts"
+if (Test-Path $layoutFile) {
+    $layContent = Get-Content $layoutFile -Raw -Encoding UTF8
+    # In 1.77, isAuxiliaryBarHidden defaults to true for fresh installs
+    # Flip it: any check for auxiliaryBar hidden -> false
+    $layContent = $layContent -replace 'isAuxiliaryBarHidden\(\)\s*\{[^}]*return\s+true', 'isAuxiliaryBarHidden() { /* qqq: forced visible */ return false'
+    Set-Content $layoutFile $layContent -Encoding UTF8
+    Write-Host "    [ok] auxiliary bar default visible" -ForegroundColor Green
+}
+# Patch 3: Remove composite drag-drop to prevent moving views out of aux bar
+$compositeBar = Join-Path $BuildDir "src\vs\workbench\browser\parts\compositeBar.ts"
+if (Test-Path $compositeBar) {
+    Comment-Lines -File $compositeBar -Pattern "startDrag|onDragStart|onDragOver|onDrop" -Desc "composite drag handlers"
+}
+Write-Host "    Auxiliary bar: hijacked" -ForegroundColor Magenta
+
+# -- 3j. Brand cleanup (ensure no Code-OSS / VS Code text leaks) ---------------------
+Write-Host "  [3j] Brand cleanup"
+# The window title in 1.77 uses product.nameShort (already 'qqq' in our product.json)
+# Kill residual 'Code - OSS' or 'Visual Studio Code' strings in key UI files
+$aboutFile = Join-Path $BuildDir "src\vs\workbench\electron-sandbox\parts\dialogs\dialogHandler.ts"
+if (-not (Test-Path $aboutFile)) {
+    $aboutFile = Join-Path $BuildDir "src\vs\workbench\browser\parts\dialogs\dialogHandler.ts"
+}
+if (Test-Path $aboutFile) {
+    $aboutContent = Get-Content $aboutFile -Raw -Encoding UTF8
+    $aboutContent = $aboutContent -replace 'Code - OSS', 'qqq IDE'
+    $aboutContent = $aboutContent -replace 'Visual Studio Code', 'qqq IDE'
+    Set-Content $aboutFile $aboutContent -Encoding UTF8
+    Write-Host "    [ok] About dialog branded" -ForegroundColor Green
+}
+# Kill getting-started / walkthrough
+Comment-Lines -File $WbDesktop -Pattern "contrib/welcomeGettingStarted/" -Desc "Getting Started"
+Comment-Lines -File $WbDesktop -Pattern "contrib/welcomeWalkthrough/" -Desc "Welcome Walkthrough"
+Comment-Lines -File $WbDesktop -Pattern "contrib/welcomeViews/" -Desc "Welcome Views"
+# Kill update notification (we handle updates via ghrun)
+Comment-Lines -File $WbDesktop -Pattern "contrib/update/" -Desc "Update notifications"
+Write-Host "    Brand: clean" -ForegroundColor Magenta
+
 # -- 3g. Patch portable data directory: data/ -> f/, user-data -> a, extensions -> e --
 Write-Host "  [3g] Patch portable dir names (QDIR: f/a/e)"
 $portableFile = Join-Path $BuildDir "src\vs\base\node\userDataPath.js"

@@ -18,13 +18,7 @@
   "commit": "",
   "date": "",
 
-  "extensionsGallery": {
-    "serviceUrl": "https://marketplace.qoder.sh/_apis/public/gallery",
-    "itemUrl": "https://marketplace.qoder.sh/items",
-    "resourceUrlTemplate": "https://marketplace.qoder.sh/assets/{publisher}/{name}/{version}/{path}",
-    "controlUrl": "",
-    "recommendationsUrl": ""
-  },
+
 
   "builtInExtensions": [],
 
@@ -39,6 +33,7 @@
     "editor.inlineSuggest.showToolbar": "never",
     "extensions.autoCheckUpdates": false,
     "extensions.autoUpdate": false,
+    "extensions.ignoreRecommendations": true,
     "telemetry.telemetryLevel": "off",
     "update.mode": "none",
     "update.showReleaseNotes": false,
@@ -54,8 +49,7 @@
   },
 
   "linkProtectionTrustedDomains": [
-    "https://gh555.com",
-    "https://marketplace.qoder.sh"
+    "https://gh555.com"
   ],
 
   "enableTelemetry": false,
@@ -68,7 +62,7 @@
 
   "checksumFailMoreInfoUrl": "https://gh555.com/integrity",
 
-  "settingsSearchUrl": "https://gh555.com/settings-search",
+
 
   "npsSurveyUrl": "",
   "cesSurveyUrl": "",
