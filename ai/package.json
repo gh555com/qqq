@@ -6,7 +6,7 @@
   "description": "qqq AI Agent — Ask qqq, get things done.",
   "icon": "res/icon.png",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.74.0"
   },
   "activationEvents": [
     "onStartupFinished"

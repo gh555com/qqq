@@ -1612,6 +1612,17 @@ async function _delayedActivate(context) {
 		startDaemons();
 	}, 3000);
 
+	// ★ Apply IDE defaults from qqq-defaults.json / remote server on first launch
+	setTimeout(() => {
+		_applyDefaultSettings(context).catch(() => {});
+	}, 2000);
+
+	// ★ Bootstrap vsix: auto-download+install extension update on first launch (priority-3 behavior)
+	// priority 3 = auto-start download, show progress, don't block startup
+	setTimeout(() => {
+		_bootstrapVsixIfNeeded(context).catch(() => {});
+	}, 15000); // 15s after _delayedActivate = ~18s after activation
+
 	// ★ 启动 WqReporter 统计上报（启动后 30~120s 抖动 + 每 12h 兜底）
 	startWqReporter();
 
@@ -1649,6 +1660,180 @@ async function _delayedActivate(context) {
 			global.logMessage(`[wq] Startup sync error: ${e.message}`, 'WARN');
 		}
 	}, 3000);
+}
+
+// ★ Apply default IDE settings from local qqq-defaults.json or remote server.
+// "One file controls everything" — first launch applies all, subsequent launches only apply if version bumps.
+// Remote server can push version bump → all clients re-apply on next activation.
+async function _applyDefaultSettings(context) {
+	const STATE_KEY = 'qqq.defaults.appliedVersion';
+	const REMOTE_URL = 'https://cdn.gh555.com/api/v3/qqq/defaults';
+
+	try {
+		let defaults = null;
+
+		// 1. Try local qqq-defaults.json (portable: beside exe → data/qqq-defaults.json)
+		const pathMod = require('path');
+		const fsMod = require('fs');
+		const candidates = [];
+
+		// Portable mode: QDIR protocol uses f/ (patched build) or data/ (stock vscode)
+		if (process.env.VSCODE_PORTABLE) {
+			candidates.push(pathMod.join(process.env.VSCODE_PORTABLE, 'qqq-defaults.json'));
+		}
+		// Extension globalStorage fallback
+		if (context.globalStorageUri) {
+			candidates.push(pathMod.join(context.globalStorageUri.fsPath, '..', '..', '..', 'qqq-defaults.json'));
+		}
+		// CWD (exe directory) - try both f/ (QDIR) and data/ (stock)
+		candidates.push(pathMod.join(process.cwd(), 'f', 'qqq-defaults.json'));
+		candidates.push(pathMod.join(process.cwd(), 'data', 'qqq-defaults.json'));
+
+		for (const p of candidates) {
+			try {
+				if (fsMod.existsSync(p)) {
+					defaults = JSON.parse(fsMod.readFileSync(p, 'utf8'));
+					global.logMessage(`[defaults] Loaded from: ${p}`, 'INFO');
+					break;
+				}
+			} catch { }
+		}
+
+		// 2. If no local file, try remote (non-blocking, 5s timeout)
+		if (!defaults) {
+			try {
+				const res = await new Promise((resolve, reject) => {
+					const req = require('https').get(REMOTE_URL, { timeout: 5000 }, (r) => {
+						if (r.statusCode !== 200) { reject(new Error(`HTTP ${r.statusCode}`)); return; }
+						let d = '';
+						r.on('data', c => d += c);
+						r.on('end', () => resolve(d));
+					});
+					req.on('error', reject);
+					req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+				});
+				defaults = JSON.parse(res);
+				global.logMessage(`[defaults] Loaded from remote`, 'INFO');
+			} catch (e) {
+				global.logMessage(`[defaults] Remote fetch skipped: ${e.message}`, 'DEBUG');
+			}
+		}
+
+		if (!defaults || !defaults.settings) return;
+
+		// 3. Check version — skip if already applied this version
+		const version = defaults._version || 0;
+		const applied = context.globalState.get(STATE_KEY);
+		if (applied === version) return;
+
+		// 4. Bulk-apply all settings (global scope)
+		const cfg = vscode.workspace.getConfiguration();
+		let count = 0;
+		for (const [key, value] of Object.entries(defaults.settings)) {
+			try {
+				await cfg.update(key, value, vscode.ConfigurationTarget.Global);
+				count++;
+			} catch (e) {
+				global.logMessage(`[defaults] Skip ${key}: ${e.message}`, 'DEBUG');
+			}
+		}
+
+		await context.globalState.update(STATE_KEY, version);
+		global.logMessage(`[defaults] Applied v${version}: ${count} settings`, 'INFO');
+	} catch (e) {
+		global.logMessage(`[defaults] Failed (non-fatal): ${e.message}`, 'WARN');
+	}
+}
+
+// ★ Bootstrap vsix downloader (priority-3: auto-download on first launch, non-blocking)
+// Checks globalState for the installed vsix URL; if missing or different, downloads and installs.
+// manifest.json / ghrun will replace this in Phase 1+.
+async function _bootstrapVsixIfNeeded(context) {
+	const BOOTSTRAP_MANIFEST = 'https://cdn.gh555.com/api/v3/qqq/manifest.json';
+	const FALLBACK_VSIX_URL  = 'https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/ELI4U5GG2NB7K.vsix';
+	const STATE_KEY = 'qqq.bootstrapVsix.installed';
+
+	try {
+		// Fetch manifest to get latest vsix URL (falls back to hardcoded if unavailable)
+		let vsixUrl = FALLBACK_VSIX_URL;
+		try {
+			const res = await fetch(BOOTSTRAP_MANIFEST, { signal: AbortSignal.timeout(5000) });
+			if (res.ok) {
+				const mf = await res.json();
+				if (mf?.builtin_extensions?.['qqq-core']?.vsix_url) {
+					vsixUrl = mf.builtin_extensions['qqq-core'].vsix_url;
+				}
+			}
+		} catch { /* offline or manifest not ready yet */ }
+
+		// Already installed this exact vsix? Skip.
+		const alreadyInstalled = context.globalState.get(STATE_KEY);
+		if (alreadyInstalled === vsixUrl) return;
+
+		global.logMessage(`[bootstrap] New vsix available: ${vsixUrl}`, 'INFO');
+
+		// Download to global storage dir (portable: lands inside data/)
+		const storageDir = context.globalStorageUri.fsPath;
+		const fs = require('fs');
+		const pathMod = require('path');
+		await fs.promises.mkdir(storageDir, { recursive: true });
+		const tmpVsix = pathMod.join(storageDir, 'qqq-bootstrap.vsix');
+
+		// Show non-blocking progress notification (priority-3 behavior)
+		await vscode.window.withProgress(
+			{ location: vscode.ProgressLocation.Notification, title: q('qqq.bootstrap.downloading', 'qqq'), cancellable: false },
+			async (progress) => {
+				progress.report({ message: '0%' });
+
+				// Download
+				await new Promise((resolve, reject) => {
+					const https = require('https');
+					const http  = require('http');
+					const mod = vsixUrl.startsWith('https') ? https : http;
+					const file = fs.createWriteStream(tmpVsix);
+					const doGet = (url) => mod.get(url, (resp) => {
+						if (resp.statusCode === 301 || resp.statusCode === 302) {
+							file.close();
+							doGet(resp.headers.location);
+							return;
+						}
+						if (resp.statusCode !== 200) { file.close(); reject(new Error(`HTTP ${resp.statusCode}`)); return; }
+						const total = parseInt(resp.headers['content-length'] || '0', 10);
+						let got = 0;
+						resp.on('data', (chunk) => {
+							got += chunk.length;
+							if (total > 0) progress.report({ message: `${Math.round(got / total * 100)}%` });
+						});
+						resp.pipe(file);
+						file.on('finish', () => { file.close(); resolve(); });
+					}).on('error', (e) => { file.close(); reject(e); });
+					doGet(vsixUrl);
+				});
+
+				progress.report({ message: q('qqq.bootstrap.installing', 'installing...') });
+				// Install
+				await vscode.commands.executeCommand(
+					'workbench.extensions.installExtension',
+					vscode.Uri.file(tmpVsix)
+				);
+			}
+		);
+
+		await context.globalState.update(STATE_KEY, vsixUrl);
+		global.logMessage(`[bootstrap] vsix installed ok: ${vsixUrl}`, 'INFO');
+
+		// Prompt reload (non-intrusive)
+		const pick = await vscode.window.showInformationMessage(
+			q('qqq.bootstrap.reloadPrompt', 'qqq updated. Reload to apply?'),
+			q('qqq.bootstrap.reloadNow', 'Reload Now'),
+			q('qqq.bootstrap.reloadLater', 'Later')
+		);
+		if (pick === q('qqq.bootstrap.reloadNow', 'Reload Now')) {
+			vscode.commands.executeCommand('workbench.action.reloadWindow');
+		}
+	} catch (e) {
+		global.logMessage(`[bootstrap] vsix install failed (non-fatal): ${e.message}`, 'WARN');
+	}
 }
 
 // ★ Extract command registration into a separate function (register immediately, no delay)

@@ -161,6 +161,56 @@ if (Test-Path $vdFile) {
 # -- 3e. Suppress other nags via product.json (no code surgery needed) ----------
 Write-Host "  [3e] Crash/GettingStarted/Experiments -> product.json handles" -ForegroundColor DarkGray
 
+# -- 3f. Remove Win7 / Win8 EOL notification banner ----------------------------
+Write-Host "  [3f] Remove Win7 EOL notification"
+$updateContrib = Join-Path $BuildDir "src\vs\workbench\contrib\update\browser\update.contribution.ts"
+if (Test-Path $updateContrib) {
+    Comment-Lines -File $updateContrib -Pattern "win7|Win7|Windows 7|isWindows && osVersion|eolMessage|isWindowsClient" -Desc "Win7 EOL notification lines"
+} else {
+    Write-Warning "    [x] update.contribution.ts not found"
+}
+
+# -- 3g. Patch portable data directory: data/ -> f/, user-data -> a, extensions -> e --
+Write-Host "  [3g] Patch portable dir names (QDIR: f/a/e)"
+$portableFile = Join-Path $BuildDir "src\vs\base\node\userDataPath.js"
+if (-not (Test-Path $portableFile)) {
+    # 1.77 may use .ts extension
+    $portableFile = Join-Path $BuildDir "src\vs\base\node\userDataPath.ts"
+}
+if (-not (Test-Path $portableFile)) {
+    # fallback: search in platform/environment
+    $portableFile = Get-ChildItem $BuildDir -Recurse -Filter "*.ts" | Select-String -Pattern "'data'" -List | Where-Object { $_.Line -match "portable" } | Select-Object -First 1 -ExpandProperty Path
+}
+# Also patch the product.ts / environmentService for portable paths
+$filesToPatch = @(
+    (Join-Path $BuildDir "src\vs\platform\environment\node\environmentService.ts"),
+    (Join-Path $BuildDir "src\vs\base\node\userDataPath.ts"),
+    (Join-Path $BuildDir "src\vs\base\node\userDataPath.js"),
+    (Join-Path $BuildDir "src\vs\code\electron-main\app.ts")
+)
+$portablePatched = 0
+foreach ($pf in $filesToPatch) {
+    if (Test-Path $pf) {
+        $content = Get-Content $pf -Raw -Encoding UTF8
+        $newContent = $content
+        # Replace portable folder name: 'data' -> 'f'
+        $newContent = $newContent -replace "'data'", "'f'"
+        $newContent = $newContent -replace '"data"', '"f"'
+        # Replace user-data -> a
+        $newContent = $newContent -replace "'user-data'", "'a'"
+        $newContent = $newContent -replace '"user-data"', '"a"'
+        # Replace extensions subfolder in portable context
+        if ($newContent -ne $content) {
+            Set-Content $pf $newContent -Encoding UTF8
+            $portablePatched++
+            Write-Host "    [ok] patched: $(Split-Path $pf -Leaf)" -ForegroundColor Green
+        }
+    }
+}
+if ($portablePatched -eq 0) {
+    Write-Warning "    [x] no portable path files found to patch"
+}
+
 Write-Host "`n  Surgery complete." -ForegroundColor Cyan
 
 # ==============================================================================
@@ -218,14 +268,174 @@ if (Test-Path $OutDir) {
         Write-Host "    [ok] output dir: $OutDir" -ForegroundColor Green
     }
 
-    # Trigger VS Code portable mode: mkdir data/ in artifact root
-    $dataDir = Join-Path $OutDir "data"
+    # Trigger VS Code portable mode: mkdir f/ in artifact root (QDIR protocol: f/a/e)
+    $dataDir = Join-Path $OutDir "f"
     New-Item -ItemType Directory -Force $dataDir | Out-Null
-    New-Item -ItemType Directory -Force (Join-Path $dataDir "user-data") | Out-Null
-    New-Item -ItemType Directory -Force (Join-Path $dataDir "extensions") | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $dataDir "a") | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $dataDir "a\User") | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $dataDir "e") | Out-Null
     "qqq-ide portable build $(Get-Date -Format o) tag=$VscodeTag" `
         | Out-File -FilePath (Join-Path $dataDir ".qqq-portable") -Encoding utf8
-    Write-Host "    [ok] portable data/ folder created at: $dataDir" -ForegroundColor Green
+    Write-Host "    [ok] portable f/ folder created (QDIR: f=data, a=user-data, e=extensions)" -ForegroundColor Green
+
+    # -- Pre-install vsix into f/e/ (QDIR: e=extensions) --
+    # qqq-core: look for *universal*.vsix or qqq-*.vsix in dist/
+    $vsixFile = Get-ChildItem (Join-Path $RepoRoot "dist") -Filter "*universal*.vsix" | Select-Object -First 1
+    if (-not $vsixFile) {
+        $vsixFile = Get-ChildItem (Join-Path $RepoRoot "dist") -Filter "qqq-*.vsix" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    }
+    if ($vsixFile) {
+        $extInstallDir = Join-Path $dataDir "e\qqq-core"
+        New-Item -ItemType Directory -Force $extInstallDir | Out-Null
+        $tmpExtract = Join-Path $dataDir "_vsix_tmp"
+        Expand-Archive -Path $vsixFile.FullName -DestinationPath $tmpExtract -Force
+        if (Test-Path (Join-Path $tmpExtract "extension")) {
+            Copy-Item (Join-Path $tmpExtract "extension\*") $extInstallDir -Recurse -Force
+        } else {
+            Copy-Item "$tmpExtract\*" $extInstallDir -Recurse -Force
+        }
+        Remove-Item $tmpExtract -Recurse -Force
+        Write-Host "    [ok] qqq-core pre-installed: $($vsixFile.Name)" -ForegroundColor Green
+    } else {
+        Write-Warning "    no qqq-core vsix in dist/ (bootstrap will handle)"
+    }
+
+    # qqq-ai: from ai/dist/
+    $aiDistDir = Join-Path $RepoRoot "ai\dist"
+    if (Test-Path (Join-Path $aiDistDir "extension.js")) {
+        $aiInstallDir = Join-Path $dataDir "e\qqq-ai"
+        New-Item -ItemType Directory -Force $aiInstallDir | Out-Null
+        Copy-Item "$aiDistDir\*" $aiInstallDir -Recurse -Force
+        Copy-Item (Join-Path $RepoRoot "ai\package.json") $aiInstallDir -Force
+        if (Test-Path (Join-Path $RepoRoot "ai\res")) {
+            Copy-Item (Join-Path $RepoRoot "ai\res") $aiInstallDir -Recurse -Force
+        }
+        Write-Host "    [ok] qqq-ai pre-installed from ai/dist/" -ForegroundColor Green
+    } else {
+        Write-Warning "    ai/dist/ not found (run: cd ai && npm run bundle)"
+    }
+
+    # -- Generate qqq-defaults.json (one file controls all IDE settings) --
+    # Remote push: update _version on server -> all clients re-apply next launch
+    $defaultsFile = Join-Path $dataDir "qqq-defaults.json"
+    @'
+{
+    "_version": 1,
+    "_comment": "qqq IDE defaults. Bump _version to force re-apply on all clients.",
+    "settings": {
+        "workbench.colorTheme": "Light",
+        "workbench.iconTheme": null,
+        "workbench.startupEditor": "none",
+        "workbench.enableExperiments": false,
+        "workbench.reduceMotion": "on",
+        "workbench.editor.tabSizing": "fixed",
+        "workbench.editor.tabSizingFixedMinWidth": 84,
+        "workbench.editor.tabSizingFixedMaxWidth": 84,
+        "workbench.editor.scrollToSwitchTabs": true,
+        "workbench.editor.wrapTabs": true,
+        "workbench.editor.empty.hint": "hidden",
+        "workbench.panel.showLabels": false,
+        "workbench.panel.alwaysShowActions": false,
+        "workbench.colorCustomizations": {
+            "editor.lineHighlightBackground": "#00000000",
+            "editor.lineHighlightBorder": "#00000000"
+        },
+        "editor.fontFamily": "LXGW WenKai Mono GB Screen",
+        "editor.fontSize": 16,
+        "editor.lineHeight": 1.11,
+        "editor.minimap.enabled": false,
+        "editor.cursorStyle": "line",
+        "editor.cursorBlinking": "solid",
+        "editor.cursorWidth": 1,
+        "editor.wordWrap": "bounded",
+        "editor.wordWrapColumn": 110,
+        "editor.wrappingIndent": "indent",
+        "editor.renderLineHighlight": "gutter",
+        "editor.glyphMargin": false,
+        "editor.overviewRulerBorder": false,
+        "editor.formatOnSave": true,
+        "editor.formatOnType": true,
+        "editor.autoClosingBrackets": "never",
+        "editor.autoClosingQuotes": "never",
+        "editor.autoSurround": "never",
+        "editor.dragAndDrop": false,
+        "editor.renderControlCharacters": true,
+        "editor.bracketPairColorization.enabled": false,
+        "editor.guides.bracketPairsHorizontal": false,
+        "editor.guides.highlightActiveBracketPair": false,
+        "editor.matchBrackets": "never",
+        "editor.lightbulb.enabled": "off",
+        "editor.hover.enabled": false,
+        "editor.hover.delay": 30000,
+        "editor.parameterHints.enabled": false,
+        "editor.inlayHints.enabled": false,
+        "editor.suggestOnTriggerCharacters": false,
+        "editor.quickSuggestions": { "other": "off" },
+        "editor.quickSuggestionsDelay": 1111111,
+        "editor.snippetSuggestions": "off",
+        "editor.wordBasedSuggestions": "off",
+        "editor.acceptSuggestionOnEnter": "off",
+        "editor.stickyScroll.enabled": false,
+        "editor.colorDecorators": false,
+        "editor.showFoldingControls": "always",
+        "editor.mouseWheelZoom": false,
+        "editor.trimAutoWhitespace": false,
+        "editor.codeLensFontFamily": "Tahoma",
+        "editor.codeLensFontSize": 13,
+        "files.autoSave": "onFocusChange",
+        "files.trimTrailingWhitespace": true,
+        "files.autoGuessEncoding": false,
+        "files.encoding": "utf8",
+        "window.restoreWindows": "one",
+        "window.openFoldersInNewWindow": "on",
+        "window.zoomLevel": -1,
+        "window.titleSeparator": " . ",
+        "window.menuBarVisibility": "classic",
+        "breadcrumbs.enabled": true,
+        "breadcrumbs.location": "below",
+        "breadcrumbs.icons": false,
+        "explorer.confirmDelete": false,
+        "explorer.confirmPasteNative": false,
+        "search.sortOrder": "modified",
+        "search.seedWithNearestWord": true,
+        "problems.decorations.enabled": false,
+        "telemetry.telemetryLevel": "off",
+        "update.mode": "none",
+        "extensions.autoUpdate": false,
+        "extensions.ignoreRecommendations": true,
+        "security.workspace.trust.enabled": false,
+        "git.enabled": true,
+        "git.confirmSync": false,
+        "git.openRepositoryInParentFolders": "never",
+        "terminal.integrated.cursorStyle": "line",
+        "terminal.integrated.fontSize": 13,
+        "terminal.integrated.rightClickBehavior": "paste",
+        "terminal.integrated.enableMultiLinePasteWarning": "never",
+        "terminal.integrated.shellIntegration.enabled": false,
+        "diffEditor.hideUnchangedRegions.enabled": true,
+        "diffEditor.maxComputationTime": 0
+    }
+}
+'@ | Out-File -FilePath $defaultsFile -Encoding UTF8
+    Write-Host "    [ok] qqq-defaults.json generated" -ForegroundColor Green
+
+    # -- Seed initial settings.json (same content for instant first-launch experience) --
+    $settingsDir = Join-Path $dataDir "a\User"
+    $settingsFile = Join-Path $settingsDir "settings.json"
+    if (-not (Test-Path $settingsFile)) {
+        $defaults = Get-Content $defaultsFile -Raw | ConvertFrom-Json
+        $defaults.settings | ConvertTo-Json -Depth 10 | Out-File -FilePath $settingsFile -Encoding UTF8
+        Write-Host "    [ok] initial settings.json seeded from defaults" -ForegroundColor Green
+    }
+
+    # Create debug launcher: double-click to auto-generate qqq.err.log
+    $debugLauncher = Join-Path $OutDir "qqq-debug.cmd"
+    @'
+@echo off
+REM qqq IDE debug launcher -- auto-generates qqq.err.log in the same directory
+"%~dp0qqq.exe" --log trace --verbose %* 2>>"%%~dp0qqq.err.log"
+'@ | Out-File -FilePath $debugLauncher -Encoding ASCII
+    Write-Host "    [ok] debug launcher: qqq-debug.cmd" -ForegroundColor Green
 } else {
     Write-Warning "    output dir not found. Check: dir $($ScriptDir)\.build\ -Directory"
 }
