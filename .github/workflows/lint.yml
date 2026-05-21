@@ -1,0 +1,28 @@
+name: lint
+
+on:
+  push:
+    branches: [main, qq, qqq-main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  no-bare-spawn:
+    name: no-bare-spawn (spawn-protocol §8)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run lint-no-bare-spawn
+        run: node scripts/lint-no-bare-spawn.js
+
+      - name: Print all hits (for debugging on failure)
+        if: failure()
+        run: node scripts/lint-no-bare-spawn.js --list || true

@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qqq.dev/schema/spawn-protocol-1.0.json",
+  "title": "qqq spawn protocol v1.0",
+  "description": "机器可校验的协议字段定义。规范主体见 ignore/qqq 拓扑/arc/spawn-protocol。",
+  "protocolVersion": "1.0",
+
+  "definitions": {
+    "Brief": {
+      "$comment": "spawn 完成后 stdout 末行 JSON（spawn-protocol §5）",
+      "type": "object",
+      "required": [
+        "task_id", "pid", "status", "exit_code", "reason", "duration_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "task_id":     { "type": "string", "minLength": 1 },
+        "pid":         { "type": "integer", "minimum": 0 },
+        "status":      { "enum": ["ok", "fail", "killed", "error"] },
+        "exit_code":   { "type": "integer" },
+        "reason": {
+          "enum": [
+            "exit", "exit_nonzero", "deadline", "stall",
+            "sigint", "spawn_fail", "proto_skew"
+          ]
+        },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "log":         { "type": ["string", "null"] },
+        "lock":        { "type": ["string", "null"] }
+      }
+    },
+
+    "Lock": {
+      "$comment": "lock file 内容（spawn-protocol §6）",
+      "type": "object",
+      "required": [
+        "task_id", "pid", "deadline", "stall",
+        "log_path", "started_at", "cmd", "cwd", "platform"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "task_id":    { "type": "string", "minLength": 1 },
+        "pid":        { "type": "integer", "minimum": 0 },
+        "job_handle": { "type": ["string", "null"] },
+        "deadline":   { "type": "integer", "minimum": 0 },
+        "stall":      { "type": "integer", "minimum": 0 },
+        "log_path":   { "type": "string" },
+        "started_at": { "type": "number" },
+        "cmd": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "cwd":        { "type": "string" },
+        "platform":   { "enum": ["win32", "linux", "darwin"] },
+        "alive":      { "type": "boolean" }
+      }
+    },
+
+    "SpawnArgs": {
+      "$comment": "spawn 子命令调用入参（spawn-protocol §3）",
+      "type": "object",
+      "required": ["task", "cmd"],
+      "additionalProperties": false,
+      "properties": {
+        "task":     { "type": "string", "minLength": 1 },
+        "deadline": { "type": "integer", "minimum": 0, "default": 600 },
+        "stall":    { "type": "integer", "minimum": 0, "default": 30 },
+        "log":      { "type": "string" },
+        "cwd":      { "type": "string" },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "shell":    { "type": "boolean", "default": false },
+        "cmd": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        }
+      }
+    },
+
+    "ExitCode": {
+      "$comment": "spawn-protocol §4",
+      "oneOf": [
+        { "const": 0,   "title": "ok" },
+        { "const": 124, "title": "deadline" },
+        { "const": 125, "title": "stall" },
+        { "const": 130, "title": "sigint" },
+        { "const": 201, "title": "spawn_fail" },
+        { "type": "integer", "minimum": 1, "maximum": 255, "title": "child_passthrough" }
+      ]
+    }
+  },
+
+  "oneOf": [
+    { "$ref": "#/definitions/Brief" },
+    { "$ref": "#/definitions/Lock" }
+  ]
+}

@@ -3,9 +3,9 @@ name: Build qqq IDE
 on:
   workflow_dispatch:
     inputs:
-      vscode_tag:
-        description: 'VS Code tag (1.77.x = last Win7-compatible Electron 19)'
-        default: '1.77.0'
+      fork_branch:
+        description: 'qqq-ide-src branch (default: qqq-main)'
+        default: 'qqq-main'
         type: string
 
 permissions:
@@ -92,13 +92,16 @@ jobs:
           Pop-Location
 
       # ============================================================
-      # Phase 3: Build IDE Shell (Code-OSS 1.77.3 + all patches)
+      # Phase 3: Build IDE Shell from kkn1n/qqq-ide-src fork
+      # (All source surgery is in-tree; build.ps1 just clone + yarn + gulp)
       # ============================================================
       - name: Run IDE build script
         shell: pwsh
+        env:
+          QQQ_FORK_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           Set-Location ide
-          .\build.ps1 -Target win32-x64 -VscodeTag ${{ inputs.vscode_tag }}
+          .\build.ps1 -Target win32-x64 -ForkRepo kkn1n/qqq-ide-src -ForkBranch ${{ inputs.fork_branch }}
 
       - name: Locate compiled artifact
         id: locate
