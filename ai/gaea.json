@@ -1,0 +1,38 @@
+{
+    "_spec": "gaea/1.0",
+    "id": "qqq-ai",
+    "name": "qqq AI",
+    "publisher": "gh555",
+    "version": "0.1.0",
+    "description": "qqq AI Agent — Ask qqq, get things done.",
+    "icon": "res/icon.png",
+    "tier": 1,
+    "category": "tool",
+    "platforms": ["win32-x64", "linux-x64", "darwin-x64", "darwin-arm64"],
+    "permissions": {
+        "fs": "readwrite",
+        "network": true,
+        "terminal": true
+    },
+    "requires": ["qqq-core"],
+    "update": {
+        "channel": "stable",
+        "auto": true,
+        "priority": 3
+    },
+    "install": {
+        "target_dir": "QDIR_BUILTIN",
+        "size_mb": 2.1,
+        "sha256": "",
+        "download_url": "https://cdn.gh555.com/gaea/d/qqq-ai/latest"
+    },
+    "lifecycle": {
+        "activate": "onStartupFinished"
+    },
+    "gaea_url": "https://gh555.com/gaea/d/qqq-ai",
+    "min_qdir_version": "1.0",
+    "_internal": {
+        "engine_type": "vscode-extension",
+        "entry": "./dist/extension.js"
+    }
+}

@@ -5,6 +5,8 @@
 
 # qqq IDE: Paste Everything into VS Code / Code-OSS / VSCodium (Project started in October 2025)
 
+**Download:** <a href="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/ELI4U5GG2NB7K.vsix">v16.5.2 · 2026-05-20</a>
+
 **Make everything pasteable. Orchestrate ideas. Turn the IDE into an operating system.**
 
 qqq IDE lets you paste images, screenshots, files, folders, HTML pages, videos, and media directly into **VS Code / Code-OSS / VSCodium** — with **WYSIWYG preview**.

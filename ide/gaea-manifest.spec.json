@@ -1,0 +1,62 @@
+{
+    "_spec_version": "1.0",
+    "_doc": "的梦gaea 商城接入协议 — 所有 gaea 商城软件/游戏/工具统一遵守此格式",
+
+    "id": "qqq-ai",
+    "name": "qqq AI",
+    "publisher": "gh555",
+    "version": "0.1.0",
+    "description": "qqq AI Agent — Ask qqq, get things done.",
+    "icon": "icon.png",
+
+    "tier": 1,
+    "_tier_doc": "1=第一方内置(随IDE发) 2=gaea白名单(ghrun管) 3=社区(高级用户手动)",
+
+    "category": "tool",
+    "_category_doc": "tool | game | theme | language | media | utility",
+
+    "platforms": ["win32-x64", "linux-x64", "darwin-x64", "darwin-arm64"],
+
+    "permissions": {
+        "fs": "readwrite",
+        "network": true,
+        "terminal": true,
+        "clipboard": false,
+        "camera": false,
+        "_doc": "声明后 ghrun install 时展示给用户确认"
+    },
+
+    "requires": ["qqq-core"],
+    "_requires_doc": "依赖的其他 gaea 软件 id 列表",
+
+    "update": {
+        "channel": "stable",
+        "auto": true,
+        "priority": 3,
+        "_priority_doc": "0=建议 1=后台 2=静默 3=自动+显示进度 4=强制"
+    },
+
+    "install": {
+        "target_dir": "QDIR_BUILTIN",
+        "_target_doc": "QDIR_BUILTIN=第一方 | QDIR_GOODS=商城软件 | QDIR_COMPONENTS=运行时组件",
+        "size_mb": 2.1,
+        "sha256": "",
+        "download_url": "https://cdn.gh555.com/gaea/d/qqq-ai/latest"
+    },
+
+    "lifecycle": {
+        "activate": "onStartupFinished",
+        "deactivate": "onShutdown",
+        "_doc": "生命周期钩子，ghrun 负责调度"
+    },
+
+    "gaea_url": "https://gh555.com/gaea/d/qqq-ai",
+    "min_qdir_version": "1.0",
+
+    "_internal": {
+        "_doc": "以下是内部引擎配置，开发者不需要关心，构建工具自动生成",
+        "engine_type": "vscode-extension",
+        "engine_manifest": "package.json",
+        "entry": "./dist/extension.js"
+    }
+}

@@ -1,0 +1,40 @@
+{
+    "_spec": "gaea/1.0",
+    "id": "qqq-core",
+    "name": "qqq",
+    "publisher": "gh555",
+    "version": "16.0.11",
+    "description": "qqq — 全功能媒体工具箱，剪贴板增强，下载器，播放器",
+    "icon": "res/icon.png",
+    "tier": 1,
+    "category": "tool",
+    "platforms": ["win32-x64", "linux-x64", "darwin-x64", "darwin-arm64"],
+    "permissions": {
+        "fs": "readwrite",
+        "network": true,
+        "terminal": true,
+        "clipboard": true,
+        "media": true
+    },
+    "requires": [],
+    "update": {
+        "channel": "stable",
+        "auto": true,
+        "priority": 3
+    },
+    "install": {
+        "target_dir": "QDIR_BUILTIN",
+        "size_mb": 35,
+        "sha256": "",
+        "download_url": "https://cdn.gh555.com/gaea/d/qqq/latest"
+    },
+    "lifecycle": {
+        "activate": "*"
+    },
+    "gaea_url": "https://gh555.com/gaea/d/qqq",
+    "min_qdir_version": "1.0",
+    "_internal": {
+        "engine_type": "vscode-extension",
+        "entry": "./dist/qqq.js"
+    }
+}
