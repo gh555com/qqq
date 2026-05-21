@@ -250,6 +250,16 @@ Write-Host "    Brand: clean" -ForegroundColor Magenta
 # No source patching needed — dataFolderName handles everything.
 Write-Host "  [3g] Portable dir: dataFolderName=f in product.json (no source patch needed)" -ForegroundColor DarkGray
 
+# -- 3k. Remove proposed API d.ts files (prevent vscode.d.ts conflicts) -------
+Write-Host "  [3k] Remove proposed API declarations"
+$proposedFiles = Get-ChildItem (Join-Path $BuildDir "src\vscode-dts") -Filter "vscode.proposed.*.d.ts" -ErrorAction SilentlyContinue
+if ($proposedFiles) {
+    $proposedFiles | Remove-Item -Force
+    Write-Host "    [ok] deleted $($proposedFiles.Count) vscode.proposed.*.d.ts files" -ForegroundColor Green
+} else {
+    Write-Host "    [-] no proposed d.ts files found" -ForegroundColor DarkGray
+}
+
 Write-Host "`n  Surgery complete." -ForegroundColor Cyan
 
 # ==============================================================================
