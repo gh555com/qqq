@@ -250,14 +250,16 @@ Write-Host "    Brand: clean" -ForegroundColor Magenta
 # No source patching needed — dataFolderName handles everything.
 Write-Host "  [3g] Portable dir: dataFolderName=f in product.json (no source patch needed)" -ForegroundColor DarkGray
 
-# -- 3k. Remove proposed API d.ts files (prevent vscode.d.ts conflicts) -------
-Write-Host "  [3k] Remove proposed API declarations"
-$proposedFiles = Get-ChildItem (Join-Path $BuildDir "src\vscode-dts") -Filter "vscode.proposed.*.d.ts" -ErrorAction SilentlyContinue
-if ($proposedFiles) {
-    $proposedFiles | Remove-Item -Force
-    Write-Host "    [ok] deleted $($proposedFiles.Count) vscode.proposed.*.d.ts files" -ForegroundColor Green
+# -- 3k. Switch compile to transpile-only (skip type-checking, avoid vscode.d.ts conflicts) --
+Write-Host "  [3k] Switch to transpile-only compilation"
+$gfCompile = Join-Path $BuildDir "build\gulpfile.compile.js"
+if (Test-Path $gfCompile) {
+    $gfContent = Get-Content $gfCompile -Raw -Encoding UTF8
+    $gfContent = $gfContent -replace "compilation\.compileTask\('src',\s*'out-build',\s*true\)", "compilation.transpileTask('src', 'out-build', false)"
+    Set-Content $gfCompile $gfContent -Encoding UTF8
+    Write-Host "    [ok] compile-build -> transpile-only (no type-check)" -ForegroundColor Green
 } else {
-    Write-Host "    [-] no proposed d.ts files found" -ForegroundColor DarkGray
+    Write-Warning "    [x] gulpfile.compile.js not found"
 }
 
 Write-Host "`n  Surgery complete." -ForegroundColor Cyan
