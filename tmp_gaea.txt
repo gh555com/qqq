@@ -1,0 +1,5 @@
+sz=9729845
+gaea-loader=5789049
+not_present=5789209
+no_modules=5789176
+',r,c,l,u){super(),this.g=g,this.h=o,this.j=d,this.k=r,this.l=c,this.n=l,this.p=u,this.c=[],this.f="[gaea-loader]",this.r("initializing"),this.s()}r(g){this.h.info(`${this.f} ${g}`)}async s(){try{const g=this.u();if(!g){this.r("no modules directory found (f/m/ not present) \\u2014 skipping");return}this.r(`scanning modules in: ${g}`);const o=await new Promise((l,u)=>{X(["fs"],l,u)}),d=await new Promise((l,u)=>{X(["path"],l,u)});if(!o.existsSync(g)){this.r("modules dir does not exist yet, creating..."),o.mkdirSync(g,{recursive:!0});return}const r=o.readdirSync(g,{withFileTypes:!0}),c=[];for(const l of r){if(!l.isDirectory())continue;const u=d.join(g,l.name,"gaea.json");if(!!o.existsSync(u))try{'

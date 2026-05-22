@@ -181,7 +181,7 @@ ${completedBlock}
 ## 原始后续步骤
 ${remainingTasks || '(无后续步骤)'}
 
-请输出 JSON:
+请产出 JSON:
 {
   "analysis": "一句话说明失败原因和影响",
   "action": "retry|revise|abort",
@@ -195,7 +195,7 @@ Rules:
 - revise: 失败暴露了方案问题，需要调整后续步骤
 - abort: 失败是根本性的，继续没有意义
 - revised_tasks 替换原始后续步骤（不含失败步骤本身）
-- 只输出 JSON`;
+- 只产出 JSON`;
 
         try {
             const resp = await fetch(GATEWAY_URL, {

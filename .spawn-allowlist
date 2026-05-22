@@ -1,33 +1,35 @@
-# 存量裸 child_process 调用白名单
+# .spawn-allowlist
 # ============================================================
-# 协议规范：ignore/qqq 拓扑/arc/spawn-protocol §8
-# 硬约束：  ignore/qqq 拓扑/arc/铁律 §12 ⑨
+# 协议：ignore/qqq 拓扑/arc/spawn-protocol §8 ②
+# 铁律：ignore/qqq 拓扑/arc/铁律 §12
 #
-# 本文件列出**已知存量**的裸 child_process 调用文件。
-# CI grep 卡口（scripts/lint-no-bare-spawn.js）允许这些文件继续存在，
-# 但任何**新增**或**改名**到不在本清单的文件中调 child_process → CI 红。
+# 每行一个 path（相对仓库根，正斜杠）；# 之后是注释。
+# 加入此文件 = 临时豁免，等待迁移到 qdirSpawn / IQzSpawnService。
+# 协议入口本身（ai/src/utils/qdirSpawn.js）和 lint 脚本由代码硬豁免，无需登记。
 #
-# 长期目标：本文件逐步缩短至空，所有调用经 ai/src/utils/qdirSpawn.js。
-# 添加新条目 = 引入技术债 = 必须配 TODO 注释说明何时迁移。
-#
-# 格式：每行一个相对路径（POSIX 斜杠），# 之后为注释。
+# 迁移目标：
+#   JS / Node：const { qdirSpawn } = require('ai/src/utils/qdirSpawn');
+#   TS / IDE壳：@IQzSpawnService → qzSpawnService.spawn(...)
+# ============================================================
 
-# === IDE 扩展核心（qqq-core） ===
-src/global.js              # TODO: 替换 4748 行 spawn / 2693 行 spawn / 多处 execSync 为 qdirSpawn
-src/qqq.js                 # TODO: 替换 ffmpeg/spawn 调用为 qdirSpawn
-src/q1.js                  # TODO: 替换 cp.* 调用为 qdirSpawn
-src/q2.js                  # TODO: 替换 5191/5194/5199 行 explorer/open/xdg-open 为 qdirSpawn
-src/q3.js                  # TODO: 替换 cp.* 调用为 qdirSpawn
-src/qvideo.js              # TODO: 替换 ffmpeg cp 调用为 qdirSpawn
-src/brokerBridge.js        # TODO: broker IPC 子进程 → qdirSpawn
-src/cdp-sniffer.js         # TODO: chrome --remote-debugging-port 拉起 → qdirSpawn
-src/dow.js                 # TODO: yt-dlp / ffmpeg 下载调用 → qdirSpawn
-src/h.js                   # TODO: 辅助脚本 → qdirSpawn
-src/qvenv.js               # TODO: python venv 创建调用 → qdirSpawn
+# ── ai 扩展层（execSync 同步链，迁移要 async 化整个调用链） ──
+ai/src/plan-executor.js     # TODO[phase4]: execSync('git ...') → qdirSpawn；调用方 async 化
+ai/src/tools.js             # TODO[phase4]: execSync(command) × 3，工具调用同步语义重构
 
-# === IDE 扩展 AI（qqq-ai） ===
-ai/src/plan-executor.js    # TODO: 替换 execSync('git') 为 qdirSpawn（后台不阻塞）
-ai/src/tools.js            # TODO: 替换 execSync 工具调用为 qdirSpawn
+# ── q3/src 多媒体管线（spawn ffmpeg / python，已自带超时与 kill，迁移收益中） ──
+src/q3.js                   # TODO[phase4]: cp.spawn(ffmpeg) × 2 → qdirSpawn（task=q3-ffmpeg-*）
+src/q1.js                   # TODO[phase4]: cp.spawn(python -c ...) → qdirSpawn（task=q1-pil-*）
 
-# === 仓库脚本（构建期 / 一次性） ===
-scripts/fetch-vscode-loc.js  # TODO: vscode-loc git clone 改走 qdirSpawn
+# ── q3/src 其他核心调用点（存量豁免，后续分批迁移） ──
+src/global.js               # TODO[phase4]: 4748行 spawn / 2693行 spawn / 多处 execSync
+src/qqq.js                  # TODO[phase4]: ffmpeg/spawn 调用
+src/q2.js                   # TODO[phase4]: 5191/5194/5199 行 explorer/open/xdg-open
+src/qvideo.js               # TODO[phase4]: ffmpeg cp 调用
+src/qvenv.js                # TODO[phase4]: python venv 创建调用
+src/brokerBridge.js         # TODO[phase4]: broker IPC 子进程
+src/cdp-sniffer.js          # TODO[phase4]: chrome --remote-debugging-port 拉起
+src/dow.js                  # TODO[phase4]: yt-dlp / ffmpeg 下载调用
+src/h.js                    # TODO[phase4]: 辅助脚本
+
+# ── 开发期脚本（不进 portable 包，CI 内运行） ──
+scripts/fetch-vscode-loc.js # CI 内拉源码翻译资源，开发期专用，可永久豁免

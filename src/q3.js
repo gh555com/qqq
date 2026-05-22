@@ -1466,7 +1466,7 @@ async function pureCommand() {
     const allOrphanPaths = orphanItems.map((item) => path.join(qqqDir, item.name));
 
     let content = "\n".repeat(13) + " " + q('q3.pure.executeCommandPrompt') + "\n\n\n " + cmdStr + "\n\n\n";
-    content += allOrphanPaths.map((p) => `/\\${p}\\/`).join("\n\n\n\n\n");
+    content += orphanItems.map((item) => `/\\qqq/${item.name}\\/`).join("\n\n\n\n\n");
 
     const purePath = path.join(parentDir, "qqq.pure");
 

@@ -2,7 +2,7 @@ const vscode = require('vscode');
 const { ChatPanelProvider } = require('./chat/panel');
 const { setAuthTokenRef } = require('./tools');
 
-// 全局日志输出频道
+// 全局日志产出频道
 let outputChannel;
 
 function log(msg) {

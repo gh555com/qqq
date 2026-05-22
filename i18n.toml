@@ -43,7 +43,7 @@ name = "qqq-ide-self"
 # ============================================================
 # 真理源是 staging/vscode-loc/en.json（由 scripts/fetch-vscode-loc.js 拉来 +
 # 9 种官方 workbench 翻译），调用 B 让机器用 en 翻成 4 种官方未覆盖语言。
-# 输出位置：用于 ide/ 编译期注入到 .nls.<lang>.json
+# 产出位置：用于 ide/ 编译期注入到 .nls.<lang>.json
 [[calls]]
 name = "qqq-ide-vscode-workbench"
 

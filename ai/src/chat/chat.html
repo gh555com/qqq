@@ -23,8 +23,8 @@
     <!-- ━━━ Metrics Dashboard ━━━ -->
     <div id="metrics-panel">
         <!-- Turn -->
-        <div class="mc" title="本轮输入 token 数（发送给 AI 的上下文量，包含 system prompt + 对话历史 + 当前消息）"><span class="mc-i">↑</span><span class="mc-v" id="mv-in">—</span></div>
-        <div class="mc" title="本轮输出 token 数（AI 生成的回复 + 工具调用）"><span class="mc-i">↓</span><span class="mc-v" id="mv-out">—</span></div>
+        <div class="mc" title="本轮键入 token 数（发送给 AI 的上下文量，包含 system prompt + 对话历史 + 当前消息）"><span class="mc-i">↑</span><span class="mc-v" id="mv-in">—</span></div>
+        <div class="mc" title="本轮产出 token 数（AI 生成的回复 + 工具调用）"><span class="mc-i">↓</span><span class="mc-v" id="mv-out">—</span></div>
         <div class="mc" title="深度思考 token 数（reasoning_tokens，越高 = 模型思考越深，质量越好但费用也越高）"><span class="mc-i">🧠</span><span class="mc-v" id="mv-think">—</span></div>
         <div class="mc" title="前缀缓存命中率：cacheHit/(cacheHit+cacheMiss)×100%。越高 = 越省钱，缓存命中价格是未命中的 1/120"><span class="mc-i">💾</span><span class="mc-v" id="mv-cache">—</span></div>
         <div class="mc" title="缓存命中 token 数（这些 token 按极低价格计费，约 ¥0.025/M）"><span class="mc-lbl">命中</span><span class="mc-v mc-hi" id="mv-hit">—</span></div>
@@ -33,7 +33,7 @@
         <div class="mc" title="模型档位：⚡ Flash = 快速便宜(无思考)，🧠 Pro+Max = 深度思考(质量最高)"><span class="mc-v" id="mv-tier" style="font-weight:normal;opacity:0.7">—</span></div>
         <div class="mc" title="本轮工具调用次数（read_file/edit_file/run_command 等）"><span class="mc-i">🔧</span><span class="mc-v" id="mv-tools">—</span></div>
         <div class="mc" title="本轮响应总耗时（从发送到 AI 回复完成）"><span class="mc-i">⏱</span><span class="mc-v" id="mv-time">—</span></div>
-        <div class="mc" title="输出吞吐量 = completionTokens/耗时(秒)，越高 = 模型生成越快"><span class="mc-lbl">tok/s</span><span class="mc-v mc-hi" id="mv-tps">—</span></div>
+        <div class="mc" title="产出吞吐量 = completionTokens/耗时(秒)，越高 = 模型生成越快"><span class="mc-lbl">tok/s</span><span class="mc-v mc-hi" id="mv-tps">—</span></div>
         <div class="mc" title="缓存命中节省金额(CNY) = cacheHitTokens × (¥3-¥0.025)/1M，衡量前缀缓存优化真实收益"><span class="mc-lbl">¥省</span><span class="mc-v mc-hi" id="mv-save">—</span></div>
         <div class="mc" title="本轮 API 重试次数（429/502/503/网络错误触发自动退避重试）"><span class="mc-lbl">retry</span><span class="mc-v" id="mv-retry">—</span></div>
         <div class="mc" title="本轮每个工具调用的平均耗时（ms），衡量工具执行效率"><span class="mc-lbl">t̄ool</span><span class="mc-v" id="mv-tavg">—</span></div>
@@ -41,15 +41,15 @@
         <div class="mc" title="免费时段指示器：✨ = 当前轮免费，— = 正常计费"><span class="mc-v" id="mv-free" style="font-weight:normal">—</span></div>
         <div class="mc-sep"></div>
         <!-- Session -->
-        <div class="mc" title="本次对话累计输入 token 总量"><span class="mc-lbl">Σ↑</span><span class="mc-v" id="mv-sin">—</span></div>
-        <div class="mc" title="本次对话累计输出 token 总量"><span class="mc-lbl">Σ↓</span><span class="mc-v" id="mv-sout">—</span></div>
+        <div class="mc" title="本次对话累计键入 token 总量"><span class="mc-lbl">Σ↑</span><span class="mc-v" id="mv-sin">—</span></div>
+        <div class="mc" title="本次对话累计产出 token 总量"><span class="mc-lbl">Σ↓</span><span class="mc-v" id="mv-sout">—</span></div>
         <div class="mc" title="本次对话累计缓存命中 token 总量（省下的钱）"><span class="mc-lbl">Σ💾</span><span class="mc-v" id="mv-scache">—</span></div>
         <div class="mc" title="本次对话累计缓存未命中 token 总量"><span class="mc-lbl">Σ✗</span><span class="mc-v" id="mv-smiss">—</span></div>
         <div class="mc" title="本次对话累计消耗 ge 总量"><span class="mc-lbl">Σ💰</span><span class="mc-v" id="mv-scost">—</span></div>
         <div class="mc" title="本次对话总轮次数（每轮 = 一次用户发送 + AI 完整回复）"><span class="mc-i">🔄</span><span class="mc-v" id="mv-turns">—</span></div>
         <div class="mc" title="本次对话累计重试次数（网络抖动越多 = 越高）"><span class="mc-lbl">Σretry</span><span class="mc-v" id="mv-sretry">—</span></div>
         <div class="mc" title="本次对话缓存累计节省金额(CNY)，衡量整场对话前缀缓存优化总收益"><span class="mc-lbl">Σ¥省</span><span class="mc-v mc-hi" id="mv-ssave">—</span></div>
-        <div class="mc" title="Session 平均输出吞吐量 = session 总 output / session 总耗时。反映整场对话的平均生成速度"><span class="mc-lbl">x̄tok/s</span><span class="mc-v" id="mv-savgtps">—</span></div>
+        <div class="mc" title="Session 平均产出吞吐量 = session 总 output / session 总耗时。反映整场对话的平均生成速度"><span class="mc-lbl">x̄tok/s</span><span class="mc-v" id="mv-savgtps">—</span></div>
         <div class="mc" title="平均每轮节省 ¥ = 总¥省/总轮次。反映单轮缓存优化平均收益"><span class="mc-lbl">x̄¥/turn</span><span class="mc-v mc-hi" id="mv-savgsave">—</span></div>
         <div class="mc" title="平均每轮重试次数 = 总重试/总轮次。反映网络稳定性 (>0.5 = 不稳定)"><span class="mc-lbl">x̄ret/turn</span><span class="mc-v" id="mv-savgretry">—</span></div>
         <div class="mc-sep"></div>
@@ -65,15 +65,15 @@
         <div class="mc" title="Lifetime：跨 IDE 重启累计启动过多少个 panel session"><span class="mc-lbl">∞sess</span><span class="mc-v" id="mv-lsess">—</span></div>
         <div class="mc" title="Lifetime：跨 IDE 重启累计总消耗 ge（1ge=¥1）"><span class="mc-lbl">∞¥花</span><span class="mc-v" id="mv-lcost">—</span></div>
         <div class="mc" title="Lifetime：跨 IDE 重启累计前缀缓存总节省 ¥、高亮显示你总共省下多少钱"><span class="mc-lbl">∞¥省</span><span class="mc-v mc-hi" id="mv-lsave">—</span></div>
-        <div class="mc" title="Lifetime：跨 IDE 重启累计总输入 token 量"><span class="mc-lbl">∞↑</span><span class="mc-v" id="mv-lin">—</span></div>
-        <div class="mc" title="Lifetime：跨 IDE 重启累计总输出 token 量"><span class="mc-lbl">∞↓</span><span class="mc-v" id="mv-lout">—</span></div>
+        <div class="mc" title="Lifetime：跨 IDE 重启累计总键入 token 量"><span class="mc-lbl">∞↑</span><span class="mc-v" id="mv-lin">—</span></div>
+        <div class="mc" title="Lifetime：跨 IDE 重启累计总产出 token 量"><span class="mc-lbl">∞↓</span><span class="mc-v" id="mv-lout">—</span></div>
         <div class="mc" title="Lifetime：跨 IDE 重启累计总重试次数"><span class="mc-lbl">∞ret</span><span class="mc-v" id="mv-lret">—</span></div>
         <div class="mc" title="Lifetime：跨 IDE 重启累计总耗时（你在 qqq 上花了多少时间）"><span class="mc-lbl">∞⏱</span><span class="mc-v" id="mv-ldur">—</span></div>
     </div>
     <div id="messages"></div>
     <div id="input-area">
         <div id="image-strip"></div>
-        <div id="input-est-row"><span id="input-est" title="预估当前输入将使用的 token 量（按 chars÷4 估算）。中文需乘上 1.5–2倍。越多 tokens = 越贵，如果上下文也充足，本轮费用估计也会高">— tok</span></div>
+        <div id="input-est-row"><span id="input-est" title="预估当前键入将使用的 token 量（按 chars÷4 估算）。中文需乘上 1.5–2倍。越多 tokens = 越贵，如果上下文也充足，本轮费用估计也会高">— tok</span></div>
         <div id="input-row">
             <textarea id="input" placeholder="Ask qqq... (Ctrl+V 粘贴图片)" rows="1"></textarea>
             <button id="send-btn">Send</button>

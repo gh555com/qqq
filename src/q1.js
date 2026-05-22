@@ -2244,7 +2244,7 @@ async function renderImages(editor) {
 			const endPos = editor.document.positionAt(offset + match[0].length);
 
 			const rawPath = (match[1] || "").trim();
-			if (!rawPath) continue;
+			if (!rawPath || !rawPath.startsWith('qqq')) continue;
 
 			const absPath = resolvePathToAbsolute(editor.document.uri, rawPath);
 

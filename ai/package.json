@@ -6,45 +6,14 @@
   "description": "qqq AI Agent — Ask qqq, get things done.",
   "icon": "res/icon.png",
   "engines": {
-    "vscode": "^1.74.0"
+    "vscode": "^1.85.0"
   },
   "activationEvents": [
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "qqqAiView",
-          "title": "qqq AI",
-          "icon": "res/icon.png"
-        }
-      ],
-      "auxiliarybar": [
-        {
-          "id": "qqqAiViewAux",
-          "title": "qqq AI",
-          "icon": "res/icon.png"
-        }
-      ]
-    },
-    "views": {
-      "qqqAiView": [
-        {
-          "id": "qqq-ai.chatPanel",
-          "name": "Ask qqq",
-          "type": "webview"
-        }
-      ],
-      "qqqAiViewAux": [
-        {
-          "id": "qqq-ai.chatPanelAux",
-          "name": "Ask qqq",
-          "type": "webview"
-        }
-      ]
-    },
+    "_comment_views": "铁律 §13：qqq AI 的 viewContainer + view 已由 IDE 壳静态注册（vs/qqq/aux/qqqAuxContribution.ts）。本 vscode 扩展不再重复贡献 viewsContainers / views，避免双注册。",
     "commands": [
       {
         "command": "qqq-ai.ask",

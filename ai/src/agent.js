@@ -412,7 +412,7 @@ class Agent {
         try {
             const turns = this.conversation.filter(m => m.role === 'user').length;
             const summaryMessages = [
-                { role: 'system', content: '用3句话总结这段对话的关键信息，包括用户的意图、讨论了什么、得出了什么结论。只输出摘要，不要其他内容。' },
+                { role: 'system', content: '用3句话总结这段对话的关键信息，包括用户的意图、讨论了什么、得出了什么结论。只产出摘要，不要其他内容。' },
                 { role: 'user', content: this.conversation.filter(m => m.role === 'user' || m.role === 'assistant').map(m => `${m.role}: ${(m.content || '').slice(0, 200)}`).join('\n') }
             ];
             const token = await this._getAuthToken();

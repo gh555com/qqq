@@ -10,7 +10,7 @@ const sendBtn = document.getElementById('send-btn');
 const imageStrip = document.getElementById('image-strip');
 const inputEstEl = document.getElementById('input-est');
 
-// ━━━ E-2: 输入框实时 token 预估 + 自动高度（A-1: rAF 节流） ━━━
+// ━━━ E-2: 键入框实时 token 预估 + 自动高度（A-1: rAF 节流） ━━━
 let _inputRafPending = false;
 inputEl.addEventListener('input', () => {
     if (_inputRafPending) return;

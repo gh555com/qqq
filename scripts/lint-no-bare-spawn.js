@@ -7,7 +7,7 @@
  *
  * 用法：
  *   node scripts/lint-no-bare-spawn.js          # 走全量扫描，违规即 exit 1
- *   node scripts/lint-no-bare-spawn.js --list   # 只输出当前命中清单
+ *   node scripts/lint-no-bare-spawn.js --list   # 只产出当前命中清单
  */
 
 'use strict';
@@ -48,7 +48,7 @@ function* walk(dir) {
         if (SKIP_DIRS.has(e.name)) continue;
         const full = path.join(dir, e.name);
         if (e.isDirectory()) yield* walk(full);
-        else if (e.name.endsWith('.js') || e.name.endsWith('.cjs') || e.name.endsWith('.mjs')) {
+        else if (e.name.endsWith('.js') || e.name.endsWith('.cjs') || e.name.endsWith('.mjs') || e.name.endsWith('.ts') || e.name.endsWith('.mts') || e.name.endsWith('.cts')) {
             yield full;
         }
     }

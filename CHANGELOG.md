@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [16.5.4] - 2026-05-21
+
+### Fixed
+- **Cipher markers no longer false-trigger on code**: The `/.\.../` pattern used for file preview markers previously matched regex literals inside source code (e.g., `vscode-file:///...`), showing icons where there should be plain text. Markers now require a `qqq` prefix (`
+/\qqq/path\/
+`), eliminating all false positives when browsing IDE source files. The "pure" cleanup command now generates markers with this prefix.
+
+---
+
 ## [16.5.3] - 2026-05-20
 
 ### Improved

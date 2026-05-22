@@ -29,7 +29,7 @@ CLI（与 ghrun spawn 同协议）：
   130  收到 Ctrl+C / SIGINT
   201  启动失败（命令不存在 / cwd 错误 / 参数错误）
 
-输出：
+产出：
   stdout 最末一行打印 JSON 摘要：
     {"task_id","pid","status","exit_code","reason","duration_ms","log","lock"}
 """

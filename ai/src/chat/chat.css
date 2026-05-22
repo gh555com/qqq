@@ -194,7 +194,7 @@ body {
 .plan-done-text { font-size: 11px; color: var(--green); }
 .msg-plan-progress { font-size: 11px; opacity: 0.7; padding: 2px 8px; border-left: 2px solid var(--green); margin: 4px 0; }
 
-/* 输入区域 */
+/* 键入区域 */
 #input-area { border-top: 1px solid var(--border-color); padding: 8px; display: flex; flex-direction: column; gap: 6px; margin-left: 4px; background: var(--background-color); }
 #image-strip { display: none; overflow-x: hidden; flex-wrap: wrap; padding: 4px 0; gap: 6px; }
 #image-strip::-webkit-scrollbar { height: 4px; }
