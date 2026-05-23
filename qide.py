@@ -11,13 +11,14 @@ import os
 import subprocess
 import shutil
 import time
+import threading
 from pathlib import Path
 from datetime import datetime
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QPlainTextEdit, QLabel, QGroupBox, QGridLayout,
-    QStatusBar, QMessageBox
+    QStatusBar, QMessageBox, QLineEdit, QCheckBox
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QTextCursor, QColor, QPalette
@@ -31,6 +32,7 @@ OUT_DIR = Path("E:/s/wol/py/VSCode-win32-x64")
 QQQ_EXE = OUT_DIR / "qqq.exe"
 MODULES = Path("E:/s/wol/py/qqq-modules")  # gaea 模块开发根
 F_M_DIR = OUT_DIR / "f" / "m"                # 运行时 gaea 模块目录
+RUNNER_PY   = Q3 / "scripts" / "runner.py"   # 反卡死任务执行器（铁律 §12 / §15）
 
 GIT_BASH    = r"E:\s\d\git\bin\bash.exe"
 ACTIVATE    = r"E:\s\d\activate.cmd"
@@ -41,6 +43,22 @@ PYTHON_EXE  = r"E:\s\d\python3810\python.exe"
 # 节点环境组合命令（call activate + vcvars + 实际命令）
 def env_cmd(cmd: str) -> str:
     return f'call "{ACTIVATE}" && call "{VCVARS}" && set NODE_OPTIONS=--max_old_space_size=8192 && {cmd}'
+
+
+def runner_wrap(cmd: str, task_id: str = None, deadline: int = 1800, stall: int = 60) -> str:
+    """
+    用 runner.py 包装长命令（铁律 §15①）。
+    cmd 走 cmd /c "..." 形式（runner.py 的 --shell 模式），保留 && 链。
+    Job Object 整树托管 + IOCP 异步 + stdin=NUL + 双看门狗。
+    """
+    if task_id is None:
+        task_id = f"qide-{int(time.time())}"
+    # runner.py spawn --task <id> [--deadline N] [--stall N] --shell -- <cmd>
+    # 使用 --shell 让 runner.py 自身用 cmd /c 执行（保留 && 链）
+    safe = cmd.replace('"', '\\"')
+    return (f'"{PYTHON_EXE}" "{RUNNER_PY}" spawn '
+            f'--task {task_id} --deadline {deadline} --stall {stall} '
+            f'--shell -- "{safe}"')
 
 
 # 把命令落地到 .bat 文件再让 cmd /c 执行，避免 subprocess 多层 shell 引号转义吞掉 "…\…"
@@ -66,7 +84,6 @@ class CmdWorker(QThread):
         self.shell = shell  # "cmd" or "bash"
         self._proc = None
         self._stop = False
-
     def stop(self):
         self._stop = True
         if self._proc and self._proc.poll() is None:
@@ -119,6 +136,140 @@ class CmdWorker(QThread):
         self.finished_ok.emit(code, dt)
 
 
+# ===================== qz Runner Worker（runner.py spawn + tail log） =====================
+class RunnerWorker(QThread):
+    """
+    通过 scripts/runner.py spawn 跑命令，主进程 tail log 文件流式回显。
+    Job Object 整树托管 + IOCP 异步 + stdin=NUL + 双看门狗，永不卡死主控进程。
+    遵守铁律 §15①②。
+    """
+    line_ready = Signal(str)
+    finished_ok = Signal(int, float)
+    log_path_ready = Signal(str)
+
+    def __init__(self, cmd: str, cwd: Path = None, deadline: int = 1800,
+                 stall: int = 60, task_id: str = None, parent=None):
+        super().__init__(parent)
+        self.cmd = cmd
+        self.cwd = str(cwd) if cwd else str(Q3)
+        self.deadline = deadline
+        self.stall = stall
+        self.task_id = task_id or f"qide-{int(time.time())}"
+        self._stop = False
+        self._proc = None
+        self._tail_thread = None
+
+    def stop(self):
+        self._stop = True
+        if self._proc and self._proc.poll() is None:
+            try:
+                # 调 runner.py kill
+                subprocess.Popen(
+                    [PYTHON_EXE, str(RUNNER_PY), "kill", self.task_id],
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                )
+            except Exception:
+                try: self._proc.terminate()
+                except Exception: pass
+
+    def run(self):
+        t0 = time.time()
+        # 推断日志路径：默认 QDIR_LOGS/spawn-<task>.log；env 没设则 tempdir/qqq-spawn/logs/
+        env = os.environ.copy()
+        log_dir = env.get("QDIR_LOGS")
+        if not log_dir:
+            qdir = env.get("QDIR")
+            if qdir:
+                log_dir = str(Path(qdir) / "f" / "logs")
+            else:
+                import tempfile as _tf
+                log_dir = str(Path(_tf.gettempdir()) / "qqq-spawn" / "logs")
+        log_path = Path(log_dir) / f"spawn-{self.task_id}.log"
+        self.log_path_ready.emit(str(log_path))
+        self.line_ready.emit(f"[CMD] {self.cmd}")
+        self.line_ready.emit(f"[CWD] {self.cwd}")
+        self.line_ready.emit(f"[TASK] {self.task_id}  (deadline={self.deadline}s, stall={self.stall}s)")
+        self.line_ready.emit(f"[LOG] {log_path}")
+
+        args = [
+            PYTHON_EXE, str(RUNNER_PY), "spawn",
+            "--task", self.task_id,
+            "--deadline", str(self.deadline),
+            "--stall", str(self.stall),
+            "--cwd", self.cwd,
+            "--shell",
+            "--", self.cmd
+        ]
+
+        # 启动 tail 线程：跟踪 log_path 增量
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.touch(exist_ok=True)
+        tail_stop = {"v": False}
+        def _tail():
+            pos = 0
+            buf = b""
+            while not tail_stop["v"]:
+                try:
+                    sz = log_path.stat().st_size
+                    if sz > pos:
+                        with open(log_path, "rb") as f:
+                            f.seek(pos)
+                            chunk = f.read(sz - pos)
+                        pos = sz
+                        buf += chunk
+                        while b"\n" in buf:
+                            line, _, buf = buf.partition(b"\n")
+                            try:
+                                self.line_ready.emit(line.decode("utf-8", errors="replace").rstrip("\r"))
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+                time.sleep(0.15)
+            # 残余
+            if buf:
+                try:
+                    self.line_ready.emit(buf.decode("utf-8", errors="replace"))
+                except Exception:
+                    pass
+
+        self._tail_thread = threading.Thread(target=_tail, daemon=True)
+        self._tail_thread.start()
+
+        code = -1
+        try:
+            self._proc = subprocess.Popen(
+                args,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                bufsize=1,
+                universal_newlines=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            # 主控 stdout 只剩 runner 的 brief JSON（一行）+ 启动时少量 stderr
+            for line in iter(self._proc.stdout.readline, ""):
+                if self._stop:
+                    break
+                stripped = line.rstrip("\n")
+                if stripped:
+                    self.line_ready.emit(f"[runner] {stripped}")
+            self._proc.stdout.close()
+            code = self._proc.wait()
+        except Exception as e:
+            self.line_ready.emit(f"[ERR] {e}")
+            code = -1
+        finally:
+            tail_stop["v"] = True
+            if self._tail_thread:
+                self._tail_thread.join(timeout=2)
+
+        dt = time.time() - t0
+        self.finished_ok.emit(code, dt)
+
+
 # ===================== 主窗口 =====================
 class QideWindow(QMainWindow):
     def __init__(self):
@@ -157,6 +308,9 @@ class QideWindow(QMainWindow):
         btn_row.addWidget(self._group_run())
         btn_row.addWidget(self._group_git())
         btn_row.addWidget(self._group_misc())
+
+        # ---- ⚡ qz 跑命令通用区（铁律 §15 ②） ----
+        root.addWidget(self._build_qz_bar())
 
         # ---- 日志区 ----
         self.log = QPlainTextEdit()
@@ -292,6 +446,127 @@ class QideWindow(QMainWindow):
                                    lambda: self.open_path(IDE_SRC)))
         v.addStretch()
         return g
+
+    def _build_qz_bar(self) -> QGroupBox:
+        """
+        ⚡ qz 跑命令通用区（铁律 §15 ②）
+        任意 shell 命令一键托管走 scripts/runner.py spawn —
+        Job Object 整树托管 + IOCP 异步 + stdin=NUL + 双看门狗，永不卡死。
+        """
+        g = QGroupBox("⚡ qz 跑命令（任意 shell 命令托管 runner.py，永不卡死）")
+        v = QVBoxLayout(g)
+        row1 = QHBoxLayout()
+        v.addLayout(row1)
+
+        self.qz_cmd_input = QLineEdit()
+        self.qz_cmd_input.setPlaceholderText("输入任意 shell 命令（cmd /c 形式，支持 && 链）")
+        self.qz_cmd_input.setStyleSheet("background:#1e1e1e;color:#d4d4d4;padding:5px;border:1px solid #3e3e42;")
+        self.qz_cmd_input.returnPressed.connect(self.act_qz_run)
+        row1.addWidget(self.qz_cmd_input, 1)
+
+        self.qz_cwd_input = QLineEdit(str(Q3))
+        self.qz_cwd_input.setMaximumWidth(220)
+        self.qz_cwd_input.setStyleSheet("background:#1e1e1e;color:#9cdcfe;padding:5px;border:1px solid #3e3e42;")
+        self.qz_cwd_input.setToolTip("工作目录")
+        row1.addWidget(self.qz_cwd_input)
+
+        btn_run = QPushButton("⚡ 跑")
+        btn_run.setMinimumHeight(28)
+        btn_run.clicked.connect(self.act_qz_run)
+        row1.addWidget(btn_run)
+
+        # 第二行：deadline / stall 微调 + 历史预设
+        row2 = QHBoxLayout()
+        v.addLayout(row2)
+        row2.addWidget(QLabel("deadline(s):"))
+        self.qz_deadline = QLineEdit("1800")
+        self.qz_deadline.setMaximumWidth(70)
+        self.qz_deadline.setStyleSheet("background:#1e1e1e;color:#d4d4d4;padding:3px;border:1px solid #3e3e42;")
+        row2.addWidget(self.qz_deadline)
+        row2.addWidget(QLabel("stall(s):"))
+        self.qz_stall = QLineEdit("60")
+        self.qz_stall.setMaximumWidth(70)
+        self.qz_stall.setStyleSheet("background:#1e1e1e;color:#d4d4d4;padding:3px;border:1px solid #3e3e42;")
+        row2.addWidget(self.qz_stall)
+
+        # 快捷预设
+        for label, cmd, cwd in [
+            ("yarn compile", env_cmd("yarn compile"), str(IDE_SRC)),
+            ("yarn watch",   env_cmd("yarn watch"),   str(IDE_SRC)),
+            ("gulp 11min",   env_cmd("yarn gulp vscode-win32-x64-min"), str(IDE_SRC)),
+            ("git status",   "git status",            str(Q3)),
+        ]:
+            b = QPushButton(label)
+            b.setMinimumHeight(26)
+            b.setStyleSheet("background:#264f78;color:#d4d4d4;padding:3px 8px;")
+            b.clicked.connect(lambda _, c=cmd, w=cwd: self._qz_preset(c, w))
+            row2.addWidget(b)
+        row2.addStretch()
+
+        # 第三行：列出当前活跃 task + reap
+        row3 = QHBoxLayout()
+        v.addLayout(row3)
+        b_list = QPushButton("📋 list 活跃任务")
+        b_list.setMinimumHeight(24)
+        b_list.clicked.connect(self.act_qz_list)
+        row3.addWidget(b_list)
+        b_reap = QPushButton("🧹 reap 孤儿 lock")
+        b_reap.setMinimumHeight(24)
+        b_reap.clicked.connect(self.act_qz_reap)
+        row3.addWidget(b_reap)
+        row3.addStretch()
+
+        return g
+
+    def _qz_preset(self, cmd: str, cwd: str):
+        self.qz_cmd_input.setText(cmd)
+        self.qz_cwd_input.setText(cwd)
+        self.act_qz_run()
+
+    def act_qz_run(self):
+        if self.worker and self.worker.isRunning():
+            self.append_log("⚠️ 已有任务运行中，先点中止再来。"); return
+        cmd = self.qz_cmd_input.text().strip()
+        if not cmd:
+            self.append_log("⚠️ 命令不能为空"); return
+        cwd = self.qz_cwd_input.text().strip() or str(Q3)
+        try:
+            deadline = int(self.qz_deadline.text() or "1800")
+            stall    = int(self.qz_stall.text() or "60")
+        except ValueError:
+            self.append_log("⚠️ deadline/stall 必须是整数秒"); return
+
+        self.append_log(f"\n========== ⚡ qz spawn ==========")
+        self.worker = RunnerWorker(cmd, Path(cwd), deadline, stall)
+        self.worker.line_ready.connect(self.append_log)
+        self.worker.finished_ok.connect(self.on_cmd_done)
+        self.worker.start()
+
+    def act_qz_list(self):
+        try:
+            r = subprocess.run(
+                [PYTHON_EXE, str(RUNNER_PY), "list"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            )
+            self.append_log("\n========== runner list ==========")
+            self.append_log(r.stdout or "(空)")
+            if r.stderr: self.append_log(f"[stderr] {r.stderr}")
+        except Exception as e:
+            self.append_log(f"❌ list 失败：{e}")
+
+    def act_qz_reap(self):
+        try:
+            r = subprocess.run(
+                [PYTHON_EXE, str(RUNNER_PY), "reap"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            )
+            self.append_log("\n========== runner reap ==========")
+            self.append_log(r.stdout or "(空)")
+            if r.stderr: self.append_log(f"[stderr] {r.stderr}")
+        except Exception as e:
+            self.append_log(f"❌ reap 失败：{e}")
 
     def _apply_dark_theme(self):
         self.setStyleSheet("""
