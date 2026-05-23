@@ -8,7 +8,7 @@
  *   ① package.json / gaea.json 的 publisher !== 'qqq' / 'gh555' 出现 contributes.viewsContainers.auxiliarybar
  *   ② package.json 的 publisher !== 'qqq' / 'gh555' 出现 viewsContainers.activitybar.id 命中 qqqAiView*
  *   ③ package.json 的 publisher !== 'qqq' / 'gh555' 在 contributes.views 下含 qqq-ai.* 视图
- *   ④ qqq-ide-src/src/vs/qqq/aux/ 之外的 IDE 壳源码出现 ViewContainerLocation.AuxiliaryBar 字面量
+ *   ④ qqq-ide-src/src/vs/qqq/auxbar/ 之外的 IDE 壳源码出现 ViewContainerLocation.AuxiliaryBar 字面量
  *
  * 用法：
  *   node scripts/lint-no-foreign-aux.js          # 违规即 exit 1
@@ -31,9 +31,9 @@ const ALLOWED_PUBLISHERS = new Set(['qqq', 'gh555']);
 // 扫描区域：相对仓库根的子目录
 const SCAN_DIRS = ['q3', 'qqq-modules', 'qqq-ide-src/extensions'];
 
-// IDE 壳源码扫描：仅 qqq-ide-src/src/vs，但豁免 vs/qqq/aux/
+// IDE 壳源码扫描：仅 qqq-ide-src/src/vs，但豁免 vs/qqq/auxbar/
 const IDE_SHELL_SRC = path.join(ROOT, 'qqq-ide-src', 'src', 'vs');
-const IDE_SHELL_AUX_EXEMPT = path.join(IDE_SHELL_SRC, 'qqq', 'aux');
+const IDE_SHELL_AUX_EXEMPT = path.join(IDE_SHELL_SRC, 'qqq', 'auxbar');
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.dist', 'out', '.build', 'test', 'tests', 'VSCode-win32-x64']);
 
@@ -65,7 +65,7 @@ function scanManifest(manifestPath, violations) {
         violations.push({
             file: manifestPath,
             rule: '①',
-            msg: `contributes.viewsContainers.auxiliarybar 禁止贡献（唯一来源 = qqq-ide-src/src/vs/qqq/aux/qqqAuxContribution.ts）`
+            msg: `contributes.viewsContainers.auxiliarybar 禁止贡献（唯一来源 = qqq-ide-src/src/vs/qqq/auxbar/qqqAuxContribution.ts）`
         });
     }
 
@@ -113,7 +113,7 @@ function scanManifest(manifestPath, violations) {
 // 注意：vscode 引擎本身大量使用 ViewContainerLocation.AuxiliaryBar 做 switch/case、enum 比较、布局判断、
 // 事件分发，这些都是合法用途。本卡口只拦截真正「新增 AuxiliaryBar 容器」的注册调用：
 //   registerViewContainer({...}, ViewContainerLocation.AuxiliaryBar, ...)
-// 唯一允许的注册位置 = qqq-ide-src/src/vs/qqq/aux/qqqAuxContribution.ts。
+// 唯一允许的注册位置 = qqq-ide-src/src/vs/qqq/auxbar/qqqAuxContribution.ts。
 
 // 多行匹配 registerViewContainer(... ViewContainerLocation.AuxiliaryBar 的调用形态
 const REGISTER_AUX_PATTERN = /registerViewContainer\s*\([\s\S]{0,800}?ViewContainerLocation\s*\.\s*AuxiliaryBar/;
@@ -132,7 +132,7 @@ function* walk(dir) {
 function scanIdeShell(violations, hits) {
     if (!fs.existsSync(IDE_SHELL_SRC)) return;
     for (const f of walk(IDE_SHELL_SRC)) {
-        // 豁免：vs/qqq/aux/ 是铁律 §13 唯一真理点
+        // 豁免：vs/qqq/auxbar/ 是铁律 §13 唯一真理点
         if (f.startsWith(IDE_SHELL_AUX_EXEMPT + path.sep) || f === IDE_SHELL_AUX_EXEMPT) continue;
         if (!/\.(ts|js|tsx|jsx|mts|cts)$/.test(f)) continue;
         let txt;
@@ -142,7 +142,7 @@ function scanIdeShell(violations, hits) {
         violations.push({
             file: f,
             rule: '④',
-            msg: `检测到 registerViewContainer(..., ViewContainerLocation.AuxiliaryBar) 调用出现在 vs/qqq/aux/ 之外（铁律 §13：唯一来源 = qqqAuxContribution.ts）`
+            msg: `检测到 registerViewContainer(..., ViewContainerLocation.AuxiliaryBar) 调用出现在 vs/qqq/auxbar/ 之外（铁律 §13：唯一来源 = qqqAuxContribution.ts）`
         });
     }
 }
@@ -192,7 +192,7 @@ function main() {
             console.error('       ' + v.msg);
         }
         console.error('');
-        console.error('  唯一真理点：qqq-ide-src/src/vs/qqq/aux/qqqAuxContribution.ts');
+        console.error('  唯一真理点：qqq-ide-src/src/vs/qqq/auxbar/qqqAuxContribution.ts');
         console.error('  铁律：       ignore/qqq 拓扑/arc/铁律 §13');
         console.error('  落地说明：   ignore/qqq 拓扑/arc/我们到底要做什吗 §6');
         process.exit(1);

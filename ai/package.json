@@ -13,7 +13,7 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
-    "_comment_views": "铁律 §13：qqq AI 的 viewContainer + view 已由 IDE 壳静态注册（vs/qqq/aux/qqqAuxContribution.ts）。本 vscode 扩展不再重复贡献 viewsContainers / views，避免双注册。",
+    "_comment_views": "铁律 §13：qqq AI 的 viewContainer + view 已由 IDE 壳静态注册（vs/qqq/auxbar/qqqAuxContribution.ts，目录改名因 Windows AUX 保留字）。本 vscode 扩展不再重复贡献 viewsContainers / views，避免双注册。",
     "commands": [
       {
         "command": "qqq-ai.ask",
