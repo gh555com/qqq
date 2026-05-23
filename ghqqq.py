@@ -37,7 +37,7 @@ GIT_BASH    = r"E:\s\d\git\bin\bash.exe"
 
 # 远程服务器
 SERVER_MAIN = "q@47.105.67.5"    # 阿里云主力
-SERVER_US   = "q@74.48.182.213"  # 美国节点
+SERVER_US   = "q@23.254.248.1199"  # 美国节点
 BASE_URL    = "https://gh555.com"
 
 # 热更 JSON 文件列表

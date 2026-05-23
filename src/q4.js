@@ -3726,6 +3726,30 @@ function activate(context) {
 
     console.log('[Q4] QQQ Clipboard History (fusion-final) activated.');
 
+    // ── 铁律 §14：q4 注册为 gaea goods（双轨：vscode sidebar + gaea panel） ──
+    // 远程可控：IDE 壳层 'qqq.gaea.registerGoods' 命令不存在时静默 fallback，不影响原路径。
+    try {
+        const sp = sidebarProvider;
+        vscode.commands.registerCommand('qqq.q4.renderHtml', () => {
+            try {
+                if (sp && typeof sp._getHtmlForWebview === 'function') {
+                    return sp._getHtmlForWebview({ asWebviewUri: u => u, cspSource: '' });
+                }
+                if (sp && typeof sp.getHtml === 'function') { return sp.getHtml(); }
+                return '<div style="padding:16px;color:#888;">q4 sidebarProvider 未提供 HTML</div>';
+            } catch (e) {
+                return '<div style="padding:16px;color:#c33;">q4 renderHtml 报错: ' + String(e).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])) + '</div>';
+            }
+        });
+        vscode.commands.executeCommand('qqq.gaea.registerGoods', {
+            id: 'qqq.q4',
+            title: '剪贴板',
+            icon: '📋',
+            order: 10,
+            webviewCommand: 'qqq.q4.renderHtml'
+        }).then(() => { }, () => { });  // 静默失败（壳未启用 gaea panel 时）
+    } catch (_e) { /* 不影响 vscode 原路径 */ }
+
     return {
         getHistory: (limit) => historyManager.getHistory(limit),
         addToHistory: (content) => historyManager.addToHistory(content),

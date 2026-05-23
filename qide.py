@@ -503,6 +503,8 @@ class QideWindow(QMainWindow):
         # 编译完后自动重建 f/ 目录 + 同步 gaea 模块
         if self.worker and self.worker.isRunning():
             self.append_log("⚠️ 任务进行中"); return
+        # 🛡️ 预清理：强杀 qqq.exe / electron 残余进程，防止 gulp rimraf VSCode-win32-x64/ 时被文件锁卡死
+        self._kill_running_portable()
         self.append_log("\n========== yarn gulp vscode-win32-x64-min (~11 min) ==========")
         cmd = env_cmd("yarn gulp vscode-win32-x64-min")
         self.worker = CmdWorker(cmd, IDE_SRC)
@@ -524,26 +526,65 @@ class QideWindow(QMainWindow):
         self.worker.finished_ok.connect(after_build)
         self.worker.start()
 
+    def _kill_running_portable(self):
+        """出 portable 包前自动 kill qqq.exe / Code.exe / electron 残余，避免 rimraf 失败。"""
+        import subprocess
+        targets = ["qqq.exe", "Code.exe", "electron.exe"]
+        killed_any = False
+        for name in targets:
+            try:
+                # /F 强制 /T 杀整个进程树；/IM 按进程名匹配
+                r = subprocess.run(
+                    ["taskkill", "/F", "/T", "/IM", name],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if r.returncode == 0:
+                    self.append_log(f"🛑 已强杀 {name}")
+                    killed_any = True
+                # returncode=128 = 没找到这个进程，正常情况，不打印
+            except Exception as e:
+                self.append_log(f"⚠️ kill {name} 失败：{e}")
+        if killed_any:
+            import time
+            time.sleep(1)  # 给 OS 一秒释放文件锁
+
     def act_sync_out_to_portable(self):
-        """拷 qqq-ide-src/out/* → VSCode-win32-x64/resources/app/out/* 实现开发期秒级热更"""
+        """拷 qqq-ide-src/out/* + product.json + extensions/qqq-*  → portable"""
         try:
-            src = IDE_SRC / "out"
-            dst = OUT_DIR / "resources" / "app" / "out"
-            if not src.exists():
-                self.append_log(f"❌ {src} 不存在，先 yarn compile"); return
-            if not dst.parent.exists():
-                self.append_log(f"❌ {dst.parent} 不存在，先出过一次 portable 包"); return
-            self.append_log(f"\n========== 增量同步 {src} → {dst} ==========")
+            src_out = IDE_SRC / "out"
+            dst_app = OUT_DIR / "resources" / "app"
+            dst_out = dst_app / "out"
+            if not src_out.exists():
+                self.append_log(f"❌ {src_out} 不存在，先 yarn compile"); return
+            if not dst_app.exists():
+                self.append_log(f"❌ {dst_app} 不存在，先出过一次 portable 包"); return
+            self.append_log(f"\n========== 增量同步 → portable ==========")
             t0 = time.time()
-            # robocopy /MIR 严重，改用 /E /XO（只拷新文件、不删目标多余物）；/NFL /NDL 静默
-            cmd = f'robocopy "{src}" "{dst}" /E /XO /NFL /NDL /NJH /NJS /NP /R:1 /W:1'
+            # 1. out/ 源码
+            cmd = f'robocopy "{src_out}" "{dst_out}" /E /XO /NFL /NDL /NJH /NJS /NP /R:1 /W:1'
             r = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='gbk', errors='replace')
-            # robocopy 退出码 0~7 都是成功 (0=无变动 1=拷了 2=多余 3=1+2 …)
-            ok = r.returncode <= 7
+            ok1 = r.returncode <= 7
+            self.append_log(f"  out/      → robocopy rc={r.returncode} {'✅' if ok1 else '❌'}")
+            # 2. product.json
+            sp = IDE_SRC / "product.json"
+            dp = dst_app / "product.json"
+            if sp.exists():
+                shutil.copy2(sp, dp)
+                self.append_log(f"  product.json → {dp.stat().st_size//1024}KB ✅")
+            # 3. 全量拷贝 qqq-* 与 theme-qqq-* 内置扩展（新增或修改都走这里）
+            src_ext = IDE_SRC / "extensions"
+            dst_ext = dst_app / "extensions"
+            if src_ext.exists():
+                for sub in src_ext.iterdir():
+                    if not sub.is_dir(): continue
+                    if not (sub.name.startswith("qqq-") or sub.name.startswith("theme-qqq")): continue
+                    target = dst_ext / sub.name
+                    cmd2 = f'robocopy "{sub}" "{target}" /E /XO /NFL /NDL /NJH /NJS /NP /R:1 /W:1 /XD node_modules .vscode-test'
+                    r2 = subprocess.run(cmd2, shell=True, capture_output=True, text=True, encoding='gbk', errors='replace')
+                    ok2 = r2.returncode <= 7
+                    self.append_log(f"  ext/{sub.name:<28s} rc={r2.returncode} {'✅' if ok2 else '❌'}")
             dt = time.time() - t0
-            for line in (r.stdout or '').splitlines():
-                if line.strip(): self.append_log(line)
-            self.append_log(f"[DONE {'✅' if ok else '❌'}] robocopy rc={r.returncode} elapsed {dt:.1f}s\n")
+            self.append_log(f"[DONE ✅] elapsed {dt:.1f}s\n")
         except Exception as e:
             self.append_log(f"❌ 同步失败：{e}")
 
