@@ -1,0 +1,63 @@
+name: Build ghrun
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    name: Build ghrun ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            name: win-x64
+            target: x86_64-pc-windows-msvc
+            ghrun_ext: .exe
+            watchdog_ext: .exe
+
+          - os: ubuntu-22.04
+            name: linux-x64
+            target: x86_64-unknown-linux-gnu
+            ghrun_ext: ""
+            watchdog_ext: ""
+
+          - os: macos-14
+            name: mac-arm64
+            target: aarch64-apple-darwin
+            ghrun_ext: ""
+            watchdog_ext: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build ghrun
+        shell: bash
+        run: |
+          cd ide/ghrun
+          rustup target add ${{ matrix.target }}
+          cargo build --release --target ${{ matrix.target }}
+          echo "=== build complete ==="
+          ls -lh target/${{ matrix.target }}/release/
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p dist/ghrun-${{ matrix.name }}
+          cp ide/ghrun/target/${{ matrix.target }}/release/ghrun${{ matrix.ghrun_ext }} dist/ghrun-${{ matrix.name }}/
+          cp ide/ghrun/target/${{ matrix.target }}/release/watchdog${{ matrix.watchdog_ext }} dist/ghrun-${{ matrix.name }}/
+          ls -lh dist/ghrun-${{ matrix.name }}/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghrun-${{ matrix.name }}
+          path: dist/ghrun-${{ matrix.name }}/
