@@ -459,7 +459,7 @@ class QideWindow(QMainWindow):
         v.addLayout(row1)
 
         self.qz_cmd_input = QLineEdit()
-        self.qz_cmd_input.setPlaceholderText("输入任意 shell 命令（cmd /c 形式，支持 && 链）")
+        self.qz_cmd_input.setPlaceholderText("键入任意 shell 命令（cmd /c 形式，支持 && 链）")
         self.qz_cmd_input.setStyleSheet("background:#1e1e1e;color:#d4d4d4;padding:5px;border:1px solid #3e3e42;")
         self.qz_cmd_input.returnPressed.connect(self.act_qz_run)
         row1.addWidget(self.qz_cmd_input, 1)
