@@ -1,0 +1,8 @@
+━━━━━━━━━━ HOUSE 1 ━━━━━━━━━━
+(no summary)  [6291ms]
+  ── ROOM 1.1  run_command({"command": "pwd"}) ──
+  ── ROOM 1.2  get_vision_context({}) ──
+
+━━━━━━━━━━ HOUSE 2 ━━━━━━━━━━
+(no summary)  [9037ms]
+  (final answer)

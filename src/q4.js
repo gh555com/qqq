@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const global = require('./global');
 const { q } = require('./i18n');
 const q1 = require('./q1');
+const qgsClient = require('./qgs-client');
 
 // ★ Ultimate best solution: global instance tracking for lifecycle hard kill
 let _currentHistoryManager = null;
@@ -437,14 +438,16 @@ class ClipboardHistoryManager {
 
     _initStorage() {
         try {
-            // ★ Primary storage: user home directory (~/.qqq/clipboard-history/)
-            // Survives IDE uninstall/reinstall, shared across all IDEs (VS Code, Cursor, Windsurf, etc.)
+            // ★★★ qgs SQLite storage (single truth machine, shared with qqq-shell-v2)
+            // Replaces legacy history.bin.gz file-based storage
+            this._qgsNs = qgsClient.ns('qqq.clip', { v: 1, form: 'doc' });
+
+            // Legacy path (kept for backward-compat migration only)
             const homeDir = os.homedir();
             this._storageDir = path.join(homeDir, '.qqq', CONSTANTS.STORAGE_DIR);
-            if (!fs.existsSync(this._storageDir)) fs.mkdirSync(this._storageDir, { recursive: true });
             this._fileBinGz = path.join(this._storageDir, CONSTANTS.FILE_BIN_GZ);
 
-            // ★ Auto-migration: if user home has no data but old globalStorageUri does, migrate it
+            // ★ Auto-migration from legacy file or globalStorageUri
             this._migrateFromGlobalStorage();
         } catch { }
     }
@@ -476,8 +479,48 @@ class ClipboardHistoryManager {
     }
 
     async _loadHistory() {
-        if (!this._fileBinGz || !fs.existsSync(this._fileBinGz)) return;
         const t0 = performance.now();
+
+        // ★★★ Primary: load from qgs SQLite (single truth machine)
+        try {
+            if (this._qgsNs) {
+                const payload = await this._qgsNs.get('history');
+                if (payload && Array.isArray(payload.history) && payload.history.length > 0) {
+                    this._resetInMemory();
+                    const historyArr = payload.history;
+                    historyArr.slice().reverse().forEach(it => {
+                        if (!it.content) return;
+                        const node = {
+                            ...it,
+                            id: it.id || randomId(),
+                            hash: it.hash || md5Hex(it.content),
+                            preview: it.preview || makePreview(it.content),
+                            size: it.size || Buffer.byteLength(it.content, 'utf8'),
+                            pinned: !!it.pinned,
+                            pinTimestamp: it.pinTimestamp || 0,
+                            prev: null, next: null
+                        };
+                        if (!this._hashMap.has(node.hash)) {
+                            this._insertHead(node);
+                            this._idMap.set(node.id, node);
+                            this._hashMap.set(node.hash, node);
+                        }
+                    });
+                    this._trimExcess();
+                    this._touch();
+                    this._notifyChange();
+                    this.perfStats.loadTimeMs += (performance.now() - t0);
+                    this.perfStats.operations++;
+                    console.log('[Q4] Loaded ' + this._size + ' items from qgs');
+                    return;
+                }
+            }
+        } catch (e) {
+            console.warn('[Q4] qgs load failed, falling back to legacy file:', e.message);
+        }
+
+        // ★ Fallback: legacy file-based load (history.bin.gz)
+        if (!this._fileBinGz || !fs.existsSync(this._fileBinGz)) return;
         try {
             const dataBuf = await fs.promises.readFile(this._fileBinGz);
 
@@ -523,25 +566,32 @@ class ClipboardHistoryManager {
             });
 
             // Trim excess items but protect pinned items
-            if (this._size > CONSTANTS.MAX_HISTORY_ITEMS) {
-                let cur = this._tail;
-                while (cur && this._size > CONSTANTS.MAX_HISTORY_ITEMS) {
-                    const prev = cur.prev;
-                    if (!cur.pinned) {
-                        if (cur.hash) this._sessionRemovedHashes.add(cur.hash);
-                        this._removeNode(cur);
-                    }
-                    cur = prev;
-                }
-            }
+            this._trimExcess();
             this._touch();
             this._notifyChange();
+
+            // ★ Migrate legacy data to qgs (async, fire-and-forget)
+            this._migrateToQgs().catch(() => {});
         } catch (e) {
             console.error('[Q4]', q('log.binaryLoadError'), e.message);
             await this._quarantineCorruptFile(this._fileBinGz);
         } finally {
             this.perfStats.loadTimeMs += (performance.now() - t0);
             this.perfStats.operations++;
+        }
+    }
+
+    _trimExcess() {
+        if (this._size > CONSTANTS.MAX_HISTORY_ITEMS) {
+            let cur = this._tail;
+            while (cur && this._size > CONSTANTS.MAX_HISTORY_ITEMS) {
+                const prev = cur.prev;
+                if (!cur.pinned) {
+                    if (cur.hash) this._sessionRemovedHashes.add(cur.hash);
+                    this._removeNode(cur);
+                }
+                cur = prev;
+            }
         }
     }
 
@@ -556,6 +606,18 @@ class ClipboardHistoryManager {
         this._cache.searchList = null;
         this._cache.searchBytes = 0;
         this._cache.lastSearchKey = '';
+    }
+
+    /** One-time migration: save current in-memory state to qgs */
+    async _migrateToQgs() {
+        try {
+            if (!this._qgsNs) return;
+            const payload = { version: CONSTANTS.VERSION, savedAt: Date.now(), history: this._toArrayAll() };
+            await this._qgsNs.setNow('history', payload);
+            console.log('[Q4] Migrated ' + this._size + ' items from legacy file to qgs');
+        } catch (e) {
+            console.warn('[Q4] _migrateToQgs failed:', e.message);
+        }
     }
 
     // Boundary protection: keep numbers in a reasonable range to prevent abnormal data from polluting stats
@@ -851,11 +913,18 @@ class ClipboardHistoryManager {
             this._sessionCleared = true;
             this._touch();
             this._notifyChange('clear');
-            if (deleteFiles && this._fileBinGz && fs.existsSync(this._fileBinGz)) {
-                try { fs.unlinkSync(this._fileBinGz); } catch { }
+            if (deleteFiles) {
+                // ★ Clear from qgs first
+                if (this._qgsNs) {
+                    try { await this._qgsNs.setNow('history', { version: CONSTANTS.VERSION, savedAt: Date.now(), history: [] }); } catch { }
+                }
+                // Then delete legacy file
+                if (this._fileBinGz && fs.existsSync(this._fileBinGz)) {
+                    try { fs.unlinkSync(this._fileBinGz); } catch { }
+                }
             }
-            this._dirty = true;
-            await this.forceSave();
+            // ★ Already saved to qgs above; skip redundant forceSave for legacy path
+            this._dirty = false;
         } finally {
             this.perfStats.operations++;
         }
@@ -878,8 +947,17 @@ class ClipboardHistoryManager {
         this._dirty = false;
         const t0 = performance.now();
         try {
-            // ★★★ Multi-window merge-on-save: merge disk state before writing
-            // This prevents "last writer wins" from destroying other windows' changes
+            // ★★★ qgs primary save path (SQLite WAL handles multi-window consistency)
+            if (this._qgsNs) {
+                const payload = { version: CONSTANTS.VERSION, savedAt: Date.now(), history: this._toArrayAll() };
+                await this._qgsNs.setNow('history', payload);
+                this.perfStats.saveTimeMs += (performance.now() - t0);
+                this.perfStats.operations++;
+                return;
+            }
+
+            // ★ Fallback: legacy file-based save
+            // Multi-window merge-on-save: merge disk state before writing
             await this._mergeFromDisk();
 
             const payload = { version: CONSTANTS.VERSION, savedAt: Date.now(), history: this._toArrayAll() };

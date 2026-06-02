@@ -177,6 +177,31 @@ async function initCache(context) {
 }
 
 async function loadCacheMetaAsync() {
+	// ★★★ Primary: load from qgs SQLite (single truth machine)
+	try {
+		const qgsNs = qgsClient.ns('qqq.cache', { v: 1, form: 'doc' });
+		const entries = await qgsNs.get('entries');
+		const stats = await qgsNs.get('stats');
+		const brokenFiles = await qgsNs.get('brokenFiles');
+		const fileIndex = await qgsNs.get('fileIndex');
+		const icons = await qgsNs.get('icons');
+		
+		if (entries || stats || brokenFiles || fileIndex || icons) {
+			cacheMeta = {
+				entries: entries || {},
+				stats: stats || { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 },
+				brokenFiles: brokenFiles || {},
+				fileIndex: fileIndex || {},
+				icons: icons || {}
+			};
+			global.logMessage('[Cache] Loaded from qgs: ' + Object.keys(cacheMeta.entries).length + ' entries', 'DEBUG');
+			return;
+		}
+	} catch (e) {
+		global.logMessage('[Cache] qgs load failed, falling back to meta.json: ' + e.message, 'WARN');
+	}
+
+	// ★ Fallback: legacy meta.json file load
 	const metaPath = path.join(cacheDir, META_FILE_NAME);
 	try {
 		if (fs.existsSync(metaPath)) {
@@ -187,6 +212,9 @@ async function loadCacheMetaAsync() {
 			if (!cacheMeta.brokenFiles) cacheMeta.brokenFiles = {};
 			if (!cacheMeta.fileIndex) cacheMeta.fileIndex = {};
 			if (!cacheMeta.icons) cacheMeta.icons = {};
+
+			// ★ Migrate legacy data to qgs (async, fire-and-forget)
+			_migrateCacheToQgs().catch(() => {});
 		} else {
 			cacheMeta = createEmptyMeta();
 		}
@@ -293,19 +321,49 @@ function createEmptyMeta() {
 }
 
 
-// Return a Promise to ensure the caller can wait for meta.json to be fully written
+// ★★★ Save to qgs SQLite (single truth machine) + legacy meta.json for backward compat
 function saveCacheMeta() {
-	if (!cacheDir || !cacheMeta) return Promise.resolve();
+	if (!cacheMeta) return Promise.resolve();
 
 	return metaSaveQueue.enqueue(async () => {
+		// Primary: save to qgs
 		try {
-			const data = JSON.stringify(cacheMeta, null, 2);
-			const metaPath = path.join(cacheDir, META_FILE_NAME);
-			await fs.promises.writeFile(metaPath, data, "utf-8");
+			const qgsNs = qgsClient.ns('qqq.cache', { v: 1, form: 'doc' });
+			await qgsNs.setNow('entries', cacheMeta.entries || {});
+			await qgsNs.setNow('stats', cacheMeta.stats || {});
+			await qgsNs.setNow('brokenFiles', cacheMeta.brokenFiles || {});
+			await qgsNs.setNow('fileIndex', cacheMeta.fileIndex || {});
+			await qgsNs.setNow('icons', cacheMeta.icons || {});
 		} catch (e) {
-			global.logMessage("Meta save failed: " + e.message, "ERROR");
+			global.logMessage("qgs cache save failed: " + e.message, "WARN");
+		}
+
+		// Fallback: also save to legacy meta.json (will be phased out)
+		if (cacheDir) {
+			try {
+				const data = JSON.stringify(cacheMeta, null, 2);
+				const metaPath = path.join(cacheDir, META_FILE_NAME);
+				await fs.promises.writeFile(metaPath, data, "utf-8");
+			} catch (e) {
+				global.logMessage("Meta save failed: " + e.message, "ERROR");
+			}
 		}
 	});
+}
+
+/** One-time migration: save current cacheMeta to qgs */
+async function _migrateCacheToQgs() {
+	try {
+		const qgsNs = qgsClient.ns('qqq.cache', { v: 1, form: 'doc' });
+		await qgsNs.setNow('entries', cacheMeta.entries || {});
+		await qgsNs.setNow('stats', cacheMeta.stats || {});
+		await qgsNs.setNow('brokenFiles', cacheMeta.brokenFiles || {});
+		await qgsNs.setNow('fileIndex', cacheMeta.fileIndex || {});
+		await qgsNs.setNow('icons', cacheMeta.icons || {});
+		global.logMessage('[Cache] Migrated to qgs: ' + Object.keys(cacheMeta.entries).length + ' entries', 'DEBUG');
+	} catch (e) {
+		global.logMessage('[Cache] _migrateCacheToQgs failed: ' + e.message, 'WARN');
+	}
 }
 
 function isValidWebPBuffer(buffer) {

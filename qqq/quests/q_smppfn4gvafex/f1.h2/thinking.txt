@@ -1,0 +1,13 @@
+━━━━━━━━━━ HOUSE 1 ━━━━━━━━━━
+用户问的是"当前主文件夹是哪一个"，也就是问当前工作目录是哪个。让我检查一下vision context或者当前的工作目录。
+
+━━━━━━━━━━ HOUSE 2 ━━━━━━━━━━
+用户问的是"当前主文件夹是哪一个"。从vision context可以看到有三个项目文件夹：
+
+- **q3** (E:\s\wol\py\q3) - 这看起来像是 qqq 的主项目
+- **qqq-shell-v2** (E:\s\wol\py\qqq-shell-v2) - shell相关
+- **gaea** (E:\s\wol\py\gaea) - gaea 相关
+
+从项目结构和内容来看，**q3** (E:\s\wol\py\q3) 应该是 qqq 的主项目文件夹，包含 ide、identities、assets、dist 等核心目录。
+
+pwd 命令失败了，但这可能是因为 shell 环境的问题。从 vision context 来看，有三个工作区文件夹，但主文件夹应该是 q3。

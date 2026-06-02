@@ -6,6 +6,7 @@
 const { getTools } = require('./tools');
 const { GATEWAY_URL, SYSTEM_PROMPT } = require('./prompt');
 const { TurnSummaryStripper } = require('./turn-summary');
+const vscode = require('vscode');
 
 module.exports = function(Agent) {
 
@@ -88,6 +89,11 @@ module.exports = function(Agent) {
                     : resp.status === 429 ? '服务繁忙，重试已耗尽。'
                     : `Server error (${resp.status}). Please try again later.`;
                 if (opts.onError) opts.onError(friendly);
+                // ★ 429/502/503 走 9 秒自动关闭通知（真理机器）
+                if (resp.status === 429 || resp.status === 502 || resp.status === 503) {
+                    vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: friendly, cancellable: false },
+                        async () => { await new Promise(r => setTimeout(r, 9000)); });
+                }
                 return null;
             }
 
